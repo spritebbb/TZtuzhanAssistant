@@ -1,0 +1,217 @@
+/* ===== 菟菚桌面助手 · 菟丝子藤蔓主题 =====
+   意象：菟丝子 —— 细藤缠绕 · 藤黄绿 · 暖米白 · 温润灵动 */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* 背景层（暖米白 + 藤色） */
+  --bg: #faf7ef;
+  --bg-sidebar: #f3eee1;
+  --bg-header: rgba(255, 253, 248, 0.82);
+  --bg-hover: #ece7d8;
+  --bg-input: #fffdf8;
+
+  /* 气泡 */
+  --bg-bubble: #fffdf8;
+  --bg-user: linear-gradient(135deg, #c2d072, #a9bd58);
+  --bg-user-deep: linear-gradient(135deg, #b0c45e, #94a949);
+
+  /* 边框 */
+  --border: #e3dcc8;
+  --border-light: #ede7d6;
+
+  /* 文字（深橄榄绿） */
+  --text: #3d4628;
+  --text-dim: #6f7a55;
+  --text-faint: #a3ab88;
+
+  /* 主色（藤黄绿） */
+  --primary: #a4b85c;
+  --primary-light: #c6d680;
+  --primary-deep: #7e9140;
+  --primary-soft: #f0f4dc;
+  --primary-text: #718537;
+
+  /* 点缀（琥珀金 · 菟丝花） */
+  --accent: #d9a860;
+  --accent-light: #f6e7c8;
+  --accent-deep: #c08a3e;
+
+  /* 状态 */
+  --danger: #d97b63;
+  --danger-soft: #f9e8e0;
+
+  /* 阴影（暖色） */
+  --shadow-sm: 0 1px 3px rgba(110, 100, 60, 0.10), 0 1px 2px rgba(110, 100, 60, 0.08);
+  --shadow-md: 0 8px 28px rgba(110, 100, 60, 0.16);
+  --shadow-lg: 0 20px 60px rgba(110, 100, 60, 0.24);
+  --glow: 0 0 0 3px rgba(164, 184, 92, 0.22);
+
+  /* 圆角（有机感） */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 999px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  background-image:
+    radial-gradient(1100px 560px at 88% -12%, rgba(198, 214, 128, 0.14), transparent 62%),
+    radial-gradient(820px 480px at -8% 112%, rgba(217, 168, 96, 0.10), transparent 58%),
+    radial-gradient(640px 420px at 50% 40%, rgba(240, 244, 220, 0.5), transparent 60%);
+  color: var(--text);
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  height: 100vh;
+}
+
+/* ===== 滚动条（藤色） ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d9d3bb;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c2ba99;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ===== Markdown 渲染（藤蔓浅色适配） ===== */
+.md {
+  line-height: 1.7;
+  word-break: break-word;
+}
+.md h2, .md h3, .md h4 {
+  margin: 10px 0 6px;
+  line-height: 1.35;
+  color: var(--primary-deep);
+}
+.md h2 { font-size: 1.12rem; }
+.md h3 { font-size: 1.04rem; }
+.md h4 { font-size: 0.97rem; }
+.md p { margin: 4px 0; }
+.md pre {
+  background: #f4f1e4;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  margin: 8px 0;
+  color: var(--text);
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.md code {
+  background: var(--primary-soft);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 0.85em;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  color: var(--primary-deep);
+}
+.md a {
+  color: var(--primary-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.md a:hover { color: var(--primary); }
+.md blockquote {
+  border-left: 4px solid var(--primary-light);
+  background: #f7f5ea;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin: 8px 0;
+  padding: 8px 14px;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.86rem;
+  max-width: 100%;
+}
+.md table th, .md table td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.md table th {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  font-weight: 600;
+}
+.md table tr:nth-child(even) td {
+  background: #faf8ef;
+}
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  margin: 6px 0;
+  display: block;
+  box-shadow: var(--shadow-sm);
+}
+.md ul, .md ol {
+  padding-left: 1.5em;
+  margin: 4px 0;
+}
+.md hr {
+  border: none;
+  border-top: 1px dashed var(--border);
+  margin: 10px 0;
+}
+.md strong { color: var(--text); font-weight: 700; }
+
+/* ===== 通用动效 ===== */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes blinkCursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes tendrilDraw {
+  from { stroke-dashoffset: 320; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes sway {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
