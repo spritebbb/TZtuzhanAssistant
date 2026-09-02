@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+.tmp/
+.pytest_cache/
+
+# 前端构建产物与依赖
+frontend/node_modules/
+frontend/dist/
+frontend/dist-electron/
+frontend/release/
+frontend/.npm-cache/
+frontend/.npm-tmp/
+frontend/*.tsbuildinfo
+frontend/_electron_*.log

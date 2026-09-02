@@ -1,0 +1,21 @@
+# -*- coding: utf-8 -*-
+"""语音朗读接口（edge-tts）。"""
+from __future__ import annotations
+
+from fastapi import APIRouter
+from fastapi.responses import FileResponse, JSONResponse
+
+from ..core.tts import synth_async
+
+router = APIRouter(prefix="/api", tags=["tts"])
+
+
+@router.get("/tts")
+async def api_tts(text: str = "", voice: str = "zh-CN-XiaoxiaoNeural"):
+    """语音朗读：edge-tts 合成 mp3（带缓存）。text 为空或合成失败返回 400。"""
+    if not text.strip():
+        return JSONResponse({"ok": False, "error": "缺少 text"}, status_code=400)
+    path = await synth_async(text, voice)
+    if path is None or not path.exists():
+        return JSONResponse({"ok": False, "error": "语音合成失败"}, status_code=502)
+    return FileResponse(path, media_type="audio/mpeg")
