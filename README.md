@@ -1,15 +1,64 @@
-# 菟菚桌面助手（TZtuzhanAssistant）
+<p align="center">
+  <img src="assets/persona.png" alt="菟菚桌面助手立绘" width="260" />
+</p>
 
-> 类 DeepSeek Harness 的拟人 AI 助手 — **本地桌面 / 浏览器版本**。
-> 完全脱离 QQ / NoneBot，单用户 · 本机运行 · 完整人格 · 记忆 · 好感度 · 插件化工具链。
+<h1 align="center">菟菚桌面助手</h1>
 
-![Release](https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
-![Python](https://img.shields.io/badge/python-3.11%20~%203.13-green)
-![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
-![Frontend](https://img.shields.io/badge/frontend-Electron%20%2B%20Vue3-4FC08D)
+<p align="center">
+  <strong>有记忆、有性格、能调用工具的本地 AI 助手</strong><br />
+  桌面端 / 浏览器端 · 单用户本机运行 · 人格、记忆与工具链一体化
+</p>
 
-## 特性
+<p align="center">
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
+  <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=for-the-badge&logo=windows" alt="Windows 10/11" />
+  <img src="https://img.shields.io/badge/Python-3.11--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11 to 3.13" />
+  <img src="https://img.shields.io/badge/FastAPI-%2B%20Vue%203-009688?style=for-the-badge&logo=fastapi" alt="FastAPI and Vue 3" />
+</p>
+
+<p align="center">
+  <a href="#-快速开始">快速开始</a> ·
+  <a href="#-核心能力">核心能力</a> ·
+  <a href="#-部署指南">部署指南</a> ·
+  <a href="#-局域网访问与安全">局域网安全</a> ·
+  <a href="#-配置项env">配置</a>
+</p>
+
+---
+
+## 📦 v2.1.0 已发布
+
+| 推荐下载 | 适合谁 | 下载 |
+|---|---|---|
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-v2.1.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-Full-v2.1.0-Large.zip) |
+
+> 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
+
+<p align="center">
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0"><strong>查看完整 Release 说明 →</strong></a>
+</p>
+
+## ✨ 核心能力
+
+| | |
+|---|---|
+| 🎭 **拟人人格**<br />人格写在 `persona-菟菚.md`，支持自然、连续的交流风格。 | 🧠 **长期记忆**<br />SQLite + 本地向量检索，保存画像、事实、话题与重要日期。 |
+| 🧰 **工具与 Agent**<br />插件热加载、MCP 接入、工具循环与逐步确认，关键动作可控。 | 💬 **实时流式对话**<br />SSE 打字机输出、工具进度、图片生成与随时停止。 |
+| 💖 **关系与心情**<br />好感度、昵称、关怀回应与天气驱动心情，形成持续互动。 | 🛡️ **本机优先安全**<br />默认仅回环监听；LAN 请求受 token、Host 白名单与 SSRF 防护约束。 |
+
+## 🚀 快速开始
+
+1. 从上方下载 **轻量部署包** 或 **大杯部署包**。
+2. 解压到英文路径（如 `D:\Tuzhan`），双击 `Start-Tuzhan.bat`。
+3. 首次运行时在自动打开的 `.env` 中填写 `LLM_API_KEY`，保存后返回终端继续。
+4. 浏览器打开 `http://127.0.0.1:8801` 后即可聊天。
+
+> 需要 Python 3.11 ~ 3.13；首次安装依赖和记忆模型时需要联网，请耐心等待。
+
+---
+
+## 🧩 功能一览
 
 - 🎭 **拟人人格**：毒舌腹黑、地狱笑话，人格写在 `persona-菟菚.md`
 - 🧠 **长期记忆**：SQLite 存储用户画像、关系事实（五元组）、话题延续、重要日子；本地 BGE 向量语义检索
@@ -28,18 +77,18 @@
 
 ---
 
-# 🚀 部署指南
+## 🚀 部署指南
 
 三种运行形态按需选择：
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [Deploy zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
-| **① 一键部署包 · 大杯版（large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [Deploy-Full large zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v2.1.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-v2.1.0.zip) |
+| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v2.1.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-Full-v2.1.0-Large.zip) |
 | **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe（约 80 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
 
-> 两种一键部署包唯一区别是记忆 embedding 模型默认值：轻量版 `BAAI/bge-small-zh-v1.5`（约 100MB）；大杯版（文件名带 `large`，GitHub 资产名不支持中文）`BAAI/bge-m3`（约 1.2GB，首次启动自动下载，中文语义检索效果最好）。这只是 `.env` 默认配置，装好后随时可手动改。
+> 两种一键部署包唯一区别是记忆 embedding 模型默认值：轻量版 `BAAI/bge-small-zh-v1.5`（约 100MB）；大杯版（文件名带 `Large`）`BAAI/bge-m3`（约 1.2GB，首次启动自动下载，中文语义检索效果最好）。这只是 `.env` 默认配置，装好后随时可手动改。
 
 **通用前置要求**（三种方式都需要）：
 
@@ -58,9 +107,9 @@
 
 ### 步骤
 
-1. **下载**：到 [Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) 下载部署包：
+1. **下载**：到 [v2.1.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0) 下载部署包：
    - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
-   - `TZtuzhanAssistant-Deploy-Full-vX.X.X-large.zip` — 大杯版 / large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
+   - `TZtuzhanAssistant-Deploy-Full-vX.X.X-Large.zip` — 大杯版 / Large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
 3. **双击 `Start-Tuzhan.bat`**。脚本会自动完成：
    - 检测 / 创建 `.venv` 虚拟环境；
