@@ -34,9 +34,12 @@
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [Deploy zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [Deploy zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **① 一键部署包 · 大杯版（large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [Deploy-Full large zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe（约 80 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
+
+> 两种一键部署包唯一区别是记忆 embedding 模型默认值：轻量版 `BAAI/bge-small-zh-v1.5`（约 100MB）；大杯版（文件名带 `large`，GitHub 资产名不支持中文）`BAAI/bge-m3`（约 1.2GB，首次启动自动下载，中文语义检索效果最好）。这只是 `.env` 默认配置，装好后随时可手动改。
 
 **通用前置要求**（三种方式都需要）：
 
@@ -55,7 +58,9 @@
 
 ### 步骤
 
-1. **下载**：到 [Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) 下载 `TZtuzhanAssistant-Deploy-vX.X.X.zip`。
+1. **下载**：到 [Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) 下载部署包：
+   - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
+   - `TZtuzhanAssistant-Deploy-Full-vX.X.X-large.zip` — 大杯版 / large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
 3. **双击 `Start-Tuzhan.bat`**。脚本会自动完成：
    - 检测 / 创建 `.venv` 虚拟环境；
