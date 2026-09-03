@@ -11,8 +11,8 @@ if (-not $resolvedOutput.StartsWith($resolvedSource + [IO.Path]::DirectorySepara
 
 $fullSuffix = ([string][char]0x5927) + ([char]0x676F) + ([char]0x7248)
 $packages = @(
-    @{ Name = 'TZtuzhanAssistant-Deploy-v2.0.0'; Full = $false },
-    @{ Name = ('TZtuzhanAssistant-Deploy-Full-v2.0.0-' + $fullSuffix); Full = $true }
+    @{ Name = 'TZtuzhanAssistant-Deploy-v2.1.0'; Full = $false },
+    @{ Name = ('TZtuzhanAssistant-Deploy-Full-v2.1.0-' + $fullSuffix); Full = $true }
 )
 
 function Build-Package([string]$name, [bool]$full) {
