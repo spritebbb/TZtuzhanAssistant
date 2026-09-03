@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { apiFetch, getBaseUrl } from '../api'
+import { apiFetch } from '../api'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -187,43 +187,44 @@ async function respondConfirm(requestId: string, allow: boolean) {
   }
 }
 
-function startStream() {
+async function startStream() {
   if (!current.value || streamCtrl) return
   const ctrl = new AbortController()
   streamCtrl = ctrl
-  const base = getBaseUrl()
-  fetch(`${base}/api/agent/tasks/${current.value.id}/stream`, { signal: ctrl.signal })
-    .then(res => {
-      if (!res.body) return
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      function pump(): Promise<void> {
-        return reader.read().then(({ done, value }) => {
-          if (done) return
-          const chunk = decoder.decode(value, { stream: true })
-          for (const part of chunk.split('\n\n')) {
-            if (!part.startsWith('data: ')) continue
-            try {
-              const ev = JSON.parse(part.slice(6))
-              if (ev.type === 'confirm_request') {
-                // 工具级确认：推给确认卡片，用户批准后 POST /api/confirm
-                pendingConfirms.value.push(ev)
-              } else if (ev.type === 'task_done') {
-                running.value = false
-                pendingConfirms.value = []
-                loadTask(current.value!.id)
-              } else if (ev.type === 'progress' || ev.type === 'step') {
-                loadTask(current.value!.id)
-              }
-            } catch { /* ignore */ }
+  try {
+    const res = await apiFetch(`/api/agent/tasks/${current.value.id}/stream`, { signal: ctrl.signal })
+    if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop() || ''
+      for (const frame of frames) {
+        const line = frame.split('\n').find(part => part.startsWith('data: '))
+        if (!line) continue
+        try {
+          const ev = JSON.parse(line.slice(6))
+          if (ev.type === 'confirm_request') {
+            pendingConfirms.value.push(ev)
+          } else if (ev.type === 'task_done') {
+            running.value = false
+            pendingConfirms.value = []
+            if (current.value) await loadTask(current.value.id)
+          } else if (ev.type === 'progress' || ev.type === 'step') {
+            if (current.value) await loadTask(current.value.id)
           }
-          return pump()
-        })
+        } catch { /* ignore malformed frame */ }
       }
-      return pump()
-    })
-    .catch(() => {})
-    .finally(() => { streamCtrl = null })
+      if (done) break
+    }
+  } catch {
+    // abort/network errors are reflected by the next task status refresh
+  } finally {
+    if (streamCtrl === ctrl) streamCtrl = null
+  }
 }
 
 function cancelStream() {

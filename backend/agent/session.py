@@ -232,11 +232,11 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
             from ..core import affection as _affection
 
             user = _user_db.ensure_user(task.user_id)
-            pref = user.get("nickname_pref") or "你"
+            pref = user["nickname_pref"] or "你"
             stage = _affection.stage_of(user["affection"])
             system = build_system_prompt(
                 stage=stage, address=pref,
-                lover_confirm=bool(user.get("lover_confirm", False)),
+                lover_confirm=bool(user["lover_confirm"]),
                 first_chat=False, affection=user["affection"],
                 user_id=task.user_id,
             )
@@ -320,6 +320,14 @@ def cancel_task(task_id: str) -> AgentTask | None:
         _save(task)
         logger.info("[Agent] 任务 {} 已取消（后台执行将不再写入结果）", task_id)
     return task
+
+
+def clear_all_tasks() -> int:
+    """删除全部持久化 Agent 任务（单用户“彻底失忆”使用）。"""
+    conn = _connect()
+    cur = conn.execute("DELETE FROM agent_tasks")
+    conn.commit()
+    return max(0, int(cur.rowcount or 0))
 
 
 def confirm_step(task_id: str, step_index: int, allow: bool) -> AgentTask | None:

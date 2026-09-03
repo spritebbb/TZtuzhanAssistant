@@ -46,7 +46,7 @@ def main() -> None:
         if not os.getenv("AGENT_REMOTE_TOKEN"):
             print(
                 "⚠️  警告：当前绑定非回环地址（局域网可达）且未配置 AGENT_REMOTE_TOKEN，\n"
-                "   受控端点（/api/* 写、/mcp/*、/api/mcp/*、/api/agent/*、/plugins/*）\n"
+                "   除健康探针外的全部 /api/*、/mcp/*、/plugins/* 及人物图片\n"
                 "   对局域网设备一律拒绝（来源 IP 语义：仅本机回环免 token）。\n"
                 "   如需局域网设备访问，请在 .env 中配置 AGENT_REMOTE_TOKEN 并在调用时携带。"
             )

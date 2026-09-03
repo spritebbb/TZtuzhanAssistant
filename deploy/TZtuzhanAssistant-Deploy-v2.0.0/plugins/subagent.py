@@ -19,7 +19,7 @@ PLUGIN_META = {
 import asyncio
 import json
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.core import llm
 
 # 并行子代理上限：防止极端输入一次打爆 API 限流/资源
@@ -36,7 +36,7 @@ _SUBAGENT_SYSTEM = (
 async def _agent_run(prompt: str = "", background: str = "") -> str:
     """派发一个独立子任务，返回子代理的完整结果。"""
     if not prompt:
-        return "（缺少任务描述）"
+        return tool_failure("（缺少任务描述）")
     messages: list[dict] = [{"role": "system", "content": _SUBAGENT_SYSTEM}]
     if background:
         messages.append({
@@ -49,7 +49,7 @@ async def _agent_run(prompt: str = "", background: str = "") -> str:
         result = await llm.chat(messages, temperature=0.3, max_tokens=2048)
         return result or "（子代理返回空结果）"
     except Exception as e:
-        return f"（子代理执行失败：{type(e).__name__}: {e}）"
+        return tool_failure(f"（子代理执行失败：{type(e).__name__}: {e}）")
 
 
 async def _agent_fanout(tasks_json: str = "") -> str:
@@ -59,15 +59,15 @@ async def _agent_fanout(tasks_json: str = "") -> str:
     [{"id": "task1", "prompt": "调查 A 方案"}, {"id": "task2", "prompt": "调查 B 方案", "background": "可选背景"}]
     """
     if not tasks_json:
-        return "（缺少任务列表 JSON）"
+        return tool_failure("（缺少任务列表 JSON）")
     try:
         tasks = json.loads(tasks_json)
         if not isinstance(tasks, list) or not tasks:
-            return "（任务列表必须是非空 JSON 数组）"
+            return tool_failure("（任务列表必须是非空 JSON 数组）")
         if len(tasks) > _FANOUT_MAX:
-            return f"（任务数量超过上限 {_FANOUT_MAX}，请分批执行）"
+            return tool_failure(f"（任务数量超过上限 {_FANOUT_MAX}，请分批执行）")
     except json.JSONDecodeError as e:
-        return f"（JSON 解析失败：{e}）"
+        return tool_failure(f"（JSON 解析失败：{e}）")
 
     async def _run_one(item: object) -> tuple[str, str]:
         if not isinstance(item, dict):

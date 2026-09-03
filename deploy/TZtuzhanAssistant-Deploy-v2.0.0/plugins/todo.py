@@ -15,7 +15,7 @@ PLUGIN_META = {
 
 from datetime import datetime
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.core import userdb
 from backend.core.current_user import current_user_id
 
@@ -27,7 +27,7 @@ def _uid() -> str:
 async def _todo_create(content: str = "", priority: str = "P1", phase: str = "") -> str:
     """创建新的任务/目标。"""
     if not content:
-        return "（缺少任务描述）"
+        return tool_failure("（缺少任务描述）")
     priority = priority.upper()
     if priority not in ("P0", "P1", "P2", "P3"):
         priority = "P1"
@@ -74,11 +74,11 @@ async def _todo_list(status: str = "") -> str:
 async def _todo_get(task_id: int = 0) -> str:
     """查看单个任务详情。"""
     if not task_id:
-        return "（缺少任务 ID）"
+        return tool_failure("（缺少任务 ID）")
     uid = _uid()
     t = userdb.db.get_task(uid, task_id)
     if not t:
-        return f"（任务 #{task_id} 不存在）"
+        return tool_failure(f"（任务 #{task_id} 不存在）")
     status_icon = {"pending": "⏳", "in_progress": "🔄", "completed": "✅", "blocked": "🚫"}.get(t["status"], "📌")
     lines = [
         f"#{t['id']} {status_icon} {t['content']}",
@@ -100,23 +100,23 @@ async def _todo_update(task_id: int = 0, content: str = "", status: str = "",
                        blocked_reason: str = "") -> str:
     """更新任务属性。"""
     if not task_id:
-        return "（缺少任务 ID）"
+        return tool_failure("（缺少任务 ID）")
     uid = _uid()
     t = userdb.db.get_task(uid, task_id)
     if not t:
-        return f"（任务 #{task_id} 不存在）"
+        return tool_failure(f"（任务 #{task_id} 不存在）")
     kwargs: dict[str, str] = {}
     if content:
         kwargs["content"] = content
     if status:
         status = status.strip().lower().replace(" ", "_")
         if status not in ("pending", "in_progress", "completed", "blocked"):
-            return f"（不支持的状态: {status}，可选: pending / in_progress / completed / blocked）"
+            return tool_failure(f"（不支持的状态: {status}，可选: pending / in_progress / completed / blocked）")
         kwargs["status"] = status
     if priority:
         priority = priority.upper()
         if priority not in ("P0", "P1", "P2", "P3"):
-            return f"（不支持的优先级: {priority}，可选: P0/P1/P2/P3）"
+            return tool_failure(f"（不支持的优先级: {priority}，可选: P0/P1/P2/P3）")
         kwargs["priority"] = priority
     if phase:
         kwargs["phase"] = phase
@@ -128,29 +128,29 @@ async def _todo_update(task_id: int = 0, content: str = "", status: str = "",
             kwargs["status"] = "blocked"
     ok = userdb.db.update_task(uid, task_id, **kwargs)
     if not ok:
-        return "（无有效更新字段）"
+        return tool_failure("（无有效更新字段）")
     return f"✅ 任务 #{task_id} 已更新"
 
 
 async def _todo_complete(task_id: int = 0) -> str:
     """标记任务为已完成。"""
     if not task_id:
-        return "（缺少任务 ID）"
+        return tool_failure("（缺少任务 ID）")
     uid = _uid()
     ok = userdb.db.update_task(uid, task_id, status="completed")
     if not ok:
-        return f"（任务 #{task_id} 不存在）"
+        return tool_failure(f"（任务 #{task_id} 不存在）")
     return f"✅ 任务 #{task_id} 已完成"
 
 
 async def _todo_delete(task_id: int = 0) -> str:
     """删除任务。"""
     if not task_id:
-        return "（缺少任务 ID）"
+        return tool_failure("（缺少任务 ID）")
     uid = _uid()
     ok = userdb.db.delete_task(uid, task_id)
     if not ok:
-        return f"（任务 #{task_id} 不存在）"
+        return tool_failure(f"（任务 #{task_id} 不存在）")
     return f"🗑️ 已删除任务 #{task_id}"
 
 

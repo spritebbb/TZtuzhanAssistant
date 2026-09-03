@@ -58,7 +58,10 @@ class Config:
         self.llm_perception_model: str = os.getenv("LLM_PERCEPTION_MODEL", "").strip()
         self.llm_perception_base_url: str = os.getenv("LLM_PERCEPTION_BASE_URL", "").strip()
         self.llm_perception_api_key: str = os.getenv("LLM_PERCEPTION_API_KEY", "").strip()
-        self.llm_perception_timeout: int = _env_int("LLM_PERCEPTION_TIMEOUT", 30)
+        # 感知层超时（秒）。感知已后台化不阻塞回复，且硅基流动 Qwen3-8B 单条实测
+        # 10-35s，超时过小(30s)会频繁触发 APITimeoutError 重试、刷"LLM 连接失败"
+        # 假警报。放宽到 60s 覆盖正常慢响应（后台跑，无碍回复首字）。
+        self.llm_perception_timeout: int = _env_int("LLM_PERCEPTION_TIMEOUT", 60)
 
         persona = os.getenv("PERSONA_FILE", "persona-菟菚.md")
         p = Path(persona)

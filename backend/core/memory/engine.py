@@ -13,9 +13,11 @@ from ..log import logger
 
 # 持有后台任务强引用，避免 pending task 被 GC 销毁
 _background_tasks: set[asyncio.Task] = set()
+# 只记录会写用户记忆的任务；启动预热/回填不应阻塞“彻底失忆”。
+_message_tasks: set[asyncio.Task] = set()
 
 
-def _spawn(coro) -> asyncio.Task:
+def _spawn(coro, *, user_write: bool = False) -> asyncio.Task:
     """创建后台任务并持有强引用（与 app.py / agent 的修法一致）。
 
     只 `ensure_future` 不保存引用的任务在 await 慢操作时可能被 GC 静默丢弃，
@@ -24,6 +26,9 @@ def _spawn(coro) -> asyncio.Task:
     task = asyncio.ensure_future(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    if user_write:
+        _message_tasks.add(task)
+        task.add_done_callback(_message_tasks.discard)
     return task
 
 
@@ -83,7 +88,7 @@ def on_message(user_id: str, user_text: str, reply: str, mock: bool = False) -> 
     try:
         if user_text and user_text.strip():
             if config.memory_mem0 and not mock:
-                _spawn(_mem0_add_task(user_id, user_text))
+                _spawn(_mem0_add_task(user_id, user_text), user_write=True)
     except Exception:
         pass
 

@@ -53,7 +53,7 @@ async def test_write_file_via_tool_rejects_outside() -> None:
         "content": "x",
     })
     # 工具返回字符串，ok=True 但 output 含拒绝信息
-    assert "不允许" in (r.output or ""), f"写系统目录应被拒: {r.output}"
+    assert r.ok is False and "不允许" in (r.error or ""), f"写系统目录应被拒: {r}"
     # 项目内临时写入应成功
     tmp = Path(__file__).resolve().parent / "_tmp_whitelist_test.txt"
     r2 = await ToolRegistry.execute("write_file", {

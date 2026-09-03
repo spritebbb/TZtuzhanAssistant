@@ -16,6 +16,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+
 from .log import logger
 from .userdb import db
 
@@ -27,38 +30,147 @@ _TABLES = (
     "tasks",
 )
 
+_reset_lock = asyncio.Lock()
+_resetting = False
+_reset_epoch = 0
+_QUIESCE_TIMEOUT = 120.0
+
+
+def reset_in_progress() -> bool:
+    return _resetting
+
+
+def reset_epoch() -> int:
+    return _reset_epoch
+
+
+def epoch_is_current(epoch: int) -> bool:
+    return epoch == _reset_epoch and not _resetting
+
+
+class ResetSuperseded(RuntimeError):
+    pass
+
+
+@asynccontextmanager
+async def user_write_guard(epoch: int):
+    """让一次用户数据写与重置互斥，并拒绝跨越过重置边界的旧请求。"""
+    async with _reset_lock:
+        if not epoch_is_current(epoch):
+            raise ResetSuperseded("request superseded by reset")
+        yield
+
+
+async def _cancel_tasks(tasks: list[asyncio.Task]) -> None:
+    current = asyncio.current_task()
+    active = [t for t in tasks if t is not current and not t.done()]
+    for task in active:
+        task.cancel()
+    if active:
+        await asyncio.gather(*active, return_exceptions=True)
+
+
+async def _quiesce_user_writers() -> None:
+    """停止生成任务，并等待所有已开始的用户记忆写任务真正结束。"""
+    from ..api import agent as agent_api
+    from ..api import chat as chat_api
+    from ..agent import session as agent_session
+    from . import pipeline, tasks as core_tasks
+    from .memory import engine
+
+    # 先落取消状态，再取消执行协程；命令类工具会在 CancelledError 中杀进程树。
+    for task_id, task in list(agent_api._agent_bg_by_id.items()):
+        if not task.done():
+            agent_session.cancel_task(task_id)
+    await _cancel_tasks(list(agent_api._agent_bg_by_id.values()))
+    await _cancel_tasks(list(chat_api._bg_tasks))
+    await _cancel_tasks(list(core_tasks._tasks))
+
+    # pipeline/Mem0 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，
+    # 所以必须等待真实完成后再清库；超时则拒绝重置，避免“清完又写回来”。
+    writers = [
+        task for task in [*pipeline._memory_tasks, *engine._message_tasks]
+        if not task.done()
+    ]
+    if writers:
+        done, pending = await asyncio.wait(writers, timeout=_QUIESCE_TIMEOUT)
+        if pending:
+            raise TimeoutError(f"仍有 {len(pending)} 个记忆任务未结束，请稍后重试")
+        for task in done:
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is not None:
+                logger.warning("[重置] 后台记忆任务以异常结束：{}", exc)
+
 
 async def reset_everything() -> dict:
-    """执行彻底失忆重置，返回清理统计。所有子步骤失败均不阻断主流程。"""
-    from .memory import vector_store as _vec
+    """执行彻底失忆重置，返回逐步骤状态；任何失败都明确返回 ``ok=False``。"""
+    global _resetting, _reset_epoch
 
-    stats: dict = {"userdb_tables": 0, "vector": 0, "session_msgs": 0}
+    async with _reset_lock:
+        _resetting = True
+        _reset_epoch += 1
+        stats: dict = {
+            "ok": False,
+            "userdb_tables": 0,
+            "vector": 0,
+            "session_msgs": 0,
+            "agent_tasks": 0,
+            "failures": [],
+        }
+        try:
+            try:
+                await _quiesce_user_writers()
+            except Exception as exc:
+                stats["failures"].append(f"后台任务未安全停止：{exc}")
+                logger.warning("[重置] 后台任务未安全停止：{}", exc)
+                return stats
 
-    # 1) 清 userdb 业务表
-    try:
-        with db._lock:
-            for table in _TABLES:
-                db.conn.execute(f"DELETE FROM {table}")
-            db.conn.commit()
-        stats["userdb_tables"] = len(_TABLES)
-        logger.info("[重置] userdb 业务表已清空（%d 张）", len(_TABLES))
-    except Exception as e:
-        logger.warning("[重置] userdb 清空失败: %s", e)
+            # userdb 全部业务表用单事务清理，避免中途失败留下半张库。
+            try:
+                with db._lock:
+                    db.conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        for table in _TABLES:
+                            db.conn.execute(f"DELETE FROM {table}")
+                        db.conn.commit()
+                    except Exception:
+                        db.conn.rollback()
+                        raise
+                stats["userdb_tables"] = len(_TABLES)
+                logger.info("[重置] userdb 业务表已清空（{} 张）", len(_TABLES))
+            except Exception as exc:
+                stats["failures"].append(f"userdb 清空失败：{exc}")
+                logger.warning("[重置] userdb 清空失败：{}", exc)
 
-    # 2) 清向量库（memory v2）
-    try:
-        stats["vector"] = _vec.clear()
-        logger.info("[重置] 向量库已清空: %d", stats["vector"])
-    except Exception as e:
-        logger.warning("[重置] 向量库清空失败: %s", e)
+            try:
+                from .memory import vector_store as _vec
 
-    # 3) 清空当前会话气泡（不归档）
-    try:
-        from ..session import store as _store
+                stats["vector"] = await asyncio.to_thread(_vec.clear)
+                logger.info("[重置] 向量库已清空：{}", stats["vector"])
+            except Exception as exc:
+                stats["failures"].append(f"向量库清空失败：{exc}")
+                logger.warning("[重置] 向量库清空失败：{}", exc)
 
-        stats["session_msgs"] = await _store.clear_current()
-        logger.info("[重置] 当前会话已清空: %d 条", stats["session_msgs"])
-    except Exception as e:
-        logger.warning("[重置] 当前会话清空失败: %s", e)
+            try:
+                from ..session import store as _store
 
-    return stats
+                stats["session_msgs"] = await _store.clear_current()
+                logger.info("[重置] 当前会话已清空：{} 条", stats["session_msgs"])
+            except Exception as exc:
+                stats["failures"].append(f"当前会话清空失败：{exc}")
+                logger.warning("[重置] 当前会话清空失败：{}", exc)
+
+            try:
+                from ..agent import session as agent_session
+
+                stats["agent_tasks"] = agent_session.clear_all_tasks()
+            except Exception as exc:
+                stats["failures"].append(f"Agent 任务清空失败：{exc}")
+                logger.warning("[重置] Agent 任务清空失败：{}", exc)
+
+            stats["ok"] = not stats["failures"]
+            return stats
+        finally:
+            _resetting = False

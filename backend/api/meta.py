@@ -33,7 +33,11 @@ def _memory_status() -> dict:
         return {
             "vector_enabled": bool(stats.get("enabled")),
             "vector_count": sum(v for k, v in stats.items() if k != "enabled" and isinstance(v, int)),
-            "embed_mode": emb.mode(),
+            # 状态接口绝不能同步触发模型下载；预热由 app startup 的后台任务负责。
+            "embed_mode": (
+                f"model:{emb.current_model()}" if emb.is_loaded()
+                else ("hash" if config.memory_embed_force else "warming")
+            ),
             "mem0": bool(config.memory_mem0),
         }
     except Exception:

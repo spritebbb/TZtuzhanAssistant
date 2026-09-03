@@ -129,14 +129,14 @@ def _request_json(url: str, *, method: str = "GET", body: bytes | None = None, t
     import urllib.error
     import urllib.parse
 
-    from .safety import check_url
+    from .safety import build_pinned_opener, resolve_public_url
 
-    opener = urllib.request.build_opener(_NoRedirect)
     cur = url
     for _ in range(_MAX_REDIRECTS + 1):
-        ok, err = check_url(cur)
+        ok, err, resolved_ip = resolve_public_url(cur)
         if not ok:
             raise ValueError(f"拒绝访问不安全的服务器地址: {err}")
+        opener = build_pinned_opener(resolved_ip, _NoRedirect())
         headers = {"Accept": "application/json"}
         if body is not None:
             headers["Content-Type"] = "application/json"

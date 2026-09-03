@@ -21,7 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.tools.safety import check_command
 
 # ---- 工具实现 ----
@@ -102,7 +102,7 @@ async def _list_process(filter: str = "") -> str:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         txt = out.decode("utf-8", errors="replace") if out else ""
         if not txt:
-            return "（无法获取进程列表）"
+            return tool_failure("（无法获取进程列表）")
         lines = []
         for line in txt.strip().splitlines():
             if not line.strip():
@@ -119,7 +119,7 @@ async def _list_process(filter: str = "") -> str:
             return f"（未找到匹配\"{filter}\"的进程）"
         return "\n".join(lines[:50]) + (f"\n…（共 {len(lines)} 个，仅显示前 50）" if len(lines) > 50 else "")
     except Exception as e:
-        return f"（获取进程列表失败：{e}）"
+        return tool_failure(f"（获取进程列表失败：{e}）")
 
 
 async def _kill_process(pid: int = 0, name: str = "") -> str:
@@ -137,9 +137,9 @@ async def _kill_process(pid: int = 0, name: str = "") -> str:
                 await proc.wait()
             if proc.returncode == 0:
                 return f"已结束进程 PID {pid}"
-            return f"（结束进程失败，PID {pid} 可能不存在或权限不足）"
+            return tool_failure(f"（结束进程失败，PID {pid} 可能不存在或权限不足）")
         except Exception as e:
-            return f"（结束进程失败：{e}）"
+            return tool_failure(f"（结束进程失败：{e}）")
     if name:
         # 校验名称本身（不再拼 taskkill 前缀——那会命中自身黑名单导致永远被拦）。
         # 名称作为 taskkill 的独立参数传入（无 shell 注入面），这里只拒绝
@@ -148,7 +148,7 @@ async def _kill_process(pid: int = 0, name: str = "") -> str:
         if not ok:
             return err
         if any(ch in name for ch in "&|<>^;\""):
-            return "（进程名包含非法字符，已拒绝）"
+            return tool_failure("（进程名包含非法字符，已拒绝）")
         try:
             proc = await asyncio.create_subprocess_exec(
                 "taskkill", "/IM", name, "/F",
@@ -161,10 +161,10 @@ async def _kill_process(pid: int = 0, name: str = "") -> str:
                 await proc.wait()
             if proc.returncode == 0:
                 return f"已结束进程：{name}"
-            return f"（未找到进程：{name}）"
+            return tool_failure(f"（未找到进程：{name}）")
         except Exception as e:
-            return f"（结束进程失败：{e}）"
-    return "（请指定 pid 或 name）"
+            return tool_failure(f"（结束进程失败：{e}）")
+    return tool_failure("（请指定 pid 或 name）")
 
 
 async def _list_window() -> str:
@@ -186,7 +186,7 @@ async def _list_window() -> str:
             return "（未找到可见窗口）"
         return "\n".join(windows[:30]) + (f"\n…（共 {len(windows)} 个，仅显示前 30）" if len(windows) > 30 else "")
     except Exception as e:
-        return f"（获取窗口列表失败：{e}）"
+        return tool_failure(f"（获取窗口列表失败：{e}）")
 
 
 async def _activate_window(hwnd: int = 0, title: str = "") -> str:
@@ -203,19 +203,19 @@ async def _activate_window(hwnd: int = 0, title: str = "") -> str:
                     hwnd_target = h
             win32gui.EnumWindows(_find, None)
         if not hwnd_target:
-            return "（未找到匹配的窗口）"
+            return tool_failure("（未找到匹配的窗口）")
         win32gui.ShowWindow(hwnd_target, win32con.SW_RESTORE)
         win32gui.SetForegroundWindow(hwnd_target)
         text = win32gui.GetWindowText(hwnd_target)
         return f"已激活窗口：{text}"
     except Exception as e:
-        return f"（激活窗口失败：{e}）"
+        return tool_failure(f"（激活窗口失败：{e}）")
 
 
 async def _open_app(command: str = "") -> str:
     """打开应用/文件（通过 shell 启动，如 notepad, calc, explorer, 或路径）。"""
     if not command:
-        return "（缺少要打开的应用）"
+        return tool_failure("（缺少要打开的应用）")
 
     # 与 run_command 同一套危险命令黑名单（路径分支与应用名分支都要过）
     ok, err = check_command(command)
@@ -247,14 +247,14 @@ async def _open_app(command: str = "") -> str:
             await asyncio.wait_for(proc.wait(), timeout=10)
             if proc.returncode == 0:
                 return f"✓ 已启动：{command}"
-            return f"（启动失败，返回码 {proc.returncode}）"
+            return tool_failure(f"（启动失败，返回码 {proc.returncode}）")
         except Exception as e:
-            return f"（启动失败：{e}）"
+            return tool_failure(f"（启动失败：{e}）")
 
     # 应用名分支（notepad/calc 等）：cmd /c start 会把参数当命令行解释，
     # 拒绝 shell 元字符，防止命令夹带（含 % 环境变量展开与换行续写）
     if any(ch in command for ch in "&|<>^;\"%\r\n"):
-        return "（要打开的内容包含非法字符，已拒绝）"
+        return tool_failure("（要打开的内容包含非法字符，已拒绝）")
     try:
         # 用 subprocess 启动（不等待，不捕获输出）
         proc = await asyncio.create_subprocess_exec(
@@ -265,9 +265,9 @@ async def _open_app(command: str = "") -> str:
         await asyncio.wait_for(proc.wait(), timeout=5)
         if proc.returncode == 0:
             return f"✓ 已启动：{command}"
-        return f"（启动失败，返回码 {proc.returncode}）"
+        return tool_failure(f"（启动失败，返回码 {proc.returncode}）")
     except Exception as e:
-        return f"（启动失败：{e}）"
+        return tool_failure(f"（启动失败：{e}）")
 
 
 async def _screenshot() -> str:
@@ -283,7 +283,7 @@ async def _screenshot() -> str:
         # 返回相对路径（前端可拼接 /api/images/screenshots/{name}）
         return f"screenshots/{name}"
     except Exception as e:
-        return f"（截图失败：{e}）"
+        return tool_failure(f"（截图失败：{e}）")
 
 
 async def _clipboard_get() -> str:
@@ -298,18 +298,18 @@ async def _clipboard_get() -> str:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return "（读取剪贴板超时）"
+            return tool_failure("（读取剪贴板超时）")
         txt = out.decode("utf-8", errors="replace") if out else ""
         txt = txt.strip()
         return txt or "（剪贴板为空或非文本内容）"
     except Exception as e:
-        return f"（读取剪贴板失败：{e}）"
+        return tool_failure(f"（读取剪贴板失败：{e}）")
 
 
 async def _clipboard_set(text: str = "") -> str:
     """写入剪贴板文本内容。"""
     if not text:
-        return "（缺少要写入的内容）"
+        return tool_failure("（缺少要写入的内容）")
     try:
         # 避免编码问题：用临时文件+PowerShell。文件名用随机 uuid（不再用可预测的
         # 秒级时间戳，防 TOCTOU）；路径里的单引号转义，防 PowerShell 插值出错
@@ -328,13 +328,13 @@ async def _clipboard_set(text: str = "") -> str:
         finally:
             tmp.unlink(missing_ok=True)
     except Exception as e:
-        return f"（写入剪贴板失败：{e}）"
+        return tool_failure(f"（写入剪贴板失败：{e}）")
 
 
 async def _browser_open(url: str = "") -> str:
     """在默认浏览器中打开 URL。"""
     if not url:
-        return "（缺少 URL）"
+        return tool_failure("（缺少 URL）")
     if not url.startswith(("http://", "https://", "file://")):
         url = "https://" + url
     try:
@@ -342,7 +342,7 @@ async def _browser_open(url: str = "") -> str:
         webbrowser.open(url)
         return f"✓ 已在浏览器中打开：{url}"
     except Exception as e:
-        return f"（打开浏览器失败：{e}）"
+        return tool_failure(f"（打开浏览器失败：{e}）")
 
 
 # ---- 注册 ----

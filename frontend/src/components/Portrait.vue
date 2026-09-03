@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ensureBaseUrl, getBaseUrl } from '../api'
+import { ensureBaseUrl, getApiUrl } from '../api'
 
 const props = defineProps<{ size?: number }>()
 
@@ -8,7 +8,7 @@ const imgUrl = ref('')
 
 onMounted(async () => {
   await ensureBaseUrl()
-  imgUrl.value = `${getBaseUrl()}/persona/cutout`
+  imgUrl.value = getApiUrl('/persona/cutout', true)
 })
 </script>
 

@@ -358,6 +358,35 @@ async def append_proactive_message(session_id: str, text: str) -> bool:
         return await asyncio.to_thread(_append_proactive_sync, session_id, text)
 
 
+def _clear_current_sync() -> int:
+    """清空当前会话的全部消息（不归档、不保留）。返回删除条数。
+
+    用于「彻底失忆/重新开始」：重置时不需要像归档那样把对话存进 archives，
+    而是直接把当前气泡连同标题一起抹掉，让会话回到全新空白态。
+    """
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "DELETE FROM messages WHERE session_id=?", (CURRENT_SESSION_ID,)
+        )
+        deleted = cur.rowcount
+        now = time.time()
+        conn.execute(
+            "UPDATE sessions SET title='新会话', updated_at=? WHERE id=?",
+            (now, CURRENT_SESSION_ID),
+        )
+        conn.commit()
+        return int(deleted)
+    finally:
+        conn.close()
+
+
+async def clear_current() -> int:
+    """清空当前会话消息（走 async 锁，不阻塞事件循环）。返回删除条数。"""
+    async with _lock:
+        return await asyncio.to_thread(_clear_current_sync)
+
+
 async def archive_current() -> dict | None:
     """归档当前会话（打包消息存入 archives，清空当前会话）。无消息返回 None。"""
     async with _lock:

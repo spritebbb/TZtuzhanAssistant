@@ -3,7 +3,7 @@ import { resolveImageSrc } from '../images'
 
 // api/index.ts 的 baseUrl 默认 127.0.0.1:8801；这里直接验证拼接逻辑
 vi.mock('../../api', () => ({
-  getBaseUrl: () => 'http://127.0.0.1:8801',
+  getApiUrl: (path: string) => `http://127.0.0.1:8801${path}`,
 }))
 
 describe('resolveImageSrc', () => {

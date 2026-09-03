@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.tools.safety import check_path
 
 _WORK_DIR = Path(os.getcwd())
@@ -40,10 +40,10 @@ def _check_within(root: Path, target: Path) -> bool:
 def _glob_sync(pattern: str = "", path: str = "") -> str:
     """按 glob 模式搜索文件名（默认在项目根内递归搜索）。"""
     if not pattern:
-        return "（缺少 glob 模式，例如 *.py 或 src/**/*.ts）"
+        return tool_failure("（缺少 glob 模式，例如 *.py 或 src/**/*.ts）")
     root = _resolve_root(path)
     if root is None:
-        return "（路径不允许：只能在工作目录下搜索）"
+        return tool_failure("（路径不允许：只能在工作目录下搜索）")
     try:
         matches = [str(p.relative_to(root)) for p in root.glob(pattern) if p.is_file()]
         matches = [m for m in matches if _check_within(root, root / m)]
@@ -56,16 +56,16 @@ def _glob_sync(pattern: str = "", path: str = "") -> str:
             result += f"\n...（共 {len(matches)} 个，已显示前 100）"
         return result
     except Exception as e:
-        return f"（搜索失败：{e}）"
+        return tool_failure(f"（搜索失败：{e}）")
 
 
 def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
     """在文件内容中检索正则表达式，返回 文件:行号:内容（对标 Harness 的 grep）。"""
     if not pattern:
-        return "（缺少检索模式）"
+        return tool_failure("（缺少检索模式）")
     root = _resolve_root(path)
     if root is None:
-        return "（路径不允许：只能在工作目录下检索）"
+        return tool_failure("（路径不允许：只能在工作目录下检索）")
     try:
         # 默认跳过隐藏目录和常见产物目录
         skip_dirs = {".git", ".venv", "node_modules", "dist", "dist-electron",
@@ -102,7 +102,7 @@ def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
         body = "\n".join(results)
         return body if len(results) < 100 else body + "\n...（已达上限 100 条）"
     except Exception as e:
-        return f"（检索失败：{e}）"
+        return tool_failure(f"（检索失败：{e}）")
 
 
 async def _glob(pattern: str = "", path: str = "") -> str:

@@ -10,7 +10,7 @@ import json
 import time
 import urllib.request
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 
 # 插件元信息（可选；管理界面/API 展示用）
 PLUGIN_META = {
@@ -51,12 +51,12 @@ def _fetch_rate() -> float | None:
 def _currency_convert(amount: float = 0, currency: str = "USD", target: str = "CNY") -> str:
     """汇率换算：把指定金额的币种换算成目标币种。"""
     if amount <= 0:
-        return "（请提供大于 0 的金额）"
+        return tool_failure("（请提供大于 0 的金额）")
     if currency.upper() != "USD" or target.upper() != "CNY":
-        return "（示例插件暂只支持 USD→CNY）"
+        return tool_failure("（示例插件暂只支持 USD→CNY）")
     rate = _fetch_rate()
     if rate is None:
-        return "（汇率获取失败，请稍后再试）"
+        return tool_failure("（汇率获取失败，请稍后再试）")
     converted = amount * rate
     _last_convert.update(amount=amount, rate=rate, converted=converted, ts=now_str())
     return f"{amount:,.2f} USD ≈ {converted:,.2f} CNY（汇率 1 USD = {rate:.4f} CNY）"

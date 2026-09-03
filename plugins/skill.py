@@ -13,7 +13,7 @@ PLUGIN_META = {
     "author": "tuzhan",
 }
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.skills import load_catalog, load_skill_file
 from backend.skills.catalog import SKILLS_DIR
 
@@ -46,13 +46,13 @@ def _skill_search(query: str = "") -> str:
 def _skill_load(name: str = "") -> str:
     """按名称加载技能全文。"""
     if not name:
-        return "（缺少技能名称）"
+        return tool_failure("（缺少技能名称）")
     qn = name.strip().lower()
     skills = load_catalog()
     for s in skills:
         if s.name.lower() == qn:
             return f"# {s.name}\n\n{s.description}\n\n---\n\n{s.content}"
-    return f"（未找到技能：{name}）"
+    return tool_failure(f"（未找到技能：{name}）")
 
 
 def register(ctx=None) -> None:

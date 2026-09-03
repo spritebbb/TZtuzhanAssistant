@@ -1,5 +1,5 @@
 // 会话 API（单一会话模式 + 归档）
-import { apiFetch, getBaseUrl } from './index'
+import { apiFetch, getApiUrl } from './index'
 
 export interface SessionInfo {
   id: string
@@ -107,7 +107,7 @@ export function openInitiativeStream(
   onMessage: (text: string) => void,
   onError?: () => void,
 ): EventSource {
-  const url = `${getBaseUrl()}/api/initiative/stream?session_id=${encodeURIComponent(sessionId)}`
+  const url = getApiUrl(`/api/initiative/stream?session_id=${encodeURIComponent(sessionId)}`, true)
   const es = new EventSource(url)
   es.addEventListener('initiative', (e: MessageEvent) => {
     try {

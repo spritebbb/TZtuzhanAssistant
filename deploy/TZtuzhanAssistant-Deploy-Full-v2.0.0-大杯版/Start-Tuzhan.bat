@@ -14,7 +14,7 @@ echo   Tuzhan Assistant - one-click web launcher (port 8801)
 echo  ============================================================
 echo.
 
-rem ---- 0) find python ----
+rem ---- 1) find python ----
 if exist "%VENV%\Scripts\python.exe" (
     set "PY=%VENV%\Scripts\python.exe"
 ) else (
@@ -27,31 +27,40 @@ if not defined PY (
     pause
     exit /b 1
 )
-echo  [1/5] Python: %PY%
+echo  [1/6] Python: %PY%
 
-rem ---- 1) create venv if missing ----
+rem ---- 2) create venv if missing ----
 if not exist "%VENV%\Scripts\python.exe" (
-    echo  [2/5] Creating virtual environment...
+    echo  [2/6] Creating virtual environment...
     "%PY%" -m venv "%VENV%"
     if errorlevel 1 goto :venvfail
     set "PY=%VENV%\Scripts\python.exe"
 )
 
-rem ---- 2) install dependencies once ----
+rem ---- 3) install dependencies once ----
 if not exist "%VENV%\Lib\site-packages\fastapi" (
-    echo  [3/5] Installing Python dependencies, this may take a while...
+    echo  [3/6] Installing Python dependencies, this may take a while...
     "%PY%" -m pip install --upgrade pip
     if errorlevel 1 goto :pipfail
     "%PY%" -m pip install -r "%ROOT%\requirements.txt"
     if errorlevel 1 goto :pipfail
 ) else (
-    echo  [3/5] Dependencies already installed, skip.
+    echo  [3/6] Dependencies already installed, skip.
 )
 set "PY=%VENV%\Scripts\python.exe"
 
-rem ---- 3) first-run .env ----
+rem ---- 4) initialize databases on first run (idempotent) ----
+if not exist "%ROOT%\data\bot.db" (
+    echo  [4/6] Initializing fresh databases (bot.db / sessions.db / agent_tasks.db)...
+    "%PY%" "%ROOT%\init_database.py"
+    if errorlevel 1 goto :initfail
+) else (
+    echo  [4/6] Databases already initialized, skip.
+)
+
+rem ---- 5) first-run .env ----
 if not exist "%ROOT%\.env" (
-    echo  [4/5] Creating .env from template...
+    echo  [5/6] Creating .env from template...
     copy /Y "%ROOT%\.env.example" "%ROOT%\.env" >nul
 )
 set "ENV_OK=0"
@@ -64,8 +73,8 @@ if not "%ENV_OK%"=="1" (
     pause
 )
 
-rem ---- 4) start backend if not running ----
-echo  [5/5] Checking backend on port 8801...
+rem ---- 6) start backend if not running ----
+echo  [6/6] Checking backend on port 8801...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8801/api/health' -TimeoutSec 2; if($r.StatusCode -eq 200){exit 0} } catch {}; exit 1" >nul 2>&1
 if errorlevel 1 (
     echo        Starting backend...
@@ -93,6 +102,12 @@ exit /b 1
 echo  [ERROR] pip install failed.
 echo          If this is a network problem, run manually with a mirror:
 echo          "%PY%" -m pip install -r "%ROOT%\requirements.txt" -i https://pypi.tuna.tsinghua.edu.cn/simple
+pause
+exit /b 1
+
+:initfail
+echo  [ERROR] Database initialization failed.
+echo          Run Init-Database.bat again to see the full error message.
 pause
 exit /b 1
 

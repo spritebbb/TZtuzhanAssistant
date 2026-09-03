@@ -36,6 +36,15 @@ def _detect_ext(data: bytes, filename: str) -> str:
     return ".png"
 
 
+def _is_supported_image(data: bytes) -> bool:
+    return (
+        data.startswith(b"\x89PNG\r\n\x1a\n")
+        or data.startswith(b"\xff\xd8\xff")
+        or data.startswith((b"GIF87a", b"GIF89a"))
+        or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    )
+
+
 @router.post("/vision")
 async def api_vision(request: Request):
     """识图：上传图片，视觉模型描述内容。multipart 字段 file。
@@ -47,9 +56,12 @@ async def api_vision(request: Request):
     up: UploadFile | None = form.get("file")
     if up is None:
         return JSONResponse({"ok": False, "error": "缺少图片"}, status_code=400)
-    data = await up.read()
-    if len(data) > 8 * 1024 * 1024:
+    max_size = 8 * 1024 * 1024
+    data = await up.read(max_size + 1)
+    if len(data) > max_size:
         return JSONResponse({"ok": False, "error": "图片过大（>8MB）"}, status_code=413)
+    if not _is_supported_image(data):
+        return JSONResponse({"ok": False, "error": "不支持的图片格式"}, status_code=415)
 
     from ..core.vision import describe_bytes
 

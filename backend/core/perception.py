@@ -155,7 +155,7 @@ async def perceive(text: str, *, mock: bool = False) -> dict[str, Any]:
         )
         result = _parse_json(raw)
         if result is None:
-            logger.warning("[perception] LLM 输出非 JSON，降级关键词规则: %r", raw[:80])
+            logger.warning("[perception] LLM 输出非 JSON，降级关键词规则: {!r}", raw[:80])
             return _fallback_rule(text)
         return _debias_negatives(_normalize(result), text)
     except Exception:

@@ -56,6 +56,51 @@ def _spawn_memory_task(coro) -> None:
     task.add_done_callback(_memory_tasks.discard)
 
 
+async def _perceive_and_settle(user_id: str, text: str, *, mock: bool = False) -> None:
+    """后台：LLM 语义感知 + 好感度/情绪演化 + 降级时的关键词兜底。
+
+    性能说明：perceive 是一次真实的 LLM 调用（本地感知小模型/独立端点），在部分
+    服务商上首 token 可能高达 10s+。它只影响「这句话让菟菚的好感/情绪涨落多少」，
+    与回复正文无关，因此整体丢到后台执行，让主流程可以立刻开始组 prompt 去生成
+    回复 —— 消除「每条消息首字前死等一次感知 LLM」的瓶颈。
+    """
+    try:
+        from .perception import perceive
+        from .state import apply_impulse
+
+        perc = await perceive(text, mock=mock)
+
+        # 语义成功 = 拿到结果且未降级
+        semantic_ok = perc is not None and not perc.get("degraded", False)
+
+        # 语义感知驱动状态演化（该条消息的情绪/好感影响）
+        if perc:
+            apply_impulse(
+                user_id,
+                emotion_delta=perc.get("emotion_delta", 0),
+                affection_delta=perc.get("affection_delta", 0),
+                affection_reason="语义感知",
+                emotional_hit=perc.get("emotional_hit") or None,
+                emotional_weight=perc.get("hit_weight", 0.0),
+                text=text,
+            )
+        # else perc 恒非 None（失败内部已降级返回 dict）
+
+        # 降级/失败时才启用关键词兜底（避免「语义 delta + 关键词」双重计分）
+        if not semantic_ok:
+            affection.apply_abuse_penalty(user_id, text)
+            if affection.check_care(text):
+                affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, "关心菟菚")
+            if affection.check_apology(text):
+                affection.try_daily_bonus(user_id, "apology", affection.APOLOGY_BONUS, "真诚道歉")
+            if affection.check_sharing(text):
+                affection.try_daily_bonus(user_id, "sharing", affection.SHARING_BONUS, "分享心事/秘密")
+            if affection.check_compliment(text):
+                affection.try_daily_bonus(user_id, "compliment", affection.COMPLIMENT_BONUS, "夸菟菚")
+    except Exception:
+        logger.exception("[pipeline] 后台拟人状态感知失败（不影响回复）")
+
+
 async def _vectorize_memory_async(
     user_id: str, text: str, reply: str,
     lm1_id: int, lm2_id: int, removed_ids: list[int],
@@ -490,45 +535,26 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 好感度可能已变：刷新快照，后续 system prompt / 阶段判定用最新值
     user = db.get_user(user_id)
 
-    # 1.0.1) 拟人核心层：LLM 语义感知 + 状态演化（新增，替换关键词打点）
+    # 1.0.1) 拟人核心层：LLM 语义感知 + 状态演化
     # 用一次 LLM 调用读懂这句话对菟菚的情绪/好感影响，驱动多维状态演化。
-    # 感知失败自动降级（perception 内部回退关键词规则），绝不阻塞对话。
-    # perc 结果也传给 1.1 节，用于避免「语义已加分 + 关键词又加分」的双重计分。
-    perc = None
+    # 性能关键：perceive 是真实 LLM 调用（可能 10s+ 首 token），但与回复正文无关，
+    # 故整体丢到后台（_perceive_and_settle）执行，让主流程立刻去生成回复，
+    # 消除「每条消息首字前死等感知 LLM」的串行瓶颈。后台会在回复生成期间落账，
+    # 且因同用户消息经 _user_lock 串行，好感度最迟在回复生成完成后更新。
     try:
-        from .perception import perceive
-        from .state import apply_impulse
-
-        perc = await perceive(text, mock=mock)
-        apply_impulse(
-            user_id,
-            emotion_delta=perc.get("emotion_delta", 0),
-            affection_delta=perc.get("affection_delta", 0),
-            affection_reason="语义感知",
-            emotional_hit=perc.get("emotional_hit") or None,
-            emotional_weight=perc.get("hit_weight", 0.0),
-            text=text,
-        )
+        _spawn_memory_task(_perceive_and_settle(user_id, text, mock=mock))
     except Exception:
-        logger.exception("[pipeline] 拟人状态感知失败（不影响回复）")
-        perc = None
+        logger.exception("[pipeline] 拟人感知后台任务启动失败")
 
     # 1.0) 用户消息先存档：即使后续 LLM 调用失败，对话历史也不丢、
     # 失败重发时不至于重复计好感（assistant 消息在生成成功后补存）。
     db.add_message(user_id, "user", text)
 
-    # 1.1) 正向互动「每日奖励」（每日各上限 1 次；不阻塞、失败静默）
-    # 主从关系（拟人核心层改造后的唯一约定）：
-    #   - 语义感知（perc）是「主」：真语义成功时，care/apology/sharing/compliment
-    #     的好感影响已由 apply_impulse 的 affection_delta 精确表达，关键词每日奖励
-    #     就是重复，跳过。
-    #   - 关键词是「兜底」：仅当语义感知降级（LLM 失败/无 key，perc["degraded"]=True）
-    #     或完全失败（perc=None）时，才启用关键词每日奖励，避免正向反馈过弱。
-    #   - 「用称呼交流」「引用记忆」这两个信号语义感知不覆盖，始终走关键词。
+    # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
+    # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
+    # 这里只保留两个语义感知不覆盖、始终走关键词的即时信号。
     try:
-        # 真语义成功 = 拿到了结果且不是降级结果；否则按关键词兜底处理
-        semantic_ok = perc is not None and not perc.get("degraded", False)
-        # 用称呼交流（语义感知不覆盖，始终走关键词）
+        # 用称呼交流
         if affection.check_nickname_used(text, user["nickname_pref"]):
             affection.try_daily_bonus(user_id, "nickname", affection.NICKNAME_BONUS, "用菟菚的称呼交流")
         # 引用过去记忆（用户提到上次/之前/记得…，说明在引用共同经历；语义不覆盖）
@@ -536,23 +562,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
         if looks_like_recall(text):
             affection.try_daily_bonus(user_id, "memory", affection.MEMORY_REFERENCE_BONUS, "提到共同经历/回忆")
-        # 以下信号：真语义成功时已计入 affection_delta，跳过；降级/失败时走关键词兜底
-        if not semantic_ok:
-            # 辱骂：语义成功时已由 apply_impulse 的 affection_delta 扣分，这里只在
-            # 降级/失败时用关键词兜底，避免「关键词 -5 + 语义 delta」双重计分。
-            affection.apply_abuse_penalty(user_id, text)
-            # 关心菟菚
-            if affection.check_care(text):
-                affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, "关心菟菚")
-            # 道歉（修复关系，抵消前扣分）
-            if affection.check_apology(text):
-                affection.try_daily_bonus(user_id, "apology", affection.APOLOGY_BONUS, "真诚道歉")
-            # 分享心事/秘密（走心互动）
-            if affection.check_sharing(text):
-                affection.try_daily_bonus(user_id, "sharing", affection.SHARING_BONUS, "分享心事/秘密")
-            # 夸菟菚
-            if affection.check_compliment(text):
-                affection.try_daily_bonus(user_id, "compliment", affection.COMPLIMENT_BONUS, "夸菟菚")
     except Exception:
         logger.exception("[pipeline] 好感度即时奖励失败")
 

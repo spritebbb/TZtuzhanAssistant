@@ -285,7 +285,12 @@ async def maintenance_loop() -> None:
 
 
 def health() -> dict:
-    """健康检查：db 可达性、磁盘占用、备份状态。"""
+    """健康检查：db 可达性、磁盘占用、备份状态。
+
+    加固：除 db 文件是否存在外，额外暴露真实健康信号，避免「假绿灯」——
+    LLM 未配 key / persona 缺失 / 插件加载失败 / 记忆引擎降级都应在健康里反映，
+    而非等到首条消息才报 RuntimeError。
+    """
     checks = {}
     for name in ("bot.db", "sessions.db"):
         p = _DATA / name
@@ -294,8 +299,45 @@ def health() -> dict:
     checks["screenshots_mb"] = round(_dir_size_mb(_SCREENSHOTS), 1)
     backups = sorted(p.name for p in _BACKUPS.iterdir() if p.is_dir()) if _BACKUPS.exists() else []
     checks["backups"] = backups
+
+    extra: dict = {}
+    # 1) LLM_API_KEY 是否已配置（非空）
+    try:
+        from .config import config as _cfg
+
+        extra["llm_configured"] = bool(_cfg.llm_api_key and _cfg.llm_api_key.strip())
+    except Exception:
+        extra["llm_configured"] = False
+    # 2) persona 人格源文件是否存在
+    try:
+        persona_path = _cfg.persona_file
+        extra["persona_ok"] = bool(persona_path and persona_path.exists())
+    except Exception:
+        extra["persona_ok"] = False
+    # 3) 插件加载失败数（plugin_states 里 error 非空者）
+    try:
+        from ..plugins import plugin_states
+
+        states = plugin_states()
+        extra["plugin_load_failures"] = sum(1 for s in states.values() if s.get("error"))
+    except Exception:
+        extra["plugin_load_failures"] = 0
+    # 4) 记忆引擎当前模式：model:<名称> / hash（用不触发模型加载的接口，
+    #    避免健康检查顺带触发一次模型下载；预热完成后状态才从 hash 切到 model）
+    try:
+        from ..core.memory.embedding import is_loaded, current_model
+
+        if is_loaded():
+            _m = current_model()
+            extra["memory_mode"] = f"model:{_m}" if _m else "model"
+        else:
+            extra["memory_mode"] = "hash"
+    except Exception:
+        extra["memory_mode"] = "unknown"
+
     return {
         "ok": checks["bot.db"]["exists"] and checks["sessions.db"]["exists"],
         "ts": time.time(),
         **checks,
+        **extra,
     }

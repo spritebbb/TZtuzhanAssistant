@@ -20,7 +20,8 @@ from pathlib import Path
 
 from backend.core.config import PROJECT_ROOT, config
 from backend.core.log import logger
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
+from backend.tools.safety import check_cwd
 
 # Codex CLI 候选根目录（实际路径按版本目录自动探测，避免写死版本号）
 _CODEX_BIN_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%\OpenAI\Codex\bin"))
@@ -36,6 +37,33 @@ _DSH_CLI_DEFAULT = Path(
 
 # 当前工作目录（DSH 项目根；可用 DSH_CWD 环境变量覆盖）
 _DSH_CWD = os.getenv("DSH_CWD", os.getenv("DSH_ROOT", str(PROJECT_ROOT.parent)))
+
+# 工作目录越界时追加到工具结果的提示（让用户看见降级发生过）
+_CWD_FALLBACK_NOTE = "（工作目录越界，已限制为项目根）"
+
+
+def _safe_cwd(cwd: str, extra_root: str | None = None) -> tuple[str, bool]:
+    """校验外部桥工作目录，越界则回退项目根。返回 (最终 cwd, 是否回退)。
+
+    确认放行后外部 CLI 等同本机任意代码执行，cwd 必须限定在
+    safety.allowed_roots() 内，避免 AGENT_CODEX_CWD 被配成 C:\\ 之类的宽泛
+    路径后 Codex 在那里落地改动。
+    extra_root 供 DSH 用：DSH 项目根天然在本项目之外（PROJECT_ROOT.parent），
+    只对该桥单独放行，不写进全局白名单——否则会顺带放大 file_ops /
+    run_command 等工具的可操作范围。
+    """
+    ok, _err = check_cwd(cwd)
+    if not ok and extra_root:
+        try:
+            p = Path(cwd).expanduser().resolve()
+            r = Path(extra_root).expanduser().resolve()
+            ok = p == r or p.is_relative_to(r)
+        except (ValueError, OSError):
+            ok = False
+    if ok:
+        return cwd, False
+    logger.warning("外部桥工作目录不在允许范围，已回退项目根：{}", cwd)
+    return str(PROJECT_ROOT), True
 
 
 def _codex_path() -> str:
@@ -116,15 +144,40 @@ def _clean_stderr(err: str, limit: int = 400) -> str:
     return "\n".join(lines).strip()[:limit]
 
 
+async def _kill_process_tree(proc: asyncio.subprocess.Process | None) -> None:
+    """取消/超时时终止外部 CLI 及其派生进程。"""
+    if proc is None:
+        return
+    try:
+        if os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        await proc.wait()
+    except Exception:
+        pass
+
+
 async def _codex_run(prompt: str = "") -> str:
     """通过 Codex CLI（非交互 exec 模式）执行一次独立任务。"""
     if not prompt:
-        return "（缺少 prompt）"
+        return tool_failure("（缺少 prompt）")
     codex = _codex_path()
     if not Path(codex).exists():
-        return f"（Codex CLI 未找到：{codex}。请设置 AGENT_CODEX_PATH 环境变量）"
+        return tool_failure(f"（Codex CLI 未找到：{codex}。请设置 AGENT_CODEX_PATH 环境变量）")
     profile = config.agent_codex_profile or "deepseek"
-    cwd = config.agent_codex_cwd or str(PROJECT_ROOT)
+    cwd, cwd_fallback = _safe_cwd(config.agent_codex_cwd or str(PROJECT_ROOT))
     timeout = config.agent_codex_timeout
     out_file: Path | None = None
     proc = None
@@ -157,19 +210,21 @@ async def _codex_run(prompt: str = "") -> str:
             if err_clean:
                 label = "（stderr，非任务输出；仅提示，不代表任务结果）"
                 out += f"\n{label}: {err_clean}" if out else f"{label}: {err_clean}"
-        return out or "（Codex 执行完毕，无输出）"
+        returncode = getattr(proc, "returncode", 0) or 0
+        if returncode:
+            return tool_failure(out or f"（Codex 执行失败，退出码 {returncode}）")
+        out = out or "（Codex 执行完毕，无输出）"
+        return f"{out}\n{_CWD_FALLBACK_NOTE}" if cwd_fallback else out
     except asyncio.TimeoutError:
-        if proc is not None:
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
-        return f"（Codex 执行超时（{timeout}s），已终止）"
+        await _kill_process_tree(proc)
+        return tool_failure(f"（Codex 执行超时（{timeout}s），已终止）")
+    except asyncio.CancelledError:
+        await _kill_process_tree(proc)
+        raise
     except FileNotFoundError:
-        return "（Codex CLI 未找到：请确保已安装或设置 AGENT_CODEX_PATH）"
+        return tool_failure("（Codex CLI 未找到：请确保已安装或设置 AGENT_CODEX_PATH）")
     except Exception as e:
-        return f"（Codex 执行失败：{e}）"
+        return tool_failure(f"（Codex 执行失败：{e}）")
     finally:
         if out_file is not None:
             try:
@@ -181,23 +236,26 @@ async def _codex_run(prompt: str = "") -> str:
 async def _dsh_run(task: str = "") -> str:
     """通过 DeepSeek Harness CLI 执行一次任务。"""
     if not task:
-        return "（缺少 task）"
+        return tool_failure("（缺少 task）")
     # DSH headless 的任务以位置参数经 argv 传给 CLI（其命令契约未提供 stdin 读取），
     # Windows CreateProcess 命令行上限约 32K——先做长度预检并给出明确错误，
     # 避免启动失败时只抛通用异常
     if len(task) > 20000:
-        return (
+        return tool_failure(
             f"（任务过长（{len(task)} 字符）：DSH headless 经位置参数接收任务，"
             "超出 Windows 命令行约 32K 上限，请把任务拆分后再试）"
         )
     dsh = _dsh_path()
     profile = config.agent_dsh_profile or "headless"
+    # DSH 的固有工作目录在本项目之外，故额外放行 PROJECT_ROOT.parent
+    cwd, cwd_fallback = _safe_cwd(_DSH_CWD, extra_root=str(PROJECT_ROOT.parent))
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             "node", dsh, "--profile", profile, task,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=_DSH_CWD if Path(_DSH_CWD).is_dir() else None,
+            cwd=cwd if Path(cwd).is_dir() else None,
         )
         timeout = int(getattr(config, "agent_dsh_timeout", 120))
         stdout, stderr = await asyncio.wait_for(
@@ -210,19 +268,22 @@ async def _dsh_run(task: str = "") -> str:
             if err_clean:
                 label = "（stderr，非任务输出；仅提示，不代表任务结果）"
                 out += f"\n{label}: {err_clean}" if out else f"{label}: {err_clean}"
-        return out or "（DSH 执行完毕，无输出）"
+        returncode = getattr(proc, "returncode", 0) or 0
+        if returncode:
+            return tool_failure(out or f"（DSH 执行失败，退出码 {returncode}）")
+        out = out or "（DSH 执行完毕，无输出）"
+        return f"{out}\n{_CWD_FALLBACK_NOTE}" if cwd_fallback else out
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        await _kill_process_tree(proc)
         timeout = int(getattr(config, "agent_dsh_timeout", 120))
-        return f"（DSH 执行超时（{timeout}s），已终止）"
+        return tool_failure(f"（DSH 执行超时（{timeout}s），已终止）")
+    except asyncio.CancelledError:
+        await _kill_process_tree(proc)
+        raise
     except FileNotFoundError:
-        return "（Node.js 未在 PATH 中找到）"
+        return tool_failure("（Node.js 未在 PATH 中找到）")
     except Exception as e:
-        return f"（DSH 执行失败：{e}）"
+        return tool_failure(f"（DSH 执行失败：{e}）")
 
 
 def register(ctx=None) -> None:

@@ -2,7 +2,7 @@
 import { onMounted, ref, watch, onUnmounted, computed } from 'vue'
 import { streamChat, uploadVision, type ToolProgressEvent } from '../api/chat'
 import { getMessages, openInitiativeStream, CURRENT_SESSION_ID, type Message } from '../api/sessions'
-import { ensureBaseUrl, getBaseUrl, apiFetch } from '../api'
+import { ensureBaseUrl, getApiUrl, apiFetch } from '../api'
 import ToolBar from './ToolBar.vue'
 import ConfirmPanel from './ConfirmPanel.vue'
 import MessageBubble from './MessageBubble.vue'
@@ -22,7 +22,7 @@ const emit = defineEmits<{
 const fullBg = ref('')
 async function loadFullBg() {
   await ensureBaseUrl()
-  fullBg.value = `${getBaseUrl()}/persona/full`
+  fullBg.value = getApiUrl('/persona/full', true)
 }
 
 // 久别问候：挂载时问后端「是否久别归来」，返回问候语则作为 bot 消息即时展示。
@@ -59,6 +59,7 @@ const showArchiveHint = computed(() => !dismissArchiveHint.value && messages.val
 // stop()/切会话统一 abort 它）。每个流在 finally 用「controller === ctrl」
 // 守卫判断是否由自己清理，避免一个流结束时误清掉另一个流的引用。
 let controller: AbortController | null = null
+let currentRequestId: string | null = null
 let curSessionId = props.sessionId
 let loadSeq = 0  // 加载序号：快速切换会话时丢弃过期响应，避免串会话显示
 
@@ -141,7 +142,9 @@ async function send() {
   currentStream.value = ''
   toolStatus.value = ''
   const ctrl = new AbortController()
+  const requestId = crypto.randomUUID()
   controller = ctrl
+  currentRequestId = requestId
   streaming.value = true
   scrollToBottom()
   // 气泡守卫：切会话/清空后 botIndex 已失效，回调直接丢弃
@@ -193,9 +196,11 @@ async function send() {
       onConfirmRequest: (req) => {
         pendingConfirm.value.push(req)
       },
-    })
+    }, null, requestId)
   } catch (e: unknown) {
-    if ((e as Error).name !== 'AbortError' && bubble()) {
+    if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
+      messages.value[botIndex].content = '（已停止）'
+    } else if ((e as Error).name !== 'AbortError' && bubble()) {
       messages.value[botIndex].content = '（网络错误：' + (e as Error).message + '）'
     }
   } finally {
@@ -203,11 +208,14 @@ async function send() {
     streaming.value = false
     toolStatus.value = ''
     if (controller === ctrl) controller = null
+    if (currentRequestId === requestId) currentRequestId = null
     flushPendingProactive()
   }
 }
 
 function stop() {
+  const requestId = currentRequestId
+  if (requestId) void apiFetch(`/api/chat/${encodeURIComponent(requestId)}/cancel`, { method: 'POST' })
   controller?.abort()
 }
 
@@ -257,7 +265,9 @@ async function handleImageFile(f: File | null) {
   // 每流独立 AbortController，但统一挂到 controller 供 stop()/切会话 abort；
   // finally 用「controller === ctrl」守卫，避免本流结束时误清其他流的引用。
   const ctrl = new AbortController()
+  const requestId = crypto.randomUUID()
   controller = ctrl
+  currentRequestId = requestId
   streaming.value = true
   toolStatus.value = ''
   // 气泡守卫：切会话/清空后 botIndex 已失效，回调直接丢弃，避免写 undefined
@@ -301,9 +311,11 @@ async function handleImageFile(f: File | null) {
         b.content = '⚠️ ' + err
         streaming.value = false
       },
-    }, imageUrl)
+    }, imageUrl, requestId)
   } catch (e: unknown) {
-    if ((e as Error).name !== 'AbortError' && bubble()) {
+    if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
+      messages.value[botIndex].content = '（已停止）'
+    } else if ((e as Error).name !== 'AbortError' && bubble()) {
       messages.value[botIndex].content = '⚠️ ' + (e as Error).message
     }
   } finally {
@@ -311,6 +323,7 @@ async function handleImageFile(f: File | null) {
     streaming.value = false
     toolStatus.value = ''
     if (controller === ctrl) controller = null
+    if (currentRequestId === requestId) currentRequestId = null
     flushPendingProactive()
   }
 }
@@ -359,29 +372,33 @@ watch(() => props.reloadKey, () => {
   loadMessages(curSessionId)
 })
 
-onMounted(() => {
-  loadMessages(props.sessionId)
-  loadFullBg()
+let unsubscribeInitiativeIpc: (() => void) | undefined
+
+onMounted(async () => {
+  await loadMessages(props.sessionId)
+  void loadFullBg()
   // 久别问候：加载完历史后检查一次，有问候语则追加展示
-  checkGreeting(props.sessionId)
+  await checkGreeting(props.sessionId)
   // 主动性 SSE 长连接：服务端后台生成主动消息时秒级推送（窗口开着时秒级）。
   startInitiativeStream()
   // 主进程轮询兜底：上报当前会话，让主进程在关窗后也能独立轮询弹系统通知。
   window.electronAPI?.setActiveSession(props.sessionId)
   // 订阅主进程转发的主动消息（追加气泡，与 SSE 去重）
-  window.electronAPI?.onInitiativeMessage((text) => handleProactiveMessage(text))
+  unsubscribeInitiativeIpc = window.electronAPI?.onInitiativeMessage((text) => handleProactiveMessage(text))
   document.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   stopInitiativeStream()
+  unsubscribeInitiativeIpc?.()
+  unsubscribeInitiativeIpc = undefined
   document.removeEventListener('keydown', onKeydown)
 })
 
 // ---- 主动性 SSE 长连接（菟菚主动开口 + 桌面通知）----
 let initiativeSource: EventSource | null = null
 // busy/streaming 期间收到的主动消息暂存，流结束后补插（避免静默丢失展示）
-let pendingProactive: string | null = null
+let pendingProactive: string[] = []
 
 function startInitiativeStream() {
   stopInitiativeStream()
@@ -417,10 +434,9 @@ function handleProactiveMessage(text: string) {
   // 生成中（busy/streaming）：不打断当前流，暂存到 pendingProactive，
   // 流结束或 busy 释放后补插气泡；消息已落库，刷新也不会丢。
   if (busy.value || streaming.value) {
-    pendingProactive = text
+    if (!pendingProactive.includes(text)) pendingProactive.push(text)
     return
   }
-  pendingProactive = null
   // 追加为 bot 消息气泡。主动消息后端已写入会话 messages 表（落库 + 幂等），
   // 这里即时展示。
   messages.value.push({ role: 'bot', content: text, ts: Date.now() / 1000 })
@@ -436,10 +452,10 @@ function handleProactiveMessage(text: string) {
 
 // 流结束 / busy 释放后，若有暂存的主动消息则补插（避免静默丢失展示）
 function flushPendingProactive() {
-  if (pendingProactive && !busy.value && !streaming.value) {
-    const text = pendingProactive
-    pendingProactive = null
-    handleProactiveMessage(text)
+  if (pendingProactive.length && !busy.value && !streaming.value) {
+    const queued = pendingProactive
+    pendingProactive = []
+    for (const text of queued) handleProactiveMessage(text)
   }
 }
 

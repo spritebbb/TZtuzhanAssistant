@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from ..core.log import logger
 from ..core import reset as reset_core
@@ -18,8 +19,14 @@ async def api_user_reset():
     """
     try:
         stats = await reset_core.reset_everything()
-        logger.info("[重置] 用户主动触发彻底重置完成: %s", stats)
+        if not stats.get("ok"):
+            logger.warning("[重置] 用户重置未完整完成：{}", stats.get("failures"))
+            return JSONResponse(
+                {"ok": False, "error": "重置未完整完成", "reset": stats},
+                status_code=500,
+            )
+        logger.info("[重置] 用户主动触发彻底重置完成：{}", stats)
         return {"ok": True, "reset": stats}
     except Exception as e:
         logger.exception("[重置] 重置失败")
-        return {"ok": False, "error": f"重置失败: {e}"}
+        return JSONResponse({"ok": False, "error": f"重置失败: {e}"}, status_code=500)

@@ -139,7 +139,7 @@ async def generate_proactive_message(user_id: str) -> str | None:
         text = await chat(msgs, max_tokens=100, temperature=0.85)
         return text.strip()[:200] or None
     except Exception as e:
-        logger.warning("[主动性] LLM 生成失败: %s", e)
+        logger.warning("[主动性] LLM 生成失败: {}", e)
         return None
 
 
@@ -162,7 +162,7 @@ async def _tick_once() -> int:
         if row:
             await maybe_suggest_archive(row["user_id"])
     except Exception as e:
-        logger.warning("[主动性] 归档建议检查失败: %s", e)
+        logger.warning("[主动性] 归档建议检查失败: {}", e)
 
     users = _eligible_users()
     if not users:
@@ -171,8 +171,13 @@ async def _tick_once() -> int:
     count = 0
     for u in users:
         uid = u["user_id"]
+        from .reset import reset_epoch
+        epoch = reset_epoch()
         text = await generate_proactive_message(uid)
         if not text:
+            continue
+        from .reset import epoch_is_current
+        if not epoch_is_current(epoch):
             continue
         # 投递：优先走 delivery hook（若注册，实时推给前端）；否则入队，
         # 等前端轮询 /api/initiative 时取走（离线也不丢失）。
@@ -180,14 +185,18 @@ async def _tick_once() -> int:
         try:
             delivered = await _deliver(uid, text)
         except Exception as e:
-            logger.warning("[主动性] 投递失败: %s", e)
+            logger.warning("[主动性] 投递失败: {}", e)
         if not delivered:
-            await enqueue_proactive(uid, text)
+            if not await enqueue_proactive(uid, text, epoch=epoch):
+                continue
         else:
             # 实时投递成功（不经 enqueue），仍需落库，避免刷新后丢失
-            await _persist_proactive(uid, text)
+            if not await _persist_proactive(uid, text, epoch=epoch):
+                continue
+        if not epoch_is_current(epoch):
+            continue
         _mark_proactive(uid)
-        logger.info("[主动性] 已主动联系 %s（%s）: %s", uid, "实时投递" if delivered else "入队待取", text[:40])
+        logger.info("[主动性] 已主动联系 {}（{}）: {}", uid, "实时投递" if delivered else "入队待取", text[:40])
         count += 1
         if count >= 3:
             break
@@ -219,7 +228,7 @@ async def _deliver(user_id: str, text: str) -> bool:
 _PENDING_KEY = "initiative:pending"
 
 
-async def _persist_proactive(user_id: str, text: str) -> None:
+async def _persist_proactive(user_id: str, text: str, *, epoch: int | None = None) -> bool:
     """把主动消息写入当前会话的 messages 表（真正持久化 + 幂等）。
 
     主动消息是 bot 角色、挂在全局会话（CURRENT_SESSION_ID）下。走
@@ -229,21 +238,37 @@ async def _persist_proactive(user_id: str, text: str) -> None:
     """
     try:
         from ..session import store as _store
+        from .reset import ResetSuperseded, reset_epoch, user_write_guard
 
-        await _store.append_proactive_message(_store.CURRENT_SESSION_ID, text)
+        write_epoch = reset_epoch() if epoch is None else epoch
+        async with user_write_guard(write_epoch):
+            await _store.append_proactive_message(_store.CURRENT_SESSION_ID, text)
+        return True
+    except ResetSuperseded:
+        return False
     except Exception as e:
-        logger.warning("[主动性] 主动消息落库失败: %s", e)
+        logger.warning("[主动性] 主动消息落库失败: {}", e)
+        return False
 
 
-async def enqueue_proactive(user_id: str, text: str) -> None:
+async def enqueue_proactive(user_id: str, text: str, *, epoch: int | None = None) -> bool:
     """把一条主动消息放入待投递队列（持久化，跨重启不丢）。
 
     入队后广播给该 user 的 SSE 订阅者，实现秒级实时推送；同时写入会话
     messages 表（幂等），避免主动消息只在内存/前端展示、刷新后丢失。
     """
+    from .reset import epoch_is_current, reset_epoch
+
+    write_epoch = reset_epoch() if epoch is None else epoch
+    if not epoch_is_current(write_epoch):
+        return False
     kv_set(user_id, _PENDING_KEY, text)
-    await _persist_proactive(user_id, text)
+    if not await _persist_proactive(user_id, text, epoch=write_epoch):
+        if kv_get(user_id, _PENDING_KEY) == text:
+            kv_del(user_id, _PENDING_KEY)
+        return False
     _notify_subscribers(user_id, text)
+    return True
 
 
 def dequeue_proactive(user_id: str) -> str | None:
@@ -293,14 +318,14 @@ async def initiative_loop() -> None:
 
     异常全捕获，绝不因主动引擎故障拖垮服务。
     """
-    logger.info("[主动性] 引擎启动，轮询间隔 %ss", _CHECK_INTERVAL_SEC)
+    logger.info("[主动性] 引擎启动，轮询间隔 {}s", _CHECK_INTERVAL_SEC)
     while True:
         try:
             n = await _tick_once()
             if n:
-                logger.info("[主动性] 本轮主动联系 %d 人", n)
+                logger.info("[主动性] 本轮主动联系 {} 人", n)
         except Exception as e:
-            logger.warning("[主动性] 循环异常: %s", e)
+            logger.warning("[主动性] 循环异常: {}", e)
         await asyncio.sleep(_CHECK_INTERVAL_SEC)
 
 
@@ -310,6 +335,10 @@ async def poll_for(user_id: str) -> str | None:
     与后台 loop 的区别：这是「拉」模式，由前端在打开窗口/定时轮询时调用，
     适合 Electron 桌面端这种有明确前台窗口的场景。返回消息文本或 None。
     """
+    from .reset import reset_epoch, reset_in_progress
+    if reset_in_progress():
+        return None
+    epoch = reset_epoch()
     user = db.get_user(user_id)
     if not user:
         return None
@@ -324,15 +353,22 @@ async def poll_for(user_id: str) -> str | None:
     if last is not None and time.time() - last < _IDLE_HOURS * 3600:
         return None
     text = await generate_proactive_message(user_id)
+    from .reset import epoch_is_current
+    if not epoch_is_current(epoch):
+        return None
     if text:
+        if not await _persist_proactive(user_id, text, epoch=epoch):
+            return None
+        if not epoch_is_current(epoch):
+            return None
         _mark_proactive(user_id)
-        await _persist_proactive(user_id, text)
     return text
 
 
 # ---- 主动归档建议（会话过长时，菟菚主动提醒归档，而非擅自清空）----
 
 _ARCHIVE_THRESHOLD = 40      # 当前会话消息数达到该值时提醒归档
+_ARCHIVE_IDLE_MIN = 15       # 距最后一条真实聊天 ≥ 该分钟数才提醒归档（避免正聊天时插话）
 _ARCHIVE_SUGGEST_KEY = "initiative:archive_suggest"  # kv 去重键
 
 
@@ -383,7 +419,7 @@ async def _generate_archive_suggest(user_id: str) -> str | None:
         text = await chat(msgs, max_tokens=100, temperature=0.85)
         return text.strip()[:200] or None
     except Exception as e:
-        logger.warning("[主动性] 归档建议生成失败: %s", e)
+        logger.warning("[主动性] 归档建议生成失败: {}", e)
         return None
 
 
@@ -392,7 +428,15 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
 
     返回投递的消息文本（None = 无需提醒或投递失败）。采用「建议式」而非
     自动归档：擅自清空当前对话可能让用户丢失上下文，提醒更稳妥。
+
+    「别打扰正在聊的人」：即使会话已 ≥ 阈值，若用户最近还在聊天
+    （距最后一条真实消息 < _ARCHIVE_IDLE_MIN 分钟），也不提醒——
+    归档建议是「你歇下来时」的轻提醒，不该在对方正聊得热络时硬插。
     """
+    # 先看是否真的「空闲」：正在聊/刚聊过 → 闭嘴（即使消息数已达阈值）
+    last = _last_chat_ts(user_id)
+    if last is not None and time.time() - last < _ARCHIVE_IDLE_MIN * 60:
+        return None
     try:
         from ..session import store as _store
 
@@ -406,8 +450,9 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
     text = await _generate_archive_suggest(user_id)
     if not text:
         return None
+    if not await enqueue_proactive(user_id, text):
+        return None
     _mark_archive_suggested(user_id)
-    await enqueue_proactive(user_id, text)
     return text
 
 
@@ -440,6 +485,10 @@ async def sse_event_stream(user_id: str):
             try:
                 # 等待订阅推送（后台入队会 put 进来），超时后做心跳/队列探测
                 text = await asyncio.wait_for(q.get(), timeout=1.0)
+                # 入队同时写了持久化 pending。实时队列已经投递成功时，仅在内容仍
+                # 匹配的情况下清除 pending，避免 10 秒兜底轮询把同一条再发一遍。
+                if kv_get(user_id, _PENDING_KEY) == text:
+                    kv_del(user_id, _PENDING_KEY)
                 yield f"event: initiative\ndata: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
                 continue
             except asyncio.TimeoutError:

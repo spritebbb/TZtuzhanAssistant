@@ -41,7 +41,13 @@ _PERCEPTION_SYSTEM = (
     '  "dismiss": 布尔，用户是否在轻视/敷衍/不尊重菟菚\n'
     "}\n\n"
     "判断要贴合菟菚的性格：她坚强、有尊严、不吃套路。对方善意玩笑用腹黑化解，恶意挑衅才真生气；"
-    "过早表白会让她反感（扣分），真诚关心会让她心里一暖（加分）。"
+    "过早表白会让她反感（扣分），真诚关心会让她心里一暖（加分）。\n\n"
+    "【重要：判定从严，避免误伤】你们是关系熟络的网友/朋友，对方的日常说话是口语化的：\n"
+    "  - 好友式吐槽、调侃、玩笑（如\"你小子\"\"存着玩吧\"\"你这人真是\"）绝不是冒犯或轻视，不算 dismiss/abuse，delta 取 0；\n"
+    "  - 分享见闻/八卦/趣事/聊生活（如\"听说有人做了件厉害的事\"\"我群里吃了个瓜\"）是正向或中性互动，不算负面；\n"
+    "  - 仅当出现明确的恶意攻击、羞辱、贬低人格、命令式侮辱（骂人脏话/人身攻击/恶意贬低菟菚）才算 abuse，才给明显负 delta；\n"
+    "  - 拿不准、无明显恶意、只是有点随意时，宁可按 0（中性），也不要给负分。\n"
+    "affection_delta 默认应偏向 0 或正，除非真的有冒犯实锤。"
 )
 
 # 感知超时与最大 token
@@ -93,6 +99,38 @@ def _normalize(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _debias_negatives(perc: dict[str, Any], text: str) -> dict[str, Any]:
+    """削掉感知模型的「负面误判」，防止好感被中性/调侃对话无谓扣分。
+
+    背景：感知用逐句 LLM（当前 Qwen3-8B）判断情绪，缺对话上下文，容易把好友式
+    口语（"你小子""存着玩吧""听说有人搓了卫星"）误判成被轻视/被冒犯，给出负分，
+    导致用户正常聊天好感却一路往下掉（已实测复现 -5/-2/-2 三连误判）。
+
+    仲裁原则：以关键词脏话检测 check_abuse 作为「是否真骂」的实锤——
+      - 命中（真含脏话/人身攻击）→ 保留感知原始负分（这才是真该扣的）；
+      - 未命中 → 判定为高概率误判：
+          · 仅「被轻视/敷衍」等轻度负（非 abuse）→ 归 0（极可能是玩笑/随口话）；
+          · 被判 abuse 但无脏话实锤 → 压到 -1（保留最低惩戒，防真阴阳怪气被无视），
+            并清掉情绪冲击（避免把误判写成情绪记忆污染长期档案）。
+    正向/中性不干预。仅作用于语义成功路径（_fallback_rule 已有自己的降级映射）。
+    """
+    if perc.get("affection_delta", 0) >= 0:
+        return perc
+    try:
+        from . import affection
+        if affection.check_abuse(text):  # 真脏话实锤 → 不干预，保留原始扣分
+            return perc
+    except Exception:
+        pass
+    if perc.get("abuse"):
+        perc["affection_delta"] = -1   # 被当辱骂但没脏话 → 最低惩戒
+    else:
+        perc["affection_delta"] = 0    # 仅轻视/敷衍等 → 视为玩笑/随口话，不扣
+    perc["emotional_hit"] = ""         # 清掉误判的情绪冲击，避免污染情绪记忆/档案
+    perc["hit_weight"] = 0.0
+    return perc
+
+
 async def perceive(text: str, *, mock: bool = False) -> dict[str, Any]:
     """对用户消息做 LLM 语义感知，返回规整后的感知结果 dict。
 
@@ -117,9 +155,9 @@ async def perceive(text: str, *, mock: bool = False) -> dict[str, Any]:
         )
         result = _parse_json(raw)
         if result is None:
-            logger.warning("[perception] LLM 输出非 JSON，降级关键词规则: %r", raw[:80])
+            logger.warning("[perception] LLM 输出非 JSON，降级关键词规则: {!r}", raw[:80])
             return _fallback_rule(text)
-        return _normalize(result)
+        return _debias_negatives(_normalize(result), text)
     except Exception:
         # LLM 不可用（无 key / 网络失败 / 超时）→ 降级，绝不阻塞对话
         logger.debug("[perception] LLM 感知失败，降级关键词规则")

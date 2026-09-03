@@ -33,7 +33,11 @@ def _memory_status() -> dict:
         return {
             "vector_enabled": bool(stats.get("enabled")),
             "vector_count": sum(v for k, v in stats.items() if k != "enabled" and isinstance(v, int)),
-            "embed_mode": emb.mode(),
+            # 状态接口绝不能同步触发模型下载；预热由 app startup 的后台任务负责。
+            "embed_mode": (
+                f"model:{emb.current_model()}" if emb.is_loaded()
+                else ("hash" if config.memory_embed_force else "warming")
+            ),
             "mem0": bool(config.memory_mem0),
         }
     except Exception:
@@ -45,6 +49,8 @@ async def api_meta(session_id: str = ""):
     """工具开关状态 + 完整工具清单 + 基本信息 + 心情。session_id 可选：传入时按会话隔离用户身份。"""
     from ..api.chat import _user_id
     from ..core.search import last_error as search_last_error
+
+    from ..core.affection import display as affection_display
 
     uid = _user_id(session_id) if session_id else "assistant-main"
     mood_val, mood_label = current_mood(uid, city=config.mood_city)
@@ -67,4 +73,5 @@ async def api_meta(session_id: str = ""):
         "search_last_error": search_last_error(),
         "tool_list": [t.model_dump() for t in ToolRegistry.list()],
         "mood": {"value": mood_val, "label": mood_label, "emoji": mood_emoji},
+        "affection": affection_display(uid),
     }

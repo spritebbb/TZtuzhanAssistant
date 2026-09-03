@@ -32,6 +32,20 @@ DANGER_HIGH = "high"      # 高风险（删除/覆盖/命令）
 DANGER_CRITICAL = "critical"  # 直接拒绝，不弹确认
 
 
+class ToolFailure(str):
+    """工具的预期失败结果。
+
+    工具函数过去只能返回字符串，导致“路径不允许/命令失败”等结果也被统一包装为
+    ``ToolResult(ok=True)``。保留 ``str`` 子类可兼容现有工具签名和文本拼接，同时
+    让执行管线可靠地区分成功输出与预期失败。
+    """
+
+
+def tool_failure(message: str) -> ToolFailure:
+    """构造一个可由 :class:`FunctionTool` 识别的失败结果。"""
+    return ToolFailure(message)
+
+
 def compress_text(text: str, max_chars: int = 4000) -> str:
     """结果压缩：超长输出保留头尾 + 中间摘要提示，避免撑爆上下文。"""
     if not text:
@@ -93,17 +107,20 @@ class FunctionTool:
                 output = await asyncio.to_thread(
                     lambda: cur_ctx.run(self.func, **args)
                 )
+            failed = isinstance(output, ToolFailure)
             output = str(output)
             if self.max_output_chars and len(output) > self.max_output_chars:
                 output = compress_text(output, self.max_output_chars)
+            if failed:
+                return ToolResult(ok=False, tool=self.name, error=output, elapsed_ms=ms(t0))
             return ToolResult(ok=True, tool=self.name, output=output, elapsed_ms=ms(t0))
         except TypeError as e:
             # 只把"参数绑定"类 TypeError 当参数错误返回（缺参/多参/未知关键字）；
-            # 工具函数内部自己抛出的 TypeError（如对 None 调用方法）是真实 bug，
-            # 按普通异常透传，避免误导性"参数错误"文案掩盖代码缺陷
+            # 工具函数内部的 TypeError 也必须归一化成失败结果；若继续抛出，会越过
+            # ToolResult/审计管线并中断整轮对话。仅文案上区分绑定错误和实现错误。
             if _is_binding_error(e):
                 return ToolResult(ok=False, tool=self.name, error=f"参数错误: {e}", elapsed_ms=ms(t0))
-            raise
+            return ToolResult(ok=False, tool=self.name, error=f"TypeError: {e}", elapsed_ms=ms(t0))
         except Exception as e:
             return ToolResult(ok=False, tool=self.name, error=f"{type(e).__name__}: {e}", elapsed_ms=ms(t0))
 
@@ -253,7 +270,7 @@ class ToolRegistry:
         if tool.danger_level == DANGER_CRITICAL:
             from .audit import log_tool_call
             log_tool_call(tool=name, args=args, confirmed="blocked", ok=False,
-                          result="", error="危险操作被策略拒绝", user=user)
+                          elapsed_ms=ms(t0), result="", error="危险操作被策略拒绝", user=user)
             return ToolResult(ok=False, tool=name, error="该操作被安全策略拒绝，无法执行", confirmed="blocked",
                               elapsed_ms=ms(t0))
 
@@ -272,7 +289,7 @@ class ToolRegistry:
                 from .audit import log_tool_call
                 reason = "用户拒绝了该操作" if confirmed == "deny" else "操作被安全策略拒绝"
                 log_tool_call(tool=name, args=args, confirmed=confirmed, ok=False,
-                              result="", error=reason, user=user)
+                              elapsed_ms=ms(t0), result="", error=reason, user=user)
                 return ToolResult(ok=False, tool=name, error=reason, confirmed=confirmed,
                                   elapsed_ms=ms(t0))
 
@@ -283,5 +300,6 @@ class ToolRegistry:
         # 4) 审计
         from .audit import log_tool_call
         log_tool_call(tool=name, args=args, confirmed=confirmed, ok=result.ok,
+                      elapsed_ms=result.elapsed_ms,
                       result=result.output, error=result.error, user=user)
         return result

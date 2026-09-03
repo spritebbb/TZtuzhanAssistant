@@ -1,81 +1,73 @@
 $ErrorActionPreference = 'Stop'
 
-# ---------------------------------------------------------------
-#  Build the one-click deployment package for Tuzhan Assistant.
-#  Usage:  powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1
-#  Output: deploy\TZtuzhanAssistant-Deploy-v2.0.0\  +  .zip
-#
-#  All launcher/init files and docs live in scripts/deploy_assets/ and are
-#  copied verbatim into the package root, so the build script stays ASCII.
-# ---------------------------------------------------------------
-
+# Rebuild both deterministic one-click packages from the current source tree.
 $src = Split-Path -Parent $PSScriptRoot
 $outRoot = Join-Path $src 'deploy'
-$name = 'TZtuzhanAssistant-Deploy-v2.0.0'
-$dir = Join-Path $outRoot $name
-$zip = Join-Path $outRoot ($name + '.zip')
+$resolvedSource = [IO.Path]::GetFullPath($src)
+$resolvedOutput = [IO.Path]::GetFullPath($outRoot)
+if (-not $resolvedOutput.StartsWith($resolvedSource + [IO.Path]::DirectorySeparatorChar)) {
+    throw "unsafe deploy output path: $resolvedOutput"
+}
 
-Write-Host "[deploy] source: $src"
-Write-Host "[deploy] output: $dir"
+$fullSuffix = ([string][char]0x5927) + ([char]0x676F) + ([char]0x7248)
+$packages = @(
+    @{ Name = 'TZtuzhanAssistant-Deploy-v2.0.0'; Full = $false },
+    @{ Name = ('TZtuzhanAssistant-Deploy-Full-v2.0.0-' + $fullSuffix); Full = $true }
+)
 
-if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
-if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
-New-Item -ItemType Directory -Path $dir -Force | Out-Null
-
-function Copy-Tree($rel) {
-    $s = Join-Path $src $rel
-    $d = Join-Path $dir $rel
-    if (-not (Test-Path -LiteralPath $s)) {
-        throw "source path missing: $s"
+function Build-Package([string]$name, [bool]$full) {
+    $dir = Join-Path $outRoot $name
+    $zip = Join-Path $outRoot ($name + '.zip')
+    $resolvedDir = [IO.Path]::GetFullPath($dir)
+    $resolvedZip = [IO.Path]::GetFullPath($zip)
+    if (-not $resolvedDir.StartsWith($resolvedOutput + [IO.Path]::DirectorySeparatorChar) -or
+        -not $resolvedZip.StartsWith($resolvedOutput + [IO.Path]::DirectorySeparatorChar)) {
+        throw "unsafe package path: $name"
     }
-    New-Item -ItemType Directory -Path $d -Force | Out-Null
-    # 'data' is runtime data (db/logs/screenshots) and must never ship
-    robocopy $s $d /E /XD __pycache__ .pytest_cache .git node_modules data /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed for $rel (exit $LASTEXITCODE)"
+
+    Write-Host "[deploy] rebuilding: $name"
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+
+    foreach ($rel in @('backend', 'plugins', 'skills', 'assets', 'frontend/dist')) {
+        $sourcePath = Join-Path $src $rel
+        $destPath = Join-Path $dir $rel
+        if (-not (Test-Path -LiteralPath $sourcePath)) { throw "source path missing: $sourcePath" }
+        New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+        robocopy $sourcePath $destPath /E /XD __pycache__ .pytest_cache .git node_modules data /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy failed for $rel (exit $LASTEXITCODE)" }
+        $global:LASTEXITCODE = 0
     }
-    $global:LASTEXITCODE = 0
+
+    $persona = Get-ChildItem -LiteralPath $src -File -Filter 'persona-*.md' | Select-Object -First 1
+    if (-not $persona) { throw 'persona markdown file not found' }
+    Copy-Item -LiteralPath $persona.FullName -Destination $dir
+
+    Get-Content -LiteralPath (Join-Path $src 'requirements.txt') -Encoding UTF8 |
+        Where-Object { $_ -notmatch '^\s*(pytest|pytest-asyncio)' -and $_.Trim() -ne '' } |
+        Set-Content -LiteralPath (Join-Path $dir 'requirements.txt') -Encoding UTF8
+
+    Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'deploy_assets') -File -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $dir
+    }
+
+    if ($full) {
+        $envPath = Join-Path $dir '.env.example'
+        $envText = Get-Content -LiteralPath $envPath -Raw -Encoding UTF8
+        $envText = $envText.Replace('MEMORY_EMBED_MODEL=BAAI/bge-small-zh-v1.5', 'MEMORY_EMBED_MODEL=BAAI/bge-m3')
+        Set-Content -LiteralPath $envPath -Value $envText -Encoding UTF8
+    }
+
+    Compress-Archive -Path $dir -DestinationPath $zip -Force
+    $sizeMb = [math]::Round((Get-ChildItem -LiteralPath $dir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
+    $zipMb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
+    Write-Host "[deploy] folder: $dir ($sizeMb MB)"
+    Write-Host "[deploy] zip:    $zip ($zipMb MB)"
 }
 
-Write-Host "[deploy] copying backend..."
-Copy-Tree 'backend'
-Write-Host "[deploy] copying plugins..."
-Copy-Tree 'plugins'
-Write-Host "[deploy] copying skills..."
-Copy-Tree 'skills'
-Write-Host "[deploy] copying assets..."
-Copy-Tree 'assets'
-
-Write-Host "[deploy] copying prebuilt frontend..."
-Copy-Tree 'frontend/dist'
-
-# ---- persona (locate by pattern: file name contains non-ASCII) ----
-$persona = Get-ChildItem -LiteralPath $src -File -Filter 'persona-*.md' | Select-Object -First 1
-if (-not $persona) {
-    throw 'persona markdown file not found'
-}
-Copy-Item -LiteralPath $persona.FullName -Destination $dir
-
-# ---- runtime requirements (drop test-only deps) ----
-$req = Join-Path $src 'requirements.txt'
-$dstReq = Join-Path $dir 'requirements.txt'
-Get-Content -LiteralPath $req -Encoding UTF8 |
-    Where-Object { $_ -notmatch '^\s*(pytest|pytest-asyncio)' -and $_.Trim() -ne '' } |
-    Set-Content -LiteralPath $dstReq -Encoding UTF8
-
-# ---- deploy_assets: docs / env template / launcher bats / init script ----
-Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'deploy_assets') -File | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination $dir
+foreach ($package in $packages) {
+    Build-Package -name $package.Name -full $package.Full
 }
 
-# ---- zip ----
-Write-Host "[deploy] creating zip..."
-Compress-Archive -Path $dir -DestinationPath $zip -Force
-
-$sizeMb = [math]::Round((Get-ChildItem -LiteralPath $dir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
-$zipMb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
-
-Write-Host ""
-Write-Host "[deploy] done."
-Write-Host "[deploy] folder: $dir  (${sizeMb} MB)"
-Write-Host "[deploy] zip:    $zip  (${zipMb} MB)"
+Write-Host '[deploy] both packages completed.'
