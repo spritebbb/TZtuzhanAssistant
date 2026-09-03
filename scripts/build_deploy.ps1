@@ -1,14 +1,20 @@
+﻿param(
+    # 全量版：默认 embedding 模型改为 BAAI/bge-m3（约 1.2GB，首次启动自动下载，语义检索效果最好）
+    [switch]$Full
+)
+
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------
 #  Build the one-click deployment package for Tuzhan Assistant.
-#  Usage:  powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1
-#  Output: deploy\TZtuzhanAssistant-Deploy-v2.0.0\  +  .zip
+#  Usage:  powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1           # 轻量版（bge-small-zh-v1.5）
+#          powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1 -Full     # 全量版（bge-m3）
+#  Output: deploy\TZtuzhanAssistant-Deploy[-Full]-v2.0.0\  +  .zip
 # ---------------------------------------------------------------
 
 $src = Split-Path -Parent $PSScriptRoot
 $outRoot = Join-Path $src 'deploy'
-$name = 'TZtuzhanAssistant-Deploy-v2.0.0'
+$name = if ($Full) { 'TZtuzhanAssistant-Deploy-Full-v2.0.0-大杯版' } else { 'TZtuzhanAssistant-Deploy-v2.0.0' }
 $dir = Join-Path $outRoot $name
 $zip = Join-Path $outRoot ($name + '.zip')
 
@@ -64,6 +70,19 @@ Get-Content -LiteralPath $req -Encoding UTF8 |
 # ---- deployment docs / env template (copy every asset file) ----
 Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'deploy_assets') -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $dir
+}
+
+# ---- full edition: switch default embedding model to bge-m3 ----
+if ($Full) {
+    $envPath = Join-Path $dir '.env.example'
+    $t = Get-Content -LiteralPath $envPath -Raw -Encoding UTF8
+    $t = $t.Replace('# 部署包默认用更小的 bge-small-zh-v1.5，减少首次下载体积；',
+                    '# 全量版默认 BAAI/bge-m3（约 1.2GB，首次启动自动下载，中文语义检索效果最好）；')
+    $t = $t.Replace('# 想要更好中文语义检索可改成 BAAI/bge-m3，或设 MEMORY_EMBED_FORCE=1 走哈希回退。',
+                    '# 想减小下载体积可改回 BAAI/bge-small-zh-v1.5（约 100MB），或设 MEMORY_EMBED_FORCE=1 走哈希回退。')
+    $t = $t.Replace('MEMORY_EMBED_MODEL=BAAI/bge-small-zh-v1.5', 'MEMORY_EMBED_MODEL=BAAI/bge-m3')
+    Set-Content -LiteralPath $envPath -Value $t -Encoding UTF8
+    Write-Host "[deploy] full edition: MEMORY_EMBED_MODEL -> BAAI/bge-m3"
 }
 
 # ---- ASCII launcher scripts ----
