@@ -182,8 +182,3 @@ persona-菟菚.md               # 人格源文件
 | `HF_ENDPOINT` | | HuggingFace 镜像（默认 hf-mirror.com，国内友好） |
 | `AGENT_REMOTE_TOKEN` | | 受控端点鉴权 token（非回环来源必填） |
 | `AGENT_CODEX_*` / `AGENT_DSH_*` | | 外部 Agent 桥配置（Codex CLI / DSH） |
-
-## 从旧版迁移
-
-旧版 QQ bot 位于 `D:\DSH\TZtuzhan\`（NoneBot2 + NapCat），不再维护。
-本仓库 `TZtuzhanAssistant` 是完全独立的 Web/桌面版。
