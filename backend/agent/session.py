@@ -58,6 +58,10 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # 与 store.py / userdb.py 对齐：设置 busy_timeout，避免 run_task（后台线程）
+    # 与 cancel_task / confirm_step（HTTP 请求）独立连接并发读写 WAL 单写者库时
+    # 直接撞 "database is locked"，而非短暂等待重试。
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -185,6 +189,26 @@ async def create_task(user_id: str, objective: str) -> AgentTask:
 
 # ---- 执行 ----
 
+def _claim_running(task_id: str) -> bool:
+    """原子抢占任务执行权：仅当 status=='planned' 时才置为 running。
+
+    用单条 UPDATE ... WHERE id=? AND status='planned' 把「检查→置 running」
+    合并成原子操作，并用 rowcount==1 判定抢占是否成功，避免两次 POST /run
+    并发通过「先读 status 再写 running」的竞态导致同一任务被执行两遍。
+    """
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE agent_tasks SET status='running', updated_at=? "
+            "WHERE id=? AND status='planned'",
+            (time.time(), task_id),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
 async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentTask:
     """执行任务：在计划上下文里让 LLM 自主调用工具逐步完成。
 
@@ -194,13 +218,12 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
     task = _load(task_id)
     if task is None:
         raise ValueError(f"任务不存在: {task_id}")
-    if task.status in ("running", "done"):
+    if task.status in ("running", "done", "cancelled"):
         return task
-    if task.status == "cancelled":
-        return task
-    task.status = "running"
-    task.updated_at = time.time()
-    _save(task)
+    # 原子抢占执行权：两次并发 /run 只会有一个 rowcount==1 成功，另一个读到
+    # 最新状态（已被置 running / 或已 done / cancelled）直接返回，不重复执行。
+    if not _claim_running(task_id):
+        return _load(task_id)
 
     try:
         # 组装任务上下文：人格 + 目标 + 计划 + 当前进度

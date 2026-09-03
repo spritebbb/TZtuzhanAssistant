@@ -333,6 +333,7 @@ async def poll_for(user_id: str) -> str | None:
 # ---- 主动归档建议（会话过长时，菟菚主动提醒归档，而非擅自清空）----
 
 _ARCHIVE_THRESHOLD = 40      # 当前会话消息数达到该值时提醒归档
+_ARCHIVE_IDLE_MIN = 15       # 距最后一条真实聊天 ≥ 该分钟数才提醒归档（避免正聊天时插话）
 _ARCHIVE_SUGGEST_KEY = "initiative:archive_suggest"  # kv 去重键
 
 
@@ -392,7 +393,15 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
 
     返回投递的消息文本（None = 无需提醒或投递失败）。采用「建议式」而非
     自动归档：擅自清空当前对话可能让用户丢失上下文，提醒更稳妥。
+
+    「别打扰正在聊的人」：即使会话已 ≥ 阈值，若用户最近还在聊天
+    （距最后一条真实消息 < _ARCHIVE_IDLE_MIN 分钟），也不提醒——
+    归档建议是「你歇下来时」的轻提醒，不该在对方正聊得热络时硬插。
     """
+    # 先看是否真的「空闲」：正在聊/刚聊过 → 闭嘴（即使消息数已达阈值）
+    last = _last_chat_ts(user_id)
+    if last is not None and time.time() - last < _ARCHIVE_IDLE_MIN * 60:
+        return None
     try:
         from ..session import store as _store
 

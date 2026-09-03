@@ -21,18 +21,26 @@ import asyncio
 import json
 import os
 import sys
+import time
 import urllib.parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 测试环境收敛：embedding 走哈希（不下载模型）、关 Mem0/画像后台、关搜索与天气
-# （必须在首次导入 backend.core.config 之前设置）
-os.environ.setdefault("MEMORY_EMBED_FORCE", "1")
-os.environ.setdefault("MEMORY_MEM0", "0")
-os.environ.setdefault("MEMORY_V2", "0")
-os.environ.setdefault("MOOD_CITY", "")
-os.environ.setdefault("SEARCH_ENABLED", "0")
+# 测试环境收敛：embedding 走哈希（不下载模型）、关 Mem0/画像后台、关搜索与天气。
+# 用显式赋值（而非 setdefault）确保覆盖父进程/CI 可能继承的同名变量，避免
+# "旧版检索"路径被错误短路。本脚本以独立子进程运行，环境变量不会泄漏到其它测试。
+os.environ["MEMORY_EMBED_FORCE"] = "1"
+os.environ["MEMORY_MEM0"] = "0"
+os.environ["MEMORY_V2"] = "0"
+os.environ["MOOD_CITY"] = ""
+os.environ["SEARCH_ENABLED"] = "0"
+
+# 隔离数据目录：把 DB/审计日志/向量库重定向到临时目录，不触碰真实 data/。
+import tempfile
+
+_TEST_TMP = Path(tempfile.mkdtemp(prefix="tz_http_test_"))
+_TEST_TMP.mkdir(parents=True, exist_ok=True)
 
 from fastapi.testclient import TestClient
 
@@ -45,6 +53,23 @@ config.search_enabled = False
 config.memory_v2 = False
 config.memory_mem0 = False
 config.memory_embed_force = True
+
+# 把 DB/审计日志落地路径重定向到临时目录（这些模块级变量在 import 期已捕获路径，
+# 需直接补丁）。注意：不能改全局 config.data_dir——它被 mood_rules 等模块在
+# import 期 snapshot，改动会污染后续收集的其它测试（test_mood_rules 写/读
+# mood_rules.json 路径不一致、test_tools_integration 的临时目录落到系统 Temp
+# 被 write_file 白名单拒绝，都是这个全局污染导致的）。
+import backend.session.store as _session_store
+import backend.tools.audit as _audit
+import backend.agent.session as _agent_session
+
+_session_store._DB = _TEST_TMP / "sessions.db"
+_audit._LOG_PATH = _TEST_TMP / "tool_log.jsonl"
+_agent_session._DB = _TEST_TMP / "agent_tasks.db"
+# 重定向 _DB 后必须重建表：agent_session 的 _init() 在模块 import 末尾已用旧
+# 路径建过表，指向临时目录后该库是空的，需要补一次 _init() 否则报
+# "no such table: agent_tasks"。
+_agent_session._init()
 
 AGENT_USER = "test-http-agent"
 
@@ -74,15 +99,20 @@ def form_body(**fields: str) -> str:
 # ---- /api/chat SSE ----
 
 def test_chat_sse_frame_contract() -> None:
-    """复刻前端 streamChat 的完整帧契约：session_id → confirm_request →
+    """复刻前端 streamChat 的完整帧契约：confirm_request → tool →
     piece → reset → image_url → piece → done；并验证确认推送器已注入
-    SSE 上下文（current_sse_push 接线）。"""
+    SSE 上下文（current_sse_push 接线）。
+
+    对齐 backend/api/chat.py 的 SSE 生成器真实产出帧：process 现已新增
+    progress_cb，工具循环进展以 tool 帧透传（前端 chat.ts/ChatView.vue 已处理）；
+    会话 id 由客户端在请求里带，SSE 流不回传 session_id 帧，故断言不含之。
+    """
     import backend.api.chat as chat_mod
 
     orig_process = chat_mod.process
 
     async def fake_process(user_id, text, *, mock=False, merged_msg=False,
-                           stream_cb=None, image_cb=None):
+                           stream_cb=None, image_cb=None, progress_cb=None):
         from backend.tools.confirm import current_sse_push
 
         push = current_sse_push.get()
@@ -91,6 +121,11 @@ def test_chat_sse_frame_contract() -> None:
         await push({"type": "confirm_request", "request_id": "req-x",
                     "tool": "dsh_run", "args": {"task": "x"}, "danger": "high",
                     "message": "要派发外部任务", "timeout": 60})
+        # 工具循环进度帧（前端气泡显示「正在思考/调用 XX」），对应 process 的
+        # progress_cb 参数；未提供时跳过以兼容旧桩
+        if progress_cb is not None:
+            await progress_cb({"type": "tool", "tool": "dsh_run",
+                               "status": "running", "message": "正在执行任务"})
         await stream_cb("你")
         await stream_cb("\x00RESET\x00")   # 重复回复重写：前端清空气泡
         await image_cb("data/imgs/x.png")  # 生图完成：前端渲染 <img>
@@ -107,32 +142,37 @@ def test_chat_sse_frame_contract() -> None:
             keys = []
             for f in frames:
                 keys.extend(f.keys())
-            assert keys == ["session_id", "confirm_request", "piece", "reset",
+            # 真实帧序列（chat.py SSE 生成器实际产出，无 session_id 帧）
+            assert keys == ["confirm_request", "tool", "piece", "reset",
                             "image_url", "piece", "done"], keys
-            sid = frames[0]["session_id"]
-            assert frames[1]["confirm_request"]["request_id"] == "req-x"
+            assert frames[0]["confirm_request"]["request_id"] == "req-x"
+            assert frames[1]["tool"]["tool"] == "dsh_run"
             assert frames[2]["piece"] == "你"
             assert frames[3] == {"reset": True}
             assert frames[4]["image_url"] == "/api/images/x.png"
             assert frames[5]["piece"] == "好"
             assert frames[6]["done"] == "最终回复"
 
-            # done 之后消息已持久化（user + bot）
+            # done 之后消息已持久化到固定会话 'current'（user + bot）
+            # 单一会话模式下会话 id 恒为 'current'，且无 DELETE 端点，
+            # 本测试已将 session DB 重定向到临时目录，子进程退出即自动清理。
+            sid = "current"
             msgs = client.get(f"/api/sessions/{sid}").json()
             roles = [m["role"] for m in msgs]
             assert roles == ["user", "bot"], msgs
             assert msgs[0]["content"] == "你好"
             assert msgs[1]["content"] == "最终回复"
-            # 清理测试会话（顺带验证 DELETE 端点）
-            assert client.delete(f"/api/sessions/{sid}").json()["ok"] is True
-            assert client.get(f"/api/sessions/{sid}").status_code == 404
-        print("[OK] chat SSE：帧契约 + current_sse_push 接线 + 消息持久化 + 会话删除")
+        print("[OK] chat SSE：帧契约 + current_sse_push 接线 + 消息持久化")
     finally:
         chat_mod.process = orig_process
 
 
 def test_chat_sse_error_frame() -> None:
-    """process 抛异常 → SSE error 帧（前端 onError 显示）。"""
+    """process 抛异常 → SSE error 帧（前端 onError 显示）。
+
+    生产端 intentionally 返回「不泄露内部异常细节」的通用提示（安全约定），
+    因此只校验 error 帧存在且为面向用户的非空字符串，不校验异常类型名。
+    """
     import backend.api.chat as chat_mod
 
     orig_process = chat_mod.process
@@ -147,8 +187,8 @@ def test_chat_sse_error_frame() -> None:
                             headers=FRONTEND_HEADERS)
             frames = parse_sse(r.text)
             assert frames[-1].get("error") is not None, frames
-            assert "RuntimeError" in frames[-1]["error"]
-        print("[OK] chat SSE：process 异常 → error 帧")
+            assert isinstance(frames[-1]["error"], str) and frames[-1]["error"], frames
+        print("[OK] chat SSE：process 异常 → error 帧（通用提示，不泄露内部异常）")
     finally:
         chat_mod.process = orig_process
 
@@ -233,7 +273,7 @@ def test_agent_full_flow_gate_to_done() -> None:
     orig_loop = tool_loop.run_tool_loop
 
     async def fake_loop(messages, call_llm, *, max_loops=2, mock=False,
-                        final_instruction=None, call_native=None):
+                        final_instruction=None, call_native=None, on_progress=None):
         return "任务完成：已查完。"
 
     tool_loop.run_tool_loop = fake_loop

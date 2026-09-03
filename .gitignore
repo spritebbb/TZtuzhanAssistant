@@ -30,3 +30,6 @@ scripts/models/
 assets/hotaru_v1_nohalo.png
 assets/persona_cutout.png
 frontend/ui_*.png
+
+# 内部工作日志（上线前全检/修复轮等临时过程记录）
+deliverables/

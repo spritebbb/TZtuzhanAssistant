@@ -21,6 +21,7 @@ from pathlib import Path
 from backend.core.config import PROJECT_ROOT, config
 from backend.core.log import logger
 from backend.tools.base import ToolRegistry
+from backend.tools.safety import check_cwd
 
 # Codex CLI 候选根目录（实际路径按版本目录自动探测，避免写死版本号）
 _CODEX_BIN_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%\OpenAI\Codex\bin"))
@@ -36,6 +37,33 @@ _DSH_CLI_DEFAULT = Path(
 
 # 当前工作目录（DSH 项目根；可用 DSH_CWD 环境变量覆盖）
 _DSH_CWD = os.getenv("DSH_CWD", os.getenv("DSH_ROOT", str(PROJECT_ROOT.parent)))
+
+# 工作目录越界时追加到工具结果的提示（让用户看见降级发生过）
+_CWD_FALLBACK_NOTE = "（工作目录越界，已限制为项目根）"
+
+
+def _safe_cwd(cwd: str, extra_root: str | None = None) -> tuple[str, bool]:
+    """校验外部桥工作目录，越界则回退项目根。返回 (最终 cwd, 是否回退)。
+
+    确认放行后外部 CLI 等同本机任意代码执行，cwd 必须限定在
+    safety.allowed_roots() 内，避免 AGENT_CODEX_CWD 被配成 C:\\ 之类的宽泛
+    路径后 Codex 在那里落地改动。
+    extra_root 供 DSH 用：DSH 项目根天然在本项目之外（PROJECT_ROOT.parent），
+    只对该桥单独放行，不写进全局白名单——否则会顺带放大 file_ops /
+    run_command 等工具的可操作范围。
+    """
+    ok, _err = check_cwd(cwd)
+    if not ok and extra_root:
+        try:
+            p = Path(cwd).expanduser().resolve()
+            r = Path(extra_root).expanduser().resolve()
+            ok = p == r or p.is_relative_to(r)
+        except (ValueError, OSError):
+            ok = False
+    if ok:
+        return cwd, False
+    logger.warning("外部桥工作目录不在允许范围，已回退项目根：{}", cwd)
+    return str(PROJECT_ROOT), True
 
 
 def _codex_path() -> str:
@@ -124,7 +152,7 @@ async def _codex_run(prompt: str = "") -> str:
     if not Path(codex).exists():
         return f"（Codex CLI 未找到：{codex}。请设置 AGENT_CODEX_PATH 环境变量）"
     profile = config.agent_codex_profile or "deepseek"
-    cwd = config.agent_codex_cwd or str(PROJECT_ROOT)
+    cwd, cwd_fallback = _safe_cwd(config.agent_codex_cwd or str(PROJECT_ROOT))
     timeout = config.agent_codex_timeout
     out_file: Path | None = None
     proc = None
@@ -157,7 +185,8 @@ async def _codex_run(prompt: str = "") -> str:
             if err_clean:
                 label = "（stderr，非任务输出；仅提示，不代表任务结果）"
                 out += f"\n{label}: {err_clean}" if out else f"{label}: {err_clean}"
-        return out or "（Codex 执行完毕，无输出）"
+        out = out or "（Codex 执行完毕，无输出）"
+        return f"{out}\n{_CWD_FALLBACK_NOTE}" if cwd_fallback else out
     except asyncio.TimeoutError:
         if proc is not None:
             try:
@@ -192,12 +221,14 @@ async def _dsh_run(task: str = "") -> str:
         )
     dsh = _dsh_path()
     profile = config.agent_dsh_profile or "headless"
+    # DSH 的固有工作目录在本项目之外，故额外放行 PROJECT_ROOT.parent
+    cwd, cwd_fallback = _safe_cwd(_DSH_CWD, extra_root=str(PROJECT_ROOT.parent))
     try:
         proc = await asyncio.create_subprocess_exec(
             "node", dsh, "--profile", profile, task,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=_DSH_CWD if Path(_DSH_CWD).is_dir() else None,
+            cwd=cwd if Path(cwd).is_dir() else None,
         )
         timeout = int(getattr(config, "agent_dsh_timeout", 120))
         stdout, stderr = await asyncio.wait_for(
@@ -210,7 +241,8 @@ async def _dsh_run(task: str = "") -> str:
             if err_clean:
                 label = "（stderr，非任务输出；仅提示，不代表任务结果）"
                 out += f"\n{label}: {err_clean}" if out else f"{label}: {err_clean}"
-        return out or "（DSH 执行完毕，无输出）"
+        out = out or "（DSH 执行完毕，无输出）"
+        return f"{out}\n{_CWD_FALLBACK_NOTE}" if cwd_fallback else out
     except asyncio.TimeoutError:
         try:
             proc.kill()

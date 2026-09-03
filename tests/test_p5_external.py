@@ -6,6 +6,7 @@ v2：工具已插件化——通过插件系统加载 external 插件（不再�
 import asyncio
 import importlib
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.plugins import loader
 from backend.tools.base import ToolRegistry
 from backend.tools.builtin.register_all import register_all
+from backend.tools import audit as _audit
+
+# 审计日志隔离：codex/dsh 路由测试经 ToolRegistry.execute 会写 data/tool_log.jsonl，
+# 重定向到临时目录，避免污染真实审计日志
+_TEST_TMP = Path(tempfile.mkdtemp(prefix="tz_p5_test_"))
+_audit._LOG_PATH = _TEST_TMP / "tool_log.jsonl"
 
 
 def _load_all_tools() -> None:
@@ -62,21 +69,48 @@ async def test_codex_command_shape() -> None:
 
 
 async def test_codex_run_routes() -> None:
-    """codex_run 工具注册且可路由到真实 CLI。"""
-    r = await ToolRegistry.execute("codex_run", {"prompt": "hi"})
-    # 只要返回了输出（错误提示也算正常路由），工具本身工作
+    """codex_run 工具注册且可正确路由（mock 掉 CLI 子进程，不真调本机 Codex）。
+
+    走完整 ToolRegistry 路由 + 参数传递，但 create_subprocess_exec 被替换为
+    返回固定输出的桩，避免真调本机 Codex CLI 挂起（CI / 无 CLI 环境安全）。
+    """
+    external = _external_module()
+
+    class FakeProc:
+        async def communicate(self, payload=None):
+            return b"mock-codex-ok", b""
+
+    async def fake_exec(*args, **kwargs):
+        return FakeProc()
+
+    with patch.object(external.asyncio, "create_subprocess_exec", new=fake_exec):
+        r = await ToolRegistry.execute("codex_run", {"prompt": "hi"})
+
     assert r.ok
-    text = r.output or ""
-    assert len(text) > 0
-    print(f"[OK] codex_run 路由成功，返回 {len(text)} 字符: {text[:60]!r}")
+    assert "mock-codex-ok" in (r.output or "")
+    print(f"[OK] codex_run 路由成功（mock）：{r.output[:60]!r}")
 
 
 async def test_dsh_run_routes() -> None:
-    """dsh_run 工具注册且可路由到真实 DSH CLI（headless）。"""
-    r = await ToolRegistry.execute("dsh_run", {"task": "只回复 OK 两个字母"})
+    """dsh_run 工具注册且可正确路由（mock 掉 CLI 子进程，不真调本机 DSH）。
+
+    同上：走完整路由，但子进程桩返回固定输出，避免真调本机 DSH CLI 挂起。
+    """
+    external = _external_module()
+
+    class FakeProc:
+        async def communicate(self, payload=None):
+            return b"mock-dsh-ok", b""
+
+    async def fake_exec(*args, **kwargs):
+        return FakeProc()
+
+    with patch.object(external.asyncio, "create_subprocess_exec", new=fake_exec):
+        r = await ToolRegistry.execute("dsh_run", {"task": "只回复 OK 两个字母"})
+
     assert r.ok
-    text = r.output or ""
-    print(f"[OK] dsh_run 路由成功，返回 {len(text)} 字符: {text[:80]!r}")
+    assert "mock-dsh-ok" in (r.output or "")
+    print(f"[OK] dsh_run 路由成功（mock）：{r.output[:60]!r}")
 
 
 async def test_mcp_metadata() -> None:
@@ -110,7 +144,7 @@ async def main() -> None:
     await test_dsh_run_routes()
     await test_mcp_metadata()
     await test_remote_api()
-    print("\n=== P5 外部桥: 4 项全部通过 ===")
+    print("\n=== P5 外部桥: 5 项全部通过 ===")
 
 
 asyncio.run(main())

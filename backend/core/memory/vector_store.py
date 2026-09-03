@@ -19,6 +19,13 @@ from ..log import logger
 _KINDS = {"lm", "facts", "triples", "profile", "topic", "diary", "summary", "sticker", "mem"}
 
 _lock = threading.RLock()
+# 独立锁：串行化对 Chroma PersistentClient（底层 SQLite）的实际读写调用。
+# 之所以不与 _lock 复用：_collection() 内部已持 _lock 返回 collection 对象，
+# 若把 Chroma 调用也放进 _lock 临界区会与 _collection() 的取锁区间重叠，且
+# PersistentClient 的底层 SQLite 在 WAL 模式下仍是单写者，多线程并发 upsert/query
+# 会抛 "database is locked" 甚至损坏索引。这里用独立 RLock 包住 col.* 调用，
+# 既能串行化写入，又不会和「取 collection 对象」的锁区间嵌套死锁（先取对象、再取本锁）。
+_CHROMA_LOCK = threading.RLock()
 _client = None
 _collections: dict[str, object] = {}
 
@@ -104,6 +111,29 @@ def _kid(user_id: str, kind: str, record_id: int) -> str:
     return f"{user_id}|{kind}|{record_id}"
 
 
+# 本模块标志：最近一次写入是否因「collection 维度已锁定且与当前维度不符」被跳过。
+# 由 vector_store.migrate / 外部检测：为 True 时说明 embedding 模型曾以不同维度
+# （哈希 768）抢写过，或模型切换过；触发一次全量重建（migrate 重扫）即可对齐。
+_skip_dim_mismatch = False
+
+
+def _is_dim_mismatch(exc: Exception) -> bool:
+    """判断是否 chroma 的「collection 期望维度 vs 实际维度」不匹配错误。
+
+    collection 底层维度在首次写入时被 Chroma 锁定、无法更改；当 upsert 以其他维度
+    （如 embedding 模型未就绪时走 768 维哈希回退）去写已锁 1024 维的 collection，
+    chroma 抛 InvalidArgumentError，消息含 "expecting embedding with dimension of N,
+    got M"。识别它 → 明确告警 + 全局置标志，而不是当通用"写入失败"噪音吞掉。
+    """
+    global _skip_dim_mismatch
+    text = str(exc)
+    if "expecting embedding with dimension" not in text:
+        return False
+    # 归因到真正的维度 mismatch（模型未就绪哈希回退 / 模型已切换）
+    _skip_dim_mismatch = True
+    return True
+
+
 def add(user_id: str, kind: str, record_id: int, text: str, extra: dict | None = None) -> bool:
     """写入/更新一条向量。成功返回 True，失败返回 False（不阻塞）。"""
     if not text or not text.strip():
@@ -112,31 +142,29 @@ def add(user_id: str, kind: str, record_id: int, text: str, extra: dict | None =
         col = _collection(kind)
         if col is None:
             return False
-        # 维度一致性：模型切换（bge-m3 1024 维 ↔ 哈希 768 维）后若往同一
-        # collection 混写不同维度，查询会整体报错。发现不一致时跳过写入并提示，
-        # 避免污染已有数据（需要重建时清空 data/chroma 目录）。
-        try:
-            from . import embedding as emb
-
-            cur_dim = emb.dim()
-            col_meta = col.metadata or {}
-            meta_dim = col_meta.get("dim")
-            if meta_dim is not None and int(meta_dim) != cur_dim:
-                logger.warning(
-                    "[向量] collection {} 维度 {} 与当前模型维度 {} 不一致，跳过写入；"
-                    "如模型已切换，请清空 data/chroma 重建索引", kind, meta_dim, cur_dim
-                )
-                return False
-            if meta_dim is None:
-                col.modify(metadata={**col_meta, "dim": cur_dim})
-        except Exception:
-            pass
         kid = _kid(user_id, kind, record_id)
         meta = {"user_id": user_id, "kind": kind, "record_id": record_id}
         if extra:
             meta.update(extra)
-        # upsert：id 相同覆盖（保证索引与源表一致）
-        col.upsert(ids=[kid], documents=[text], metadatas=[meta])
+        # upsert：id 相同覆盖（保证索引与源表一致）。
+        # 若 embedding 维度与 collection 已锁定维度不一致（启动竞态期模型未就绪走
+        # 768 维哈希、或模型切换），chroma 抛 InvalidArgumentError；这里单独识别并
+        # 明确告警，避免与其它失败混成一条无信息的「写入失败」日志。
+        # 整段写入加 _CHROMA_LOCK，串行化对 PersistentClient 的写，避免并发 upsert
+        # （如 pipeline 的 _vectorize_memory_async 用 asyncio.gather 并发写两条长期
+        # 记忆）撞 "database is locked"。
+        try:
+            with _CHROMA_LOCK:
+                col.upsert(ids=[kid], documents=[text], metadatas=[meta])
+        except Exception as e:
+            if _is_dim_mismatch(e):
+                logger.warning(
+                    "[向量] collection {} 维度与当前 embedding 不一致，跳过写入 {}；"
+                    "若 embedding 模型刚切换过，请清空 data/chroma 后重启以重建索引",
+                    kind, kid,
+                )
+                return False
+            raise
         return True
     except Exception:
         logger.warning("[向量] 写入失败：{}:{}:{}", user_id, kind, record_id)
@@ -160,13 +188,17 @@ def search(
             if col is None:
                 continue
             try:
-                got = col.query(
-                    query_texts=[query],
-                    n_results=min(top_k * 6, 100),
-                    where={"user_id": user_id},
-                )
+                with _CHROMA_LOCK:
+                    got = col.query(
+                        query_texts=[query],
+                        n_results=min(top_k * 6, 100),
+                        where={"user_id": user_id},
+                    )
             except Exception:
-                got = col.query(query_texts=[query], n_results=min(top_k * 6, 100))
+                # where 过滤缺失 user_id 时（个别 chroma 版本对空 where 报错）兜底重查；
+                # 同样加 _CHROMA_LOCK 串行化。
+                with _CHROMA_LOCK:
+                    got = col.query(query_texts=[query], n_results=min(top_k * 6, 100))
             # Chroma 返回的 ids/distances/documents/metadatas 是嵌套列表
             # [[id1,id2,...]], [[d1,d2,...]], [[doc1,doc2,...]], [[meta1,meta2,...]]
             ids_raw = got.get("ids") or []
@@ -222,7 +254,8 @@ def migrate_user_id(old: str, new: str) -> int:
         if col is None:
             continue
         try:
-            got = col.get(where={"user_id": old})
+            with _CHROMA_LOCK:
+                got = col.get(where={"user_id": old})
         except Exception:
             continue
         ids = got.get("ids") or []
@@ -237,9 +270,13 @@ def migrate_user_id(old: str, new: str) -> int:
             meta = dict(metas[i]) if metas[i] else {}
             meta["user_id"] = new
             try:
-                # upsert 同名新 id 后删除旧 id（Chroma 无 rename，只能删+写）
-                col.upsert(ids=[nid], documents=[docs[i]], metadatas=[meta])
-                col.delete(ids=[oid])
+                # upsert 同名新 id 后删除旧 id（Chroma 无 rename，只能删+写）；
+                # 整段加 _CHROMA_LOCK，保证 get→upsert→delete 这三条调用不被其它
+                # 并发写（add/delete）交错，避免底层 SQLite 写冲突。
+                with _CHROMA_LOCK:
+                    # upsert 同名新 id 后删除旧 id（Chroma 无 rename，只能删+写）
+                    col.upsert(ids=[nid], documents=[docs[i]], metadatas=[meta])
+                    col.delete(ids=[oid])
                 moved += 1
             except Exception:
                 continue
@@ -254,7 +291,8 @@ def delete(user_id: str, kind: str, record_id: int) -> bool:
         col = _collection(kind)
         if col is None:
             return False
-        col.delete(ids=[_kid(user_id, kind, record_id)])
+        with _CHROMA_LOCK:
+            col.delete(ids=[_kid(user_id, kind, record_id)])
         return True
     except Exception:
         return False

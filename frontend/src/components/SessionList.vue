@@ -193,8 +193,8 @@ defineExpose({ load })
     <div v-if="searchMsg && !searchResult.length" class="search-note">{{ searchMsg }}</div>
 
     <!-- 心情卡片 -->
-    <div class="moodcard glass">
-      <div class="moodemoji">{{ mood.emoji }}</div>
+    <div class="moodcard glass" :title="'心情数值：' + mood.value + ' / 100'">
+      <div class="moodnum">{{ mood.value }}</div>
       <div class="moodinfo">
         <div class="moodlabel">心情 · {{ mood.label }}</div>
         <div class="moodbar"><div class="moodfill" :style="{ width: mood.value + '%' }"></div></div>
@@ -385,6 +385,21 @@ defineExpose({ load })
   box-shadow: var(--shadow-sm);
 }
 .moodemoji { font-size: 1.5rem; line-height: 1; }
+.moodnum {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--primary-text);
+  background: radial-gradient(circle at 32% 28%, var(--primary-soft), var(--bg-hover));
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
 .moodinfo { flex: 1; min-width: 0; }
 .moodlabel { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 4px; font-weight: 600; }
 .moodbar { height: 5px; background: var(--bg-hover); border-radius: var(--radius-full); overflow: hidden; }
