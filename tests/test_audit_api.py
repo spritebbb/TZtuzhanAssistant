@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 """验证审计日志查询/过滤/清空 API。"""
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.tools.audit import log_tool_call, query_log, count_log, clear_log
+
+# 隔离审计日志路径：审计是安全特性，测试不得写入真实 data/tool_log.jsonl
+import backend.tools.audit as _audit
+
+_audit._LOG_PATH = Path(tempfile.mkdtemp(prefix="tz_audit_test_")) / "tool_log.jsonl"
 
 
 def main():

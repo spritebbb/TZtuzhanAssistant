@@ -3,12 +3,18 @@
 import asyncio
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.tools.audit import _load_tail, count_log, log_tool_call, query_log
+
+# 隔离审计日志路径：审计是安全特性，测试不得写入真实 data/tool_log.jsonl
+import backend.tools.audit as _audit
+
+_audit._LOG_PATH = Path(tempfile.mkdtemp(prefix="tz_audit_test_")) / "tool_log.jsonl"
 
 
 def test_audit_tail_read():

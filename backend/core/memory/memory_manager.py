@@ -7,7 +7,9 @@
 对外只暴露 Mem0Manager 类，调用方不感知底层实现。
 """
 import json
+import logging
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,6 +23,43 @@ _FALLBACK_IMPORTANCE_CUTOFF = 0.3  # 重要性低于此阈值的记忆优先遗�
 # Mem0 降级策略：连续失败达到阈值才降级；降级后经过冷却期允许自动重建
 _DEGRADE_THRESHOLD = 3
 _DEGRADE_COOLDOWN_SEC = 300.0
+
+# Mem0 及其依赖（sentence-transformers / chroma / huggingface_hub 等）在初始化时
+# 会通过 Python warnings 和 stdlib logging 打印一批无害噪音（方法改名 FutureWarning、
+# chroma 不支持关键字搜索、spaCy 未安装、遥测提示等）。这些与运行正确性无关，
+# 但会污染启动日志。在真正 import mem0 前统一静音，避免影响项目自身的 loguru 日志。
+def _quiet_mem0_noise() -> None:
+    # 1) Python warnings：仅忽略已知无害噪音，不做全局关闭。
+    #    warnings.filterwarnings 的 message 用的是 re.match（从头匹配），故须以 .* 开头
+    _known_noise = (
+        # sentence-transformers：get_sentence_embedding_dimension 改名
+        r".*get_sentence_embedding_dimension.*get_embedding_dimension",
+        # chroma：不支持关键字搜索（仅降级为语义检索，功能仍可用）
+        r".*chroma.*does not support keyword search",
+        # 可选优化组件缺失提示（spaCy），无碍基础功能
+        r".*spaCy is not installed",
+    )
+    for msg in _known_noise:
+        warnings.filterwarnings("ignore", message=msg)
+
+    # 2) stdlib logging：这些库的 WARNING/INFO 无价值，提到 ERROR 级别即不再落到 stderr
+    for name in (
+        "sentence_transformers",
+        "transformers",
+        "huggingface_hub",
+        "tokenizers",
+        "chromadb",
+        "mem0",
+        "httpx",
+        "httpcore",
+        "openai",
+        "urllib3",
+        "PIL",
+    ):
+        try:
+            logging.getLogger(name).setLevel(logging.ERROR)
+        except Exception:
+            pass
 
 
 class Mem0Manager:
@@ -60,6 +99,8 @@ class Mem0Manager:
             # 禁用 Mem0 的 PostHog 遥测（避免每次调用打印噪音日志）
             os.environ.setdefault("POSTHOG_DISABLED", "1")
             os.environ.setdefault("MEM0_TELEMETRY", "False")
+            # 静音 Mem0 依赖链的已知无害噪音（警告/第三方日志）
+            _quiet_mem0_noise()
             from mem0 import Memory
 
             mem0_config = {

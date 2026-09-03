@@ -71,8 +71,15 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
     _state: dict = {"pending_img": None}
+    # 累积流式已推送的文本片段（不含控制标记 \x00...\x00）：供 _cb 追加、_runner 在
+    # 流式中途失败时落库「已生成的部分回复」，避免刷新/归档后这段内容丢失。
+    _partial: list[str] = []
 
     async def _cb(piece: str) -> None:
+        # 控制字符包裹的标记（\x00RESET\x00 / \x00IMAGESTART\x00）只用于前端指令，
+        # 不计入「已生成的回复正文」；真正的文本片段才累积，供流式中途失败时落库。
+        if not (isinstance(piece, str) and piece.startswith("\x00") and piece.endswith("\x00")):
+            _partial.append(piece)
         await q.put(piece)
 
     async def _image_cb(local_path: str) -> None:
@@ -97,6 +104,7 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
             await q.put(("__confirm__", event))
 
         current_sse_push.set(_push_event)
+        # _partial 在 api_chat 作用域定义，_cb 与 _runner 共享（流式片段累积 + 中途失败落库）
         # 总超时：process 内部虽有 LLM/子进程等各环节超时，但 to_thread 内的
         # 同步调用（embedding 下载/DNS 解析等）可能远超单环节超时，这里兜底，
         # 防止客户端断开后后台任务无限累积
@@ -124,8 +132,16 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
             await q.put(("__error__", note))
         except Exception as e:
             logger.exception("[chat] 处理用户消息失败（会话 {}）", session_id)
-            note = f"{type(e).__name__}: {e}"
-            # 同上：错误也落一条 bot 消息，保证每条 user 消息都有对应回复记录
+            # 流式中途失败：把已流式输出、但 process 未成功返回完整回复的「部分文本」
+            # 落库，保证刷新/归档后这段已生成的回复不丢失；内部异常细节只写日志、不外泄。
+            partial = "".join(_partial).strip()
+            if partial:
+                bot_msg = {"role": "bot", "content": partial, "ts": time.time()}
+                if _state.get("pending_img"):
+                    bot_msg["image"] = _state["pending_img"]
+                await append_messages(session_id, [bot_msg])
+            # 面向用户的通用错误提示（不泄露内部异常原文），并作为 error 帧回传。
+            note = "回复生成中断，请重试"
             await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
             await q.put(("__error__", note))
         finally:

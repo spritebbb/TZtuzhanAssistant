@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """第二梯队修复回归：AgentSession 计划步骤级确认 + 审计日志查询 API。"""
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -9,6 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.agent import session
 from backend.agent.session import AgentTask, TaskStep
 from backend.tools.audit import log_tool_call, query_log, count_log, clear_log
+
+# 隔离审计日志路径：审计是安全特性，测试不得清空/污染真实 data/tool_log.jsonl
+import backend.tools.audit as _audit
+
+_audit._LOG_PATH = Path(tempfile.mkdtemp(prefix="tz_audit_test_")) / "tool_log.jsonl"
 
 
 def test_step_confirm():

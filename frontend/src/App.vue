@@ -5,8 +5,8 @@ import ChatView from './components/ChatView.vue'
 import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
-import { ensureBaseUrl } from './api'
-import { CURRENT_SESSION_ID, archiveCurrent } from './api/sessions'
+import { ensureBaseUrl, apiFetch } from './api'
+import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
@@ -17,7 +17,21 @@ const chatReloadKey = ref(0)
 
 // 生成中状态（由 ChatView 上报）：流式生成中禁用归档，避免拆对话
 const generating = ref(false)
-function onStreamingChange(v: boolean) { generating.value = v }
+function onStreamingChange(v: boolean) {
+  generating.value = v
+  // 一条回复流结束（v=false）＝好感度可能刚变动过 → 顺手刷新顶部好感度条
+  if (!v) refreshAffection()
+}
+
+// === 顶部好感度条：从 /api/meta 读取好感度/阶段/羁绊 ===
+const affection = ref({ value: 0, stage: '初识', bond: '', next: '熟悉', next_at: 25, fill: 0 })
+async function refreshAffection() {
+  try {
+    const r = await apiFetch('/api/meta')
+    const d = await r.json()
+    if (d.affection) affection.value = d.affection
+  } catch { /* 好感度拉取失败保留旧值 */ }
+}
 
 // === 主动归档当前对话 ===
 const archiving = ref(false)
@@ -41,10 +55,38 @@ async function archiveNow() {
   }
 }
 
-// === 主题切换（暗色/亮色，默认暗色） ===
+// === 彻底重置（失忆重开）：清空菟菚记忆/好感/昵称/向量 + 当前会话 ===
+const resetOpen = ref(false)   // 确认弹窗
+const resetting = ref(false)   // 重置进行中
+function openResetConfirm() {
+  if (resetting.value || generating.value) return
+  resetOpen.value = true
+}
+function closeResetConfirm() {
+  if (!resetting.value) resetOpen.value = false
+}
+async function doReset() {
+  if (resetting.value) return
+  resetting.value = true
+  try {
+    await resetUser()
+    // 重置成功：侧栏（心情/记忆/归档视图复位）+ 对话区重载到全新空白会话
+    sessionListKey.value += 1
+    chatReloadKey.value += 1
+    currentId.value = CURRENT_SESSION_ID
+    resetOpen.value = false
+    refreshAffection()  // 失忆后好感度归零，刷新顶部条
+  } catch {
+    window.alert?.('重置失败，请稍后重试')
+  } finally {
+    resetting.value = false
+  }
+}
+
 const theme = ref<'dark' | 'light'>('dark')
 const themeStorageKey = 'tztuzhan-theme'
 
+// === 主题切换（暗色/亮色，默认暗色） ===
 function loadTheme() {
   try {
     // 支持 ?theme=light|dark 查询参数显式指定（用于调试/截图验证）
@@ -92,6 +134,7 @@ onMounted(async () => {
   loadTheme()
   applyTheme(theme.value)
   document.addEventListener('keydown', onKeydown)
+  refreshAffection()  // 首屏载入好感度条
 })
 
 onUnmounted(() => {
@@ -154,14 +197,52 @@ onUnmounted(() => {
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
           </button>
+          <button class="icon-btn reset-btn" title="重新开始（让菟菚忘记你）" @click="openResetConfirm">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="1 4 1 10 7 10"/>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+          </button>
         </div>
       </header>
+      <!-- 好感度条：细藤对你的依赖与亲近程度 -->
+      <div class="aff-bar">
+        <svg class="aff-heart" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 21s-6.7-4.4-9.3-8.5C.6 9.2 2.3 5.5 5.7 5.5c2 0 3.4 1.1 4.3 2.5h4c.9-1.4 2.3-2.5 4.3-2.5 3.4 0 5.1 3.7 3 7-2.6 4.1-9.3 8.5-9.3 8.5z"/>
+        </svg>
+        <div class="aff-track">
+          <div class="aff-fill" :style="{ width: Math.min(100, affection.fill) + '%' }"></div>
+        </div>
+        <span class="aff-label">{{ affection.value }} · {{ affection.bond || affection.stage }}</span>
+        <span v-if="affection.next" class="aff-next" :title="'距「' + affection.next + '」还需 ' + (affection.next_at - affection.value) + ' 点'">→ {{ affection.next }} {{ affection.next_at - affection.value }}</span>
+        <span v-else class="aff-next max">♥ 已至圆满</span>
+      </div>
       <ChatView :session-id="currentId" :reload-key="chatReloadKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
 
     <!-- 面板 -->
     <SettingsPanel :show="settingsOpen" @close="closeSettings" />
     <AgentPanel :show="agentOpen" @close="agentOpen = false" />
+
+    <!-- 彻底重置确认弹窗 -->
+    <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
+      <div class="modal reset-modal">
+        <div class="modal-title">重新开始？</div>
+        <div class="modal-body">
+          <p>这会让菟菚<b>忘记你积累的一切</b>：</p>
+          <ul>
+            <li>她对你的好感度、给你的昵称、恋人关系</li>
+            <li>她的记忆、你告诉她的事、共同回忆、向量库</li>
+            <li>当前这段对话的气泡</li>
+          </ul>
+          <p class="muted">回到最开始的「初识」状态。此操作<b>不可撤销</b>（已归档的对话仍保留，可在侧栏查看）。</p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" :disabled="resetting" @click="closeResetConfirm">取消</button>
+          <button class="btn danger" :disabled="resetting" @click="doReset">{{ resetting ? '重置中…' : '确认重置' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -258,4 +339,98 @@ onUnmounted(() => {
   .header { padding: 10px 14px; }
   .header-center .sub { display: none; }
 }
+
+/* 彻底重置按钮：悬停时呈警示色，提示这是危险操作 */
+.reset-btn:hover { color: var(--danger); background: var(--danger-soft); }
+
+/* === 顶部好感度条 === */
+.aff-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 7px 22px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  z-index: 9;
+}
+.aff-heart {
+  color: var(--accent, #e08aa0);
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent, #e08aa0) 60%, transparent));
+}
+.aff-track {
+  flex: 1;
+  min-width: 60px;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.aff-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--accent-light, #f2b8c8), var(--accent, #e07a9a));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent, #e07a9a) 55%, transparent);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.aff-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.aff-next {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.aff-next.max { color: var(--accent, #e07a9a); font-weight: 600; }
+
+@media (max-width: 768px) {
+  .aff-bar { padding: 6px 14px; }
+  .aff-next { display: none; }
+}
+
+/* 重置确认弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: min(420px, 88vw);
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  padding: 20px 22px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+.modal-title { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.modal-body { color: var(--text-dim); font-size: 0.88rem; line-height: 1.7; }
+.modal-body ul { margin: 6px 0 4px; padding-left: 18px; }
+.modal-body .muted { color: var(--text-faint); font-size: 0.8rem; margin-top: 8px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.modal-actions .btn {
+  padding: 7px 16px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--border);
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  background: transparent;
+  color: var(--text-dim);
+}
+.modal-actions .btn:hover { color: var(--text); border-color: var(--primary); }
+.modal-actions .btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.modal-actions .btn.danger:hover { filter: brightness(1.08); }
+.modal-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 </style>

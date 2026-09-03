@@ -46,6 +46,8 @@ async def api_meta(session_id: str = ""):
     from ..api.chat import _user_id
     from ..core.search import last_error as search_last_error
 
+    from ..core.affection import display as affection_display
+
     uid = _user_id(session_id) if session_id else "assistant-main"
     mood_val, mood_label = current_mood(uid, city=config.mood_city)
     # 心情 emoji 映射
@@ -67,4 +69,5 @@ async def api_meta(session_id: str = ""):
         "search_last_error": search_last_error(),
         "tool_list": [t.model_dump() for t in ToolRegistry.list()],
         "mood": {"value": mood_val, "label": mood_label, "emoji": mood_emoji},
+        "affection": affection_display(uid),
     }

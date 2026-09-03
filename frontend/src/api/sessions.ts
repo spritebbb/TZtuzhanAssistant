@@ -36,6 +36,13 @@ export interface ArchiveSearchResult {
   preview: string
 }
 
+/** 彻底重置（失忆重开）的返回统计。 */
+export interface ResetStats {
+  userdb_tables: number
+  vector: number
+  session_msgs: number
+}
+
 // 单一会话固定 id（与后端 CURRENT_SESSION_ID 对齐）
 export const CURRENT_SESSION_ID = 'current'
 
@@ -53,6 +60,14 @@ export async function archiveCurrent(): Promise<ArchiveInfo | null> {
   const d = await r.json()
   if (!r.ok || !d.archived) return null
   return d.archive ?? null
+}
+
+/** 彻底重置（失忆重开）：清空菟菚积累的记忆/好感/昵称/向量 + 当前会话气泡。 */
+export async function resetUser(): Promise<ResetStats> {
+  const r = await apiFetch('/api/user/reset', { method: 'POST' })
+  const d = await r.json()
+  if (!r.ok || !d.ok) throw new Error(d.error || '重置失败')
+  return d.reset ?? { userdb_tables: 0, vector: 0, session_msgs: 0 }
 }
 
 /** 归档列表（只读回看）。 */
