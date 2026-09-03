@@ -74,6 +74,7 @@ async def _quiesce_user_writers() -> None:
     """停止生成任务，并等待所有已开始的用户记忆写任务真正结束。"""
     from ..api import agent as agent_api
     from ..api import chat as chat_api
+    from ..api import remote as remote_api
     from ..agent import session as agent_session
     from . import pipeline, tasks as core_tasks
     from .memory import engine
@@ -84,6 +85,8 @@ async def _quiesce_user_writers() -> None:
             agent_session.cancel_task(task_id)
     await _cancel_tasks(list(agent_api._agent_bg_by_id.values()))
     await _cancel_tasks(list(chat_api._bg_tasks))
+    # 远程工具循环同样会写 userdb/记忆；不停止它就会在清库后回写数据。
+    await _cancel_tasks(list(remote_api._remote_bg_by_id.values()))
     await _cancel_tasks(list(core_tasks._tasks))
 
     # pipeline/Mem0 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，

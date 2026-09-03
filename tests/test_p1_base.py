@@ -37,4 +37,5 @@ async def main() -> None:
     ToolRegistry.set_confirm_hook(None)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -127,4 +127,5 @@ async def main() -> None:
     print("\n=== P3 确认机制: 5 项全部通过 ===")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
