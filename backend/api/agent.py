@@ -17,6 +17,10 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 # 运行中的 Agent 后台任务强引用（防 GC 静默取消）
 _agent_bg_tasks: set[asyncio.Task] = set()
 
+# 延迟清理通道的后台任务强引用（防 _drop_channel_later 的 sleep 任务被 GC 回收，
+# 导致对应 channel 永不清理、_task_channels 无限增长）
+_channel_cleanup_tasks: set[asyncio.Task] = set()
+
 # 每个任务的确认/进度通道（task_id → asyncio.Queue），由 POST /run 创建、
 # GET stream 消费；任务结束后保留最近事件供迟到连接补看
 _task_channels: dict[str, asyncio.Queue] = {}
@@ -165,7 +169,9 @@ async def api_agent_run(task_id: str):
             logger.exception("[Agent] 执行任务 {} 异常", task_id)
         finally:
             await push({"type": "task_done", "task_id": task_id})
-            asyncio.create_task(_drop_channel_later(task_id))
+            _t = asyncio.create_task(_drop_channel_later(task_id))
+            _channel_cleanup_tasks.add(_t)
+            _t.add_done_callback(_channel_cleanup_tasks.discard)
 
     # 在 ctx 上下文内创建任务（Task 拷贝此刻上下文，确认钩子能读到 push）。
     # 历史 bug：写成 asyncio.create_task(ctx.run(asyncio.create_task, _run()))——

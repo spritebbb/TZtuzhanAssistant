@@ -151,9 +151,13 @@ def _fallback_rule(text: str) -> dict[str, Any]:
             "dismiss": False,
             "degraded": True,
         }
-        # 好感度 delta 由旧规则映射（正向 +1，辱骂 -5，冒犯情绪 -3）
+        # 好感度 delta 的降级映射：正向信号保留（care/apology/sharing 等语义感知
+        # 覆盖不到的部分），但「辱骂」不在这里设 affection_delta——因为降级结果
+        # degraded=True，pipeline 会走关键词兜底 apply_abuse_penalty 统一扣分；
+        # 若这里也设 -5，会导致「apply_impulse -5 + apply_abuse_penalty -5」双扣。
+        # 因此辱骂只标记 emotional_hit（情绪冲击），好感度交给兜底通道。
         if result["abuse"]:
-            result["affection_delta"] = -5
+            result["affection_delta"] = 0
             result["emotional_hit"] = "被冒犯了"
             result["hit_weight"] = 0.9
         elif result["care"]:

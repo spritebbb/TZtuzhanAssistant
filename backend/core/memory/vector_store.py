@@ -174,22 +174,78 @@ def search(
             docs_raw = got.get("documents") or []
             metas_raw = got.get("metadatas") or []
             items = []
-            if ids_raw:
-                # 取第一个查询文本的结果（query_texts=[query] 只有一个）
-                items = list(zip(ids_raw[0], dists_raw[0] if dists_raw else [], docs_raw[0] if docs_raw else [], metas_raw[0] if metas_raw else []))
+            if ids_raw and ids_raw[0]:
+                # 取第一个查询文本的结果（query_texts=[query] 只有一个）。
+                # 注意不能用 zip 对齐：Chroma 的 distances/documents/metadatas
+                # 可能缺失（cosine 距离可省略、metadata 可未返回），zip 会按
+                # 最短序列静默截断，导致本可返回的结果被丢弃，甚至因 meta=None
+                # 抛 TypeError 被外层 except 吞掉、整次检索静默返回空。
+                ids0 = ids_raw[0]
+                dists0 = dists_raw[0] if dists_raw and dists_raw[0] else [None] * len(ids0)
+                docs0 = docs_raw[0] if docs_raw and docs_raw[0] else [None] * len(ids0)
+                metas0 = metas_raw[0] if metas_raw and metas_raw[0] else [None] * len(ids0)
+                for i, row_id in enumerate(ids0):
+                    items.append((
+                        row_id,
+                        dists0[i] if i < len(dists0) else None,
+                        docs0[i] if i < len(docs0) else None,
+                        metas0[i] if i < len(metas0) else None,
+                    ))
             for row_id, dist, doc, meta in items:
                 if not str(row_id).startswith(f"{user_id}|"):
                     continue
                 parts = str(row_id).split("|")
                 rid = int(parts[2]) if len(parts) >= 3 else -1
                 results.append(
-                    SearchHit(record_id=rid, distance=float(dist), text=doc, meta=meta or {})
+                    SearchHit(record_id=rid, distance=float(dist) if dist is not None else 0.0, text=doc or "", meta=meta or {})
                 )
         results.sort(key=lambda h: h.distance)
         return results[:top_k]
     except Exception:
         logger.warning("[向量] 检索失败：{}", query[:30])
         return []
+
+
+def migrate_user_id(old: str, new: str) -> int:
+    """把旧用户身份（old）名下的向量改挂到新身份（new），返回迁移条数。幂等。
+
+    用户身份统一（session_current → assistant-main）后，SQLite 侧记录已改挂
+    assistant-main，但向量 id 仍是「old|kind|record_id」三元组且 metadata.user_id=old，
+    会导致 where={"user_id": new} 检索不到旧记忆。这里遍历各 collection，把 old 前缀
+    的向量 id 与 metadata 同步改为 new（record_id 保持不变，与 SQLite 对齐）。
+    """
+    if not enabled() or old == new:
+        return 0
+    moved = 0
+    for kind in sorted(_KINDS):
+        col = _collection(kind)
+        if col is None:
+            continue
+        try:
+            got = col.get(where={"user_id": old})
+        except Exception:
+            continue
+        ids = got.get("ids") or []
+        if not ids:
+            continue
+        docs = got.get("documents") or [None] * len(ids)
+        metas = got.get("metadatas") or [None] * len(ids)
+        for i, oid in enumerate(ids):
+            if not str(oid).startswith(f"{old}|"):
+                continue
+            nid = f"{new}|" + str(oid).split("|", 1)[1]
+            meta = dict(metas[i]) if metas[i] else {}
+            meta["user_id"] = new
+            try:
+                # upsert 同名新 id 后删除旧 id（Chroma 无 rename，只能删+写）
+                col.upsert(ids=[nid], documents=[docs[i]], metadatas=[meta])
+                col.delete(ids=[oid])
+                moved += 1
+            except Exception:
+                continue
+    if moved:
+        logger.info("[向量] 用户身份迁移 {} → {}，迁移 {} 条向量", old, new, moved)
+    return moved
 
 
 def delete(user_id: str, kind: str, record_id: int) -> bool:

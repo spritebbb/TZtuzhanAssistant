@@ -114,8 +114,11 @@ def test_proactive_queue() -> int:
     uid = "test_proactive_queue"
     db.ensure_user(uid)
 
-    # 入队 → 出队应返回同一条消息
-    initiative.enqueue_proactive(uid, "菟菚想你了")
+    # 入队 → 出队应返回同一条消息（enqueue_proactive 现为 async：入队 + 幂等落库）
+    async def _enqueue():
+        await initiative.enqueue_proactive(uid, "菟菚想你了")
+
+    asyncio.run(_enqueue())
     passed += _ok("入队后可出队", initiative.dequeue_proactive(uid) == "菟菚想你了")
     # 出队后应为空
     passed += _ok("出队后为空", initiative.dequeue_proactive(uid) is None)
@@ -220,12 +223,12 @@ def test_sse_stream() -> int:
         db.ensure_user(uid)
         # 入队应立即推给订阅者
         q = initiative.subscribe(uid)
-        initiative.enqueue_proactive(uid, "菟菚想你了")
+        await initiative.enqueue_proactive(uid, "菟菚想你了")
         text = await asyncio.wait_for(q.get(), timeout=2)
         assert text == "菟菚想你了", "订阅应立即收到入队消息"
         initiative.unsubscribe(uid, q)
         # SSE 首帧应取走队列消息
-        initiative.enqueue_proactive(uid, "第二条主动消息")
+        await initiative.enqueue_proactive(uid, "第二条主动消息")
         gen = initiative.sse_event_stream(uid)
         first = await gen.__anext__()
         assert "第二条主动消息" in first, "首帧应包含队列消息"

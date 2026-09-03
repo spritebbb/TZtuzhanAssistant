@@ -19,6 +19,7 @@ async def run_tool_round(
     mock: bool = False,
     max_loops: int = 2,
     final_instruction: list[dict] | None = None,
+    on_progress: Callable[[dict], Any] | None = None,
 ) -> str:
     """执行工具循环，返回最终 LLM 回复文本。
 
@@ -29,6 +30,7 @@ async def run_tool_round(
         mock: 测试模式（不真实调用 LLM）
         max_loops: 工具循环最大轮次
         final_instruction: 最终回复轮次追加的 system 消息
+        on_progress: 可选的阶段进度回调，接收事件 dict（thinking/tool/tool_done）
 
     Returns:
         最终回复文本（不含工具代码块）
@@ -54,4 +56,5 @@ async def run_tool_round(
         call_native=chat_native,
         max_loops=max_loops,
         final_instruction=final_instruction,
+        on_progress=on_progress,
     )

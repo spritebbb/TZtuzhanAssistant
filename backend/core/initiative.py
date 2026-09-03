@@ -154,6 +154,16 @@ async def _tick_once() -> int:
         return 0
     _last_global_run = now
 
+    # 归档建议独立于「主动找人」：会话是全局的，只要当前会话过长就提醒，
+    # 用首个有记录的用户作为投递归属（单一会话模式下所有消息共享同一 user）。
+    try:
+        with db._lock:
+            row = db.conn.execute("SELECT user_id FROM users LIMIT 1").fetchone()
+        if row:
+            await maybe_suggest_archive(row["user_id"])
+    except Exception as e:
+        logger.warning("[主动性] 归档建议检查失败: %s", e)
+
     users = _eligible_users()
     if not users:
         return 0
@@ -172,7 +182,10 @@ async def _tick_once() -> int:
         except Exception as e:
             logger.warning("[主动性] 投递失败: %s", e)
         if not delivered:
-            enqueue_proactive(uid, text)
+            await enqueue_proactive(uid, text)
+        else:
+            # 实时投递成功（不经 enqueue），仍需落库，避免刷新后丢失
+            await _persist_proactive(uid, text)
         _mark_proactive(uid)
         logger.info("[主动性] 已主动联系 %s（%s）: %s", uid, "实时投递" if delivered else "入队待取", text[:40])
         count += 1
@@ -206,12 +219,30 @@ async def _deliver(user_id: str, text: str) -> bool:
 _PENDING_KEY = "initiative:pending"
 
 
-def enqueue_proactive(user_id: str, text: str) -> None:
+async def _persist_proactive(user_id: str, text: str) -> None:
+    """把主动消息写入当前会话的 messages 表（真正持久化 + 幂等）。
+
+    主动消息是 bot 角色、挂在全局会话（CURRENT_SESSION_ID）下。走
+    store.append_proactive_message（async 锁内 + 线程池），既避免阻塞事件
+    循环，也保证与其它写路径同锁串行，不会插到用户/菟菚消息中间。
+    幂等：最后一条 bot 消息内容相同则跳过，防 SSE 重连/队列残留重复落库。
+    """
+    try:
+        from ..session import store as _store
+
+        await _store.append_proactive_message(_store.CURRENT_SESSION_ID, text)
+    except Exception as e:
+        logger.warning("[主动性] 主动消息落库失败: %s", e)
+
+
+async def enqueue_proactive(user_id: str, text: str) -> None:
     """把一条主动消息放入待投递队列（持久化，跨重启不丢）。
 
-    入队后广播给该 user 的 SSE 订阅者，实现秒级实时推送。
+    入队后广播给该 user 的 SSE 订阅者，实现秒级实时推送；同时写入会话
+    messages 表（幂等），避免主动消息只在内存/前端展示、刷新后丢失。
     """
     kv_set(user_id, _PENDING_KEY, text)
+    await _persist_proactive(user_id, text)
     _notify_subscribers(user_id, text)
 
 
@@ -295,6 +326,88 @@ async def poll_for(user_id: str) -> str | None:
     text = await generate_proactive_message(user_id)
     if text:
         _mark_proactive(user_id)
+        await _persist_proactive(user_id, text)
+    return text
+
+
+# ---- 主动归档建议（会话过长时，菟菚主动提醒归档，而非擅自清空）----
+
+_ARCHIVE_THRESHOLD = 40      # 当前会话消息数达到该值时提醒归档
+_ARCHIVE_SUGGEST_KEY = "initiative:archive_suggest"  # kv 去重键
+
+
+def _archive_suggested_today(user_id: str) -> bool:
+    today = datetime.date.today().isoformat()
+    return kv_get(user_id, f"{_ARCHIVE_SUGGEST_KEY}:{today}") is not None
+
+
+def _mark_archive_suggested(user_id: str) -> None:
+    today = datetime.date.today().isoformat()
+    kv_set(user_id, f"{_ARCHIVE_SUGGEST_KEY}:{today}", "1")
+
+
+def _build_archive_suggest_prompt(user_id: str) -> list[dict] | None:
+    """拼一条「建议归档」的菟菚风格消息。"""
+    user = db.get_user(user_id)
+    if not user:
+        return None
+    affection_val = user["affection"] or 0
+    sys_prompt = build_system_prompt(
+        stage=stage_of(affection_val),
+        address=user["nickname_pref"] or "",
+        lover_confirm=bool(user["lover_confirm"]),
+        first_chat=False,
+        affection=affection_val,
+        user_id=user_id,
+    )
+    return [
+        {"role": "system", "content": sys_prompt},
+        {
+            "role": "user",
+            "content": (
+                "你们已经聊了很长一段了，这段对话攒了不少内容。"
+                "你发现再聊下去前面的话会越来越难翻找，想提醒对方："
+                "可以把这段对话归档存档，然后开一段新的。"
+                "自然地说一句，别命令式、别啰嗦，一句到两句就够，"
+                "符合你的性格（干脆、带点腹黑毒舌也行），别加括号动作。"
+            ),
+        },
+    ]
+
+
+async def _generate_archive_suggest(user_id: str) -> str | None:
+    msgs = _build_archive_suggest_prompt(user_id)
+    if not msgs:
+        return None
+    try:
+        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        return text.strip()[:200] or None
+    except Exception as e:
+        logger.warning("[主动性] 归档建议生成失败: %s", e)
+        return None
+
+
+async def maybe_suggest_archive(user_id: str) -> str | None:
+    """判断当前会话是否过长需要提醒归档，是则生成并投递一条建议消息。
+
+    返回投递的消息文本（None = 无需提醒或投递失败）。采用「建议式」而非
+    自动归档：擅自清空当前对话可能让用户丢失上下文，提醒更稳妥。
+    """
+    try:
+        from ..session import store as _store
+
+        count = await _store.message_count(_store.CURRENT_SESSION_ID)
+    except Exception:
+        return None
+    if count < _ARCHIVE_THRESHOLD:
+        return None
+    if _archive_suggested_today(user_id):
+        return None
+    text = await _generate_archive_suggest(user_id)
+    if not text:
+        return None
+    _mark_archive_suggested(user_id)
+    await enqueue_proactive(user_id, text)
     return text
 
 

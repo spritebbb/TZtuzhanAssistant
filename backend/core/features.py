@@ -19,12 +19,12 @@ import threading
 
 _write_lock = threading.Lock()
 
-# 所有可用开关及其默认值
+# 所有可用开关及其默认值。
+# 注意：只保留「有消费方」的开关。terms/style/emotion_sticker 对应功能
+# （口头禅/表达风格/表情包）已删除，其开关与 stickers/user_terms 表一样是
+# 残留，已移除；set_flag 只接受这里的 key，故不再能写入失效开关。
 FLAG_DEFAULTS = {
-    "profile_enabled": True,       # 用户画像
-    "terms_enabled": True,         # 口头禅/黑话
-    "style_enabled": True,         # 场景化表达风格
-    "emotion_sticker_enabled": True,  # 表情包情绪匹配
+    "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
 }
 
 
@@ -48,7 +48,10 @@ def flag(name: str) -> bool:
 
 
 def set_flag(name: str, value: bool) -> None:
-    """写入开关值（同时清缓存）；原子写避免读到半截 JSON。"""
+    """写入开关值（同时清缓存）；原子写避免读到半截 JSON。
+
+    当前无前端/API 入口调用（Web UI 面板尚未接入），保留作为未来
+    功能开关面板的写入端。"""
     if name not in FLAG_DEFAULTS:
         return  # 只接受已知开关名
     with _write_lock:  # 串行化读-改-写，避免并发覆盖

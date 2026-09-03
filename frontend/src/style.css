@@ -1,5 +1,7 @@
 /* ===== 菟菚桌面助手 · 菟丝子藤蔓主题 =====
-   意象：菟丝子 —— 细藤缠绕 · 藤黄绿 · 暖米白 · 温润灵动 */
+   意象：菟丝子（Cuscuta chinensis）
+   —— 细藤缠绕 · 温润坚韧 · 我寄生予万物，也联结着万物
+*/
 
 * {
   margin: 0;
@@ -7,55 +9,144 @@
   box-sizing: border-box;
 }
 
+/* ================= 亮/暗双主题 token =================
+   默认暗色（深墨绿底），亮色（米白暖绿）随时可切 */
 :root {
-  /* 背景层（暖米白 + 藤色） */
-  --bg: #faf7ef;
-  --bg-sidebar: #f3eee1;
-  --bg-header: rgba(255, 253, 248, 0.82);
-  --bg-hover: #ece7d8;
-  --bg-input: #fffdf8;
+  --vine-900: #141a10;
+  --vine-800: #1c2417;
+  --vine-750: #222b1c;
+  --vine-700: #2a3422;
+  --vine-650: #35412a;
+  --vine-600: #415231;
+  --vine-500: #55683f;
+  --vine-400: #6f854d;
+  --vine-300: #8ba566;
+  --vine-200: #a9c07f;
+  --vine-100: #c6d89b;
 
-  /* 气泡 */
-  --bg-bubble: #fffdf8;
-  --bg-user: linear-gradient(135deg, #c2d072, #a9bd58);
-  --bg-user-deep: linear-gradient(135deg, #b0c45e, #94a949);
+  --flower-500: #bd8a3c;
+  --flower-400: #d9a860;
+  --flower-300: #e6bf80;
+  --flower-200: #f4e5c4;
 
-  /* 边框 */
-  --border: #e3dcc8;
-  --border-light: #ede7d6;
+  --cream: #f2ecdf;
+  --cream-100: #faf7ef;
+  --cream-dim: #e6dfcc;
 
-  /* 文字（深橄榄绿） */
-  --text: #3d4628;
-  --text-dim: #6f7a55;
-  --text-faint: #a3ab88;
+  /* —— 暗色主题（默认） —— */
+  --bg: #161c12;
+  --bg-grad-1: rgba(139, 165, 102, 0.08);
+  --bg-grad-2: rgba(217, 168, 96, 0.05);
+  --bg-grad-3: rgba(255, 255, 255, 0.02);
 
-  /* 主色（藤黄绿） */
-  --primary: #a4b85c;
-  --primary-light: #c6d680;
-  --primary-deep: #7e9140;
-  --primary-soft: #f0f4dc;
-  --primary-text: #718537;
+  --bg-sidebar: #1c2417;
+  --bg-lg-sidebar: rgba(20, 26, 16, 0.92);
+  --bg-header: rgba(24, 31, 20, 0.88);
+  --bg-hover: rgba(139, 165, 102, 0.10);
+  --bg-active: rgba(169, 192, 127, 0.08);
+  --bg-input: rgba(250, 247, 239, 0.05);
+  --bg-panel: #202a1a;
+  --bg-card: #242e1d;
+  --bg-bubble: #28331f;
+  --bg-bubble-user: linear-gradient(135deg, #6f854d, #55683f);
+  --bg-bubble-user-deep: linear-gradient(135deg, #63773f, #4a5c33);
+  --bg-user: linear-gradient(135deg, #6f854d, #55683f);
+  --bg-user-deep: linear-gradient(135deg, #63773f, #4a5c33);
 
-  /* 点缀（琥珀金 · 菟丝花） */
+  --border: rgba(139, 165, 102, 0.14);
+  --border-light: rgba(169, 192, 127, 0.26);
+  --border-strong: rgba(217, 168, 96, 0.38);
+  --border-muted: #2b3420;
+
+  --text: #e9ecdc;
+  --text-dim: #aab392;
+  --text-faint: #7c875e;
+  --text-invert: #141a10;
+
+  --primary: #8ba566;
+  --primary-light: #a9c07f;
+  --primary-deep: #6f854d;
+  --primary-soft: rgba(139, 165, 102, 0.12);
+  --primary-text: #b6c98e;
+
   --accent: #d9a860;
-  --accent-light: #f6e7c8;
-  --accent-deep: #c08a3e;
+  --accent-light: #f4e5c4;
+  --accent-deep: #bd8a3c;
 
-  /* 状态 */
-  --danger: #d97b63;
-  --danger-soft: #f9e8e0;
+  --danger: #e08a6d;
+  --danger-soft: rgba(224, 138, 109, 0.12);
+  --ok: #9dc881;
+  --ok-soft: rgba(157, 200, 129, 0.14);
 
-  /* 阴影（暖色） */
-  --shadow-sm: 0 1px 3px rgba(110, 100, 60, 0.10), 0 1px 2px rgba(110, 100, 60, 0.08);
-  --shadow-md: 0 8px 28px rgba(110, 100, 60, 0.16);
-  --shadow-lg: 0 20px 60px rgba(110, 100, 60, 0.24);
-  --glow: 0 0 0 3px rgba(164, 184, 92, 0.22);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 10px 32px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.45);
+  --glow: 0 0 0 3px rgba(139, 165, 102, 0.18);
+  --glow-warm: 0 0 0 3px rgba(217, 168, 96, 0.18);
 
-  /* 圆角（有机感） */
-  --radius-sm: 10px;
+  --radius-sm: 11px;
   --radius-md: 16px;
-  --radius-lg: 24px;
+  --radius-lg: 22px;
   --radius-full: 999px;
+
+  /* 聊天区植物背景（暗色）：深色藤蔓图 + 暗色遮罩 */
+  --chat-bg-image: url('/bg/bg_dark.jpg');
+  --chat-bg-overlay: linear-gradient(rgba(20, 26, 16, 0.72), rgba(20, 26, 16, 0.72));
+
+  color-scheme: dark;
+}
+
+/* ================= 亮色主题 ================= */
+.theme-light {
+  --bg: #f5f1e7;
+  --bg-grad-1: rgba(139, 165, 102, 0.12);
+  --bg-grad-2: rgba(217, 168, 96, 0.10);
+  --bg-grad-3: rgba(255, 255, 255, 0.5);
+
+  --bg-sidebar: #eee8da;
+  --bg-lg-sidebar: rgba(238, 232, 218, 0.95);
+  --bg-header: rgba(250, 247, 239, 0.9);
+  --bg-hover: rgba(111, 133, 77, 0.08);
+  --bg-active: rgba(139, 165, 102, 0.10);
+  --bg-input: rgba(255, 255, 255, 0.6);
+  --bg-panel: #faf7ef;
+  --bg-card: #ffffff;
+  --bg-bubble: #fbf9f2;
+  --bg-bubble-user: linear-gradient(135deg, #8ba566, #6f854d);
+  --bg-bubble-user-deep: linear-gradient(135deg, #7d9a5a, #63773f);
+  --bg-user: linear-gradient(135deg, #8ba566, #6f854d);
+  --bg-user-deep: linear-gradient(135deg, #7d9a5a, #63773f);
+
+  --border: rgba(111, 133, 77, 0.14);
+  --border-light: rgba(111, 133, 77, 0.28);
+  --border-strong: rgba(217, 168, 96, 0.42);
+  --border-muted: #e2dbc8;
+
+  --text: #33402a;
+  --text-dim: #64714b;
+  --text-faint: #98a279;
+  --text-invert: #faf7ef;
+
+  --primary: #6f854d;
+  --primary-light: #8ba566;
+  --primary-deep: #55683f;
+  --primary-soft: rgba(111, 133, 77, 0.08);
+  --primary-text: #55683f;
+
+  --danger: #c96a4c;
+  --danger-soft: rgba(201, 106, 76, 0.08);
+  --ok: #5f9152;
+  --ok-soft: rgba(95, 145, 82, 0.10);
+
+  --shadow-sm: 0 2px 10px rgba(100, 90, 55, 0.08);
+  --shadow-md: 0 12px 36px rgba(100, 90, 55, 0.14);
+  --shadow-lg: 0 24px 64px rgba(100, 90, 55, 0.20);
+
+  /* 聊天区植物背景（亮色）：浅色藤蔓图 + 弱遮罩 */
+  --chat-bg-image: url('/bg/bg_light.jpg');
+  --chat-bg-overlay: linear-gradient(rgba(250, 247, 239, 0.85), rgba(250, 247, 239, 0.85));
+
+  color-scheme: light;
 }
 
 html, body {
@@ -66,9 +157,8 @@ html, body {
 body {
   background: var(--bg);
   background-image:
-    radial-gradient(1100px 560px at 88% -12%, rgba(198, 214, 128, 0.14), transparent 62%),
-    radial-gradient(820px 480px at -8% 112%, rgba(217, 168, 96, 0.10), transparent 58%),
-    radial-gradient(640px 420px at 50% 40%, rgba(240, 244, 220, 0.5), transparent 60%);
+    radial-gradient(900px 520px at 80% -8%, var(--bg-grad-1), transparent 60%),
+    radial-gradient(700px 460px at -6% 106%, var(--bg-grad-2), transparent 58%);
   color: var(--text);
   font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
   user-select: none;
@@ -78,40 +168,57 @@ body {
 
 #app {
   height: 100vh;
+  /* 皮肤层次：极淡的斜向科技网格 + 顶部高光 */
+  background-image:
+    repeating-linear-gradient(
+      115deg,
+      transparent 0px,
+      transparent 48px,
+      rgba(169, 192, 127, 0.028) 49px,
+      transparent 50px
+    ),
+    linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 12%);
 }
 
-/* ===== 滚动条（藤色） ===== */
+/* ===== 通用玻璃 ===== */
+.glass {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+
+/* ===== 滚动条 ===== */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d9d3bb;
-  border-radius: 4px;
+  background: rgba(139, 165, 102, 0.28);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c2ba99;
+  background: rgba(169, 192, 127, 0.4);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* ===== Markdown 渲染（藤蔓浅色适配） ===== */
+/* ===== Markdown 渲染 ===== */
 .md {
   line-height: 1.7;
   word-break: break-word;
 }
-.md h2, .md h3, .md h4 {
+.md h1, .md h2, .md h3, .md h4 {
   margin: 10px 0 6px;
   line-height: 1.35;
-  color: var(--primary-deep);
+  color: var(--primary-text);
 }
+.md h1 { font-size: 1.2rem; }
 .md h2 { font-size: 1.12rem; }
 .md h3 { font-size: 1.04rem; }
 .md h4 { font-size: 0.97rem; }
 .md p { margin: 4px 0; }
 .md pre {
-  background: #f4f1e4;
+  background: rgba(0, 0, 0, 0.22);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 12px 14px;
@@ -121,6 +228,7 @@ body {
   margin: 8px 0;
   color: var(--text);
 }
+.theme-light .md pre { background: rgba(60, 80, 45, 0.05); }
 .md pre code {
   background: none;
   padding: 0;
@@ -132,17 +240,17 @@ body {
   padding: 2px 6px;
   font-size: 0.85em;
   font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
-  color: var(--primary-deep);
+  color: var(--primary-text);
 }
 .md a {
-  color: var(--primary-deep);
+  color: var(--primary-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 .md a:hover { color: var(--primary); }
 .md blockquote {
   border-left: 4px solid var(--primary-light);
-  background: #f7f5ea;
+  background: var(--primary-soft);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   margin: 8px 0;
   padding: 8px 14px;
@@ -162,11 +270,11 @@ body {
 }
 .md table th {
   background: var(--primary-soft);
-  color: var(--primary-deep);
+  color: var(--primary-text);
   font-weight: 600;
 }
 .md table tr:nth-child(even) td {
-  background: #faf8ef;
+  background: var(--bg-active);
 }
 .md img {
   max-width: 100%;
@@ -192,7 +300,7 @@ body {
   to { opacity: 1; }
 }
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: none; }
 }
 @keyframes popIn {
@@ -203,15 +311,15 @@ body {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
-@keyframes blinkCursor {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
 @keyframes tendrilDraw {
-  from { stroke-dashoffset: 320; }
+  from { stroke-dashoffset: 80; }
   to { stroke-dashoffset: 0; }
 }
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
 @keyframes sway {
-  0%, 100% { transform: rotate(-3deg); }
-  50% { transform: rotate(3deg); }
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(2deg); }
 }

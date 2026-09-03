@@ -193,6 +193,14 @@ def create_app() -> FastAPI:
                 task.add_done_callback(_background_tasks.discard)
         except Exception:
             logger.exception("[记忆] 记忆引擎初始化失败（降级为旧版检索）")
+        # 用户身份统一迁移：把向量库里旧身份（session_current）的向量改挂
+        # assistant-main，与 userdb 的 SQLite 身份迁移保持一致（幂等，无旧数据则无副作用）
+        try:
+            from .core.memory import vector_store as _vec
+
+            _vec.migrate_user_id("session_current", "assistant-main")
+        except Exception:
+            logger.exception("[记忆] 向量用户身份迁移失败（不影响主流程）")
         # embedding 模型后台预热：下载/加载可能耗时数分钟，绝不能阻塞启动；
         # 预热失败会进哈希降级态并打明确告警（见 embedding.warmup）
         try:

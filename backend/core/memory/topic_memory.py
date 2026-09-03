@@ -87,12 +87,11 @@ async def extract_topic(user_id: str, *, mock: bool = False) -> str | None:
         _kv_set(user_id, "last_topic_msg_id", str(max_id))
         # 写入 Chroma（topic kind）
         try:
-            import asyncio as _asyncio
+            import asyncio
             from . import vector_store as vec
+            from .engine import _spawn
 
-            _asyncio.ensure_future(
-                _asyncio.to_thread(vec.add, user_id, "topic", max_id, topic)
-            )
+            _spawn(asyncio.to_thread(vec.add, user_id, "topic", max_id, topic))
         except Exception:
             pass
         return topic

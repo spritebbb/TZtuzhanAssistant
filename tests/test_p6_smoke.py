@@ -41,10 +41,10 @@ def main() -> None:
         assert not d["result"]["isError"], f"system_info 应成功: {d}"
         print(f"[OK] /mcp/call system_info: {d['result']['content'][0]['text'][:40]!r}")
 
-        # 5) 会话路由
-        r = client.get("/api/sessions")
-        assert r.status_code == 200
-        print(f"[OK] /api/sessions: {r.status_code}")
+        # 5) 会话路由（单一会话模式：读取固定会话 'current'）
+        r = client.get("/api/sessions/current")
+        assert r.status_code == 200, f"/api/sessions/current: {r.status_code}"
+        print(f"[OK] /api/sessions/current: {r.status_code}")
 
         # 6) 确认接口（无 request_id 应 400）
         r = client.post("/api/confirm", data={})

@@ -199,11 +199,12 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
         # 把摘要也写入 Chroma 向量库（summary kind），跨会话检索可用
         if summary:
             try:
-                import asyncio as _asyncio
+                import asyncio
                 from . import vector_store as vec
+                from .engine import _spawn
 
-                _asyncio.ensure_future(
-                    _asyncio.to_thread(vec.add, user_id, "summary", 0, summary, {"ts": datetime.now().isoformat()})
+                _spawn(
+                    asyncio.to_thread(vec.add, user_id, "summary", 0, summary, {"ts": datetime.now().isoformat()})
                 )
             except Exception:
                 pass

@@ -11,6 +11,7 @@ import asyncio
 from ..base import ToolRegistry
 from ...core import userdb
 from ...core.current_user import current_user_id
+from ...core.log import logger
 from ...core.vector_store import search as vec_search
 
 _TOP_K = 6
@@ -43,6 +44,8 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
         facts = [h["content"] for h in userdb.db.search_facts(uid, query, k)]
 
     # 3) 向量检索兜底（显式工具调用时无论如何都查一次稠密向量）
+    # 说明：vec_search 是 vector_store 薄壳的 search()，返回 [(record_id, distance)]
+    # 元组列表（内部已把 SearchHit 转成元组），此处 for rid, dist in vec 正确。
     try:
         vec = await asyncio.to_thread(vec_search, uid, query, k, None)
         for rid, dist in vec:
@@ -52,8 +55,9 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
             ).fetchone()
             if row and row["content"] not in lm and len(lm) < k:
                 lm.append(row["content"])
-    except Exception:
-        pass
+    except Exception as e:
+        # 向量兜底失败只影响召回丰富度，不阻断主流程；记日志而非静默吞掉
+        logger.warning("[memory_search] 向量兜底检索失败: %s", e)
 
     parts = []
     if lm:

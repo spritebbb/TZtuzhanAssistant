@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import threading
+import urllib.request
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -108,6 +109,80 @@ async def mcp_call_tool(request: Request):
 _EXTERNAL_SERVERS: dict[str, dict] = {}
 
 
+# 不自动跟随重定向：每一跳都显式复检目标 URL（防 302 → 内网 SSRF）。
+# 与 plugins/web_fetch.py 的 _NoRedirect 同一策略：注册时 check_url 只校验了
+# 首跳地址，若 urllib 自动跟随后续 302 到内网，会绕过 SSRF 防线。
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_MAX_REDIRECTS = 5
+
+
+def _request_json(url: str, *, method: str = "GET", body: bytes | None = None, timeout: int = 10) -> dict:
+    """向外部 MCP 服务器发 JSON-RPC 请求，逐跳复检重定向（防 SSRF）。
+
+    返回解析后的 JSON dict。重定向不自动跟随：每跳先 check_url 复检，
+    通过后手动拼接新 URL 继续；命中内网/超次数则抛异常。
+    """
+    import urllib.error
+    import urllib.parse
+
+    from .safety import check_url
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    cur = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        ok, err = check_url(cur)
+        if not ok:
+            raise ValueError(f"拒绝访问不安全的服务器地址: {err}")
+        headers = {"Accept": "application/json"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(cur, data=body, headers=headers, method=method)
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # 不自动跟随的重定向会以 HTTPError(3xx) 抛出：取 Location 复检后手动跳转
+            if e.code in (301, 302, 303, 307, 308):
+                loc = e.headers.get("Location")
+                if not loc:
+                    raise RuntimeError("重定向缺少 Location") from e
+                cur = urllib.parse.urljoin(cur, loc)
+                continue
+            raise
+    raise RuntimeError("重定向次数过多")
+
+
+class McpClient:
+    """连接一个外部 MCP 服务器（HTTP + JSON-RPC），自动发现并注册远程工具。"""
+
+    def __init__(self, name: str, url: str) -> None:
+        self.name = name
+        self.url = url.rstrip("/")
+        self._tools: list[dict] = []
+
+    async def list_tools(self) -> list[dict]:
+        """请求远程服务器工具列表。"""
+        data = await asyncio.to_thread(
+            _request_json, self.url + "/tools", method="GET", timeout=10
+        )
+        self._tools = data.get("result", {}).get("tools", [])
+        return self._tools
+
+    async def call_tool(self, name: str, arguments: dict) -> str:
+        """调用远程工具，返回文本结果。"""
+        body = json.dumps({"name": name, "arguments": arguments}).encode("utf-8")
+        data = await asyncio.to_thread(
+            _request_json, self.url + "/call", method="POST", body=body, timeout=30
+        )
+        content = data.get("result", {}).get("content", [])
+        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
+        return "\n".join(parts)
+
+
 def _persist_servers() -> None:
     """把当前外部服务器登记表写盘（失败静默，不影响主流程）。原子写：临时文件 + os.replace。"""
     try:
@@ -188,52 +263,6 @@ async def restore_persisted_servers() -> int:
         except Exception:
             logger.warning("[MCP] 恢复外部服务器异常: {}", name)
     return ok_count
-
-
-class McpClient:
-    """连接一个外部 MCP 服务器（HTTP + JSON-RPC），自动发现并注册远程工具。"""
-
-    def __init__(self, name: str, url: str) -> None:
-        self.name = name
-        self.url = url.rstrip("/")
-        self._tools: list[dict] = []
-
-    async def list_tools(self) -> list[dict]:
-        """请求远程服务器工具列表。"""
-        import urllib.request
-
-        def _fetch() -> dict:
-            req = urllib.request.Request(
-                self.url + "/tools",
-                headers={"Accept": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-
-        data = await asyncio.to_thread(_fetch)
-        self._tools = data.get("result", {}).get("tools", [])
-        return self._tools
-
-    async def call_tool(self, name: str, arguments: dict) -> str:
-        """调用远程工具，返回文本结果。"""
-        import urllib.request
-
-        body = json.dumps({"name": name, "arguments": arguments}).encode("utf-8")
-
-        def _fetch() -> dict:
-            req = urllib.request.Request(
-                self.url + "/call",
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-
-        data = await asyncio.to_thread(_fetch)
-        content = data.get("result", {}).get("content", [])
-        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
-        return "\n".join(parts)
 
 
 async def register_external_server(name: str, url: str) -> bool:

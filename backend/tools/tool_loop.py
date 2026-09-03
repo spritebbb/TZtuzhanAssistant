@@ -344,6 +344,7 @@ async def run_tool_loop(
     mock: bool = False,
     final_instruction: list[dict] | None = None,
     call_native: Callable | None = None,
+    on_progress: Callable[[dict], Any] | None = None,
 ) -> str:
     """执行完整工具循环，返回最终 LLM 文本。
 
@@ -355,6 +356,10 @@ async def run_tool_loop(
         final_instruction: 无工具调用时可选追加的 system 消息
         call_native: 原生函数调用回调，接收 (messages, tools) 返回 (text, tool_calls)
                      若不提供则走文本协议回退模式
+        on_progress: 可选的阶段进度回调，接收事件 dict，如
+                     {"type": "thinking"} / {"type": "tool", "name": "web_search"} /
+                     {"type": "tool_done", "name": "web_search"}。用于把工具循环的
+                     阶段性进展实时推给前端（否则工具期间气泡空窗到最终帧才整段弹出）。
 
     Returns:
         最终文本（不含工具代码块）
@@ -370,12 +375,14 @@ async def run_tool_loop(
         return await _run_native(
             work, call_native, tools,
             max_loops=max_loops, final_instruction=final_instruction,
+            on_progress=on_progress,
         )
 
     # 回退：文本协议模式
     return await _run_text(
         work, call_llm,
         max_loops=max_loops, final_instruction=final_instruction,
+        on_progress=on_progress,
     )
 
 
@@ -386,9 +393,19 @@ async def _run_native(
     *,
     max_loops: int,
     final_instruction: list[dict] | None,
+    on_progress: Callable[[dict], Any] | None = None,
 ) -> str:
     """原生 Function Calling 循环。"""
     fallback = _extract_last_user(work)
+
+    async def _progress(ev: dict) -> None:
+        if on_progress is None:
+            return
+        try:
+            await on_progress(ev)
+        except Exception:
+            pass
+
     # 首轮注入一条强制提醒：记忆/画像里提到的旧事不替代工具调用
     _REINFORCE = (
         "⚠️ 注意：用户要求你「记录/记住/待办/搜索/查询/回忆」时，必须调用对应的工具"
@@ -405,6 +422,7 @@ async def _run_native(
     loop_count = 0
     while loop_count < max_loops:
         loop_count += 1
+        await _progress({"type": "thinking"})
         try:
             text, calls = await call_native(work, tools)
         except Exception as e:
@@ -438,8 +456,11 @@ async def _run_native(
             filled = _fill_missing_args(c, fallback, getattr(specs.get(c["name"]), "input_schema", None))
             filled = _clean_args({"name": c["name"], "arguments": filled}, fallback)
             logger.info("[工具循环] 调用 {} 参数={}", c["name"], json.dumps(filled, ensure_ascii=False)[:300])
+            # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
+            await _progress({"type": "tool", "name": c["name"]})
             r = await ToolRegistry.execute(c["name"], filled)
             body = r.output if r.ok else (r.error or "调用失败")
+            await _progress({"type": "tool_done", "name": c["name"]})
             work.append({
                 "role": "tool",
                 "tool_call_id": c["_id"],
@@ -449,6 +470,7 @@ async def _run_native(
             break
 
     # 循环用尽：无 tools 再生成一次最终回复
+    await _progress({"type": "thinking"})
     if final_instruction:
         work.extend(list(final_instruction))
     text, calls = await call_native(work, None)
@@ -461,14 +483,25 @@ async def _run_text(
     *,
     max_loops: int,
     final_instruction: list[dict] | None,
+    on_progress: Callable[[dict], Any] | None = None,
 ) -> str:
     """文本协议回退循环。"""
     work = list(work)
     work.append({"role": "system", "content": _tool_hint_text()})
     fallback = _extract_last_user(work)
+
+    async def _progress(ev: dict) -> None:
+        if on_progress is None:
+            return
+        try:
+            await on_progress(ev)
+        except Exception:
+            pass
+
     loop_count = 0
     while loop_count < max_loops:
         loop_count += 1
+        await _progress({"type": "thinking"})
         raw = await call_llm(work)
         clean, calls = parse_tool_blocks(raw)
         if not calls:
@@ -479,7 +512,12 @@ async def _run_text(
                 return final_clean or "（我先记一下，回头跟你说）"
             return clean or "（我先记一下，回头跟你说）"
 
+        # 推「开始调用工具」进度（文本回退模式批量并行执行，逐条推名字）
+        for c in calls:
+            await _progress({"type": "tool", "name": c.get("name", "")})
         result_block = await _execute_calls(calls, fallback)
+        for c in calls:
+            await _progress({"type": "tool_done", "name": c.get("name", "")})
         work.append({"role": "assistant", "content": clean or "（我查一下）"})
         work.append({
             "role": "system",
@@ -489,6 +527,7 @@ async def _run_text(
             "如果还需要更多信息，可以再调用工具；否则直接给出最终回复。",
         })
 
+    await _progress({"type": "thinking"})
     if final_instruction:
         work.extend(list(final_instruction))
     raw = await call_llm(work)

@@ -125,7 +125,10 @@ async def run_daily_batch(user_id: str, day: date) -> None:
         db.update_affection(user_id, affection.DEEP_CHAT_BONUS, "深度/走心对话")
 
     addr = (data.get("address") or "").strip()
-    if addr and not db.get_user(user_id)["nickname_pref"] and not affection.check_bad_address(addr):
+    u = db.get_user(user_id)
+    if u is None:
+        return
+    if addr and not u["nickname_pref"] and not affection.check_bad_address(addr):
         db.set_nickname(user_id, clean_address(addr)[:12])
 
     await extract_facts(user_id, day)

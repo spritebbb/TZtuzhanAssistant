@@ -12,6 +12,10 @@ from ..maintenance.loop import health
 
 router = APIRouter(prefix="/api", tags=["health"])
 
+# 持有退出任务强引用，避免 pending task 被 GC 静默取消（与 pipeline._memory_tasks
+# / agent._agent_bg_tasks 同一修法），否则 checkpoint/备份可能在完成前被回收。
+_shutdown_tasks: set[asyncio.Task] = set()
+
 
 @router.get("/health")
 async def api_health() -> JSONResponse:
@@ -36,5 +40,7 @@ async def api_shutdown() -> JSONResponse:
             pass
         os._exit(0)
 
-    asyncio.create_task(_bye())
+    task = asyncio.create_task(_bye())
+    _shutdown_tasks.add(task)
+    task.add_done_callback(_shutdown_tasks.discard)
     return JSONResponse({"ok": True, "note": "shutting down after checkpoint"})

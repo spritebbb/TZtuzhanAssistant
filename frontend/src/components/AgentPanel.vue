@@ -180,8 +180,8 @@ async function respondConfirm(requestId: string, allow: boolean) {
       body: new URLSearchParams({ request_id: requestId, allow: String(allow) }).toString(),
     })
     const d = await r.json()
-    if (d.ok) pendingConfirms.value = pendingConfirms.value.filter(p => p.request_id !== requestId)
-    else pendingConfirms.value = pendingConfirms.value.filter(p => p.request_id !== requestId)
+    pendingConfirms.value = pendingConfirms.value.filter(p => p.request_id !== requestId)
+    void d
   } catch {
     pendingConfirms.value = pendingConfirms.value.filter(p => p.request_id !== requestId)
   }
@@ -244,9 +244,9 @@ watch(() => props.show, (v) => {
 })
 
 function dangerColor(d: string): string {
-  if (d === 'high' || d === 'critical') return '#e0584a'
-  if (d === 'normal') return '#d9a860'
-  return '#a4b85c'
+  if (d === 'high' || d === 'critical') return 'var(--danger)'
+  if (d === 'normal') return 'var(--accent)'
+  return 'var(--primary)'
 }
 
 function dangerLabel(d: string): string {
@@ -260,7 +260,7 @@ function dangerLabel(d: string): string {
 <template>
   <Teleport to="body">
     <div class="overlay" :class="{ show }" @click.self="emit('close')">
-      <div class="agent-panel">
+      <div class="agent-panel glass-strong">
         <div class="a-head">
           <div class="a-head-left">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -292,7 +292,7 @@ function dangerLabel(d: string): string {
 
           <!-- 工具级确认卡片（任务执行中弹出） -->
           <div v-if="pendingConfirms.length > 0" class="a-confirms">
-            <div v-for="pr in pendingConfirms" :key="pr.request_id" class="a-confirm-card">
+            <div v-for="pr in pendingConfirms" :key="pr.request_id" class="a-confirm-card glass">
               <div class="ac-head">
                 <span class="ac-danger" :style="{ background: dangerColor(pr.danger) }">{{ dangerLabel(pr.danger) }}</span>
                 <span class="ac-tool"><code>{{ pr.tool }}</code></span>
@@ -309,7 +309,7 @@ function dangerLabel(d: string): string {
           </div>
 
           <!-- 任务详情 + 计划确认 -->
-          <div v-if="current" class="a-detail">
+          <div v-if="current" class="a-detail glass-sub">
             <div class="a-detail-head">
               <span class="a-status">{{ statusLabel[current.status] || current.status }}</span>
               <span class="a-obj">{{ current.objective }}</span>
@@ -353,9 +353,9 @@ function dangerLabel(d: string): string {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(20, 35, 30, 0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(10, 15, 10, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   z-index: 100;
   display: none;
   align-items: center;
@@ -364,7 +364,7 @@ function dangerLabel(d: string): string {
 }
 .overlay.show { display: flex; }
 .agent-panel {
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: min(680px, 96vw);
@@ -373,6 +373,10 @@ function dangerLabel(d: string): string {
   flex-direction: column;
   box-shadow: var(--shadow-lg);
   animation: popIn 0.25s ease both;
+}
+.glass-strong {
+  backdrop-filter: blur(26px) saturate(1.25);
+  -webkit-backdrop-filter: blur(26px) saturate(1.25);
 }
 .a-head {
   display: flex;
@@ -387,35 +391,40 @@ function dangerLabel(d: string): string {
 .a-x:hover { color: var(--danger); background: var(--danger-soft); }
 .a-body { flex: 1; overflow-y: auto; padding: 16px 20px 20px; }
 .a-create { display: flex; gap: 8px; margin-bottom: 14px; }
-.a-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-size: 0.88rem; outline: none; min-width: 0; }
+.a-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-size: 0.88rem; outline: none; min-width: 0; }
 .a-input:focus { border-color: var(--primary); box-shadow: var(--glow); }
 .a-btn { background: var(--bg-user); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0 20px; font-size: 0.86rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.15s; }
 .a-btn:hover { background: var(--bg-user-deep); }
 .a-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .a-btn.ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
-.a-btn.ghost:hover { color: var(--primary-deep); border-color: var(--primary); }
-.a-btn.run { background: var(--primary); }
+.a-btn.ghost:hover { color: var(--primary-text); border-color: var(--primary); }
+.a-btn.run { background: var(--primary); color: var(--text-invert); }
 .a-btn.cancel { background: var(--danger-soft); color: var(--danger); }
-.a-btn.cancel:hover { background: #f7e2d8; color: var(--danger); border-color: var(--danger); }
+.a-btn.cancel:hover { background: rgba(224, 138, 109, 0.22); color: var(--danger); border-color: var(--danger); }
 .a-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
 .a-empty { font-size: 0.82rem; color: var(--text-faint); padding: 8px 0; }
-.a-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg); border: 1px solid transparent; transition: all 0.15s; }
+.a-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg-card); border: 1px solid transparent; transition: all 0.15s; }
 .a-item:hover { border-color: var(--border-light); }
 .a-item.active { border-color: var(--primary); background: var(--primary-soft); }
-.a-item-status { font-size: 0.7rem; color: var(--primary-deep); background: var(--primary-soft); padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.a-item-status { font-size: 0.7rem; color: var(--primary-text); background: var(--primary-soft); padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
 .a-item-title { font-size: 0.85rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.a-detail { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; background: var(--bg); }
+.a-detail { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; }
+.glass-sub {
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
 .a-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.a-status { font-size: 0.75rem; font-weight: 700; color: var(--primary-deep); }
+.a-status { font-size: 0.75rem; font-weight: 700; color: var(--primary-text); }
 .a-obj { font-size: 0.9rem; color: var(--text); }
 .a-plan { display: flex; flex-direction: column; gap: 8px; }
-.a-step { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: #fff; }
-.a-step.allowed { border-left: 3px solid #7fbf7f; }
+.a-step { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--bg-card); }
+.a-step.allowed { border-left: 3px solid var(--ok); }
 .a-step.denied { border-left: 3px solid var(--danger); opacity: 0.7; }
 .a-step.running { border-left: 3px solid var(--primary); }
 .a-step.done { border-left: 3px solid var(--primary); }
 .a-step-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.a-step-idx { width: 20px; height: 20px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-deep); font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.a-step-idx { width: 20px; height: 20px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-text); font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .a-step-title { font-size: 0.88rem; font-weight: 600; color: var(--text); }
 .a-step-cfg { font-size: 0.7rem; color: var(--text-dim); margin-left: auto; }
 .a-step-status { font-size: 0.7rem; color: var(--primary); }
@@ -423,34 +432,32 @@ function dangerLabel(d: string): string {
 .a-step-result { font-size: 0.76rem; color: var(--text-dim); margin: 2px 0 2px 28px; white-space: pre-wrap; max-height: 60px; overflow: hidden; }
 .a-step-actions { display: flex; gap: 6px; margin-top: 6px; margin-left: 28px; }
 .step-btn { border: none; border-radius: 8px; padding: 4px 14px; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
-.step-btn.reject { background: #f5ede8; color: #8a6050; }
-.step-btn.allow { background: #e6f4ea; color: #2e7d52; }
+.step-btn.reject { background: var(--danger-soft); color: var(--danger); }
+.step-btn.allow { background: var(--ok-soft); color: var(--ok); }
 .a-detail-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
-.a-running { font-size: 0.8rem; color: var(--primary-deep); }
+.a-running { font-size: 0.8rem; color: var(--primary-text); }
 .a-result { margin-top: 12px; font-size: 0.84rem; color: var(--text); background: var(--primary-soft); padding: 10px 12px; border-radius: var(--radius-sm); white-space: pre-wrap; }
-.a-msg { font-size: 0.8rem; margin-top: 10px; padding: 8px 12px; background: var(--primary-soft); border-radius: var(--radius-sm); color: var(--primary-deep); }
+.a-msg { font-size: 0.8rem; margin-top: 10px; padding: 8px 12px; background: var(--primary-soft); border-radius: var(--radius-sm); color: var(--primary-text); }
 .a-msg.err { color: var(--danger); background: var(--danger-soft); }
 
 .a-confirms { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; }
 .a-confirm-card {
-  background: #fffdf5;
-  border: 1px solid #e8e0c8;
-  border-left: 4px solid #d9a860;
-  border-radius: 12px;
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-md);
   padding: 12px 14px;
-  box-shadow: 0 4px 16px rgba(40, 50, 25, 0.12);
+  box-shadow: var(--shadow-md);
 }
 .ac-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .ac-danger { font-size: 0.68rem; color: #fff; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
-.ac-tool { font-size: 0.8rem; color: #6a6048; }
-.ac-tool code { background: #f0ede4; padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; }
-.ac-msg { font-size: 0.85rem; color: #3a3428; margin-bottom: 6px; line-height: 1.5; }
+.ac-tool { font-size: 0.8rem; color: var(--text-dim); }
+.ac-tool code { background: var(--bg-hover); padding: 1px 6px; border-radius: 4px; font-size: 0.78rem; }
+.ac-msg { font-size: 0.85rem; color: var(--text); margin-bottom: 6px; line-height: 1.5; }
 .ac-args { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
 .ac-arg { display: flex; gap: 6px; font-size: 0.76rem; }
-.ac-k { color: #8a7e66; min-width: 60px; flex-shrink: 0; }
-.ac-v { color: #3a3428; word-break: break-all; max-height: 44px; overflow: hidden; }
+.ac-k { color: var(--text-faint); min-width: 60px; flex-shrink: 0; }
+.ac-v { color: var(--text-dim); word-break: break-all; max-height: 44px; overflow: hidden; }
 .ac-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .ac-btn { border: none; border-radius: 8px; padding: 6px 16px; font-size: 0.78rem; font-weight: 600; cursor: pointer; }
-.ac-btn.reject { background: #f5ede8; color: #8a6050; }
-.ac-btn.allow { background: #c6d680; color: #3a4428; }
+.ac-btn.reject { background: var(--danger-soft); color: var(--danger); }
+.ac-btn.allow { background: var(--primary-soft); color: var(--primary-text); border: 1px solid var(--border-light); }
 </style>

@@ -92,8 +92,18 @@ _BLOCK_PATTERNS = [
 ]
 
 # 额外关键词（更宽松的兜底）
-_BLOCK_KEYWORDS = ("sudo rm", "fsutil", "bcdedit", "gpedit", "net stop", "sc delete",
-                   "wmic", "vssadmin", "attrib -r -s -h /s /d")
+# 两类分开处理：
+# - 短语（含空格，语义明确）：子串匹配即可；
+# - 单词（如 wmic/fsutil）：用词界匹配，避免「wmical」「fsutiltool」等
+#   正常复合词被误伤——子串匹配会把任何含这些字母串的命令一律拒绝。
+_BLOCK_KEYWORD_PHRASES = ("sudo rm", "net stop", "sc delete", "attrib -r -s -h /s /d")
+
+# 单个命令词：词界匹配（前后不能是字母/数字，避免子串误杀）
+_BLOCK_KEYWORD_WORDS = ("wmic", "fsutil", "bcdedit", "gpedit", "vssadmin")
+_BLOCK_WORD_PATTERN = re.compile(
+    r"(?<![a-z0-9])(" + "|".join(_BLOCK_KEYWORD_WORDS) + r")(?![a-z0-9])",
+    re.I,
+)
 
 
 def check_command(command: str) -> tuple[bool, str]:
@@ -108,9 +118,12 @@ def check_command(command: str) -> tuple[bool, str]:
     for pat in _BLOCK_PATTERNS:
         if pat.search(command):
             return False, f"（命令被安全策略拒绝：命中危险模式 {pat.pattern}）"
-    for kw in _BLOCK_KEYWORDS:
+    for kw in _BLOCK_KEYWORD_PHRASES:
         if kw in lower:
             return False, f"（命令被安全策略拒绝：包含危险关键词 {kw}）"
+    m = _BLOCK_WORD_PATTERN.search(lower)
+    if m:
+        return False, f"（命令被安全策略拒绝：包含危险关键词 {m.group(1)}）"
     # 用户可配置黑名单（AGENT_BLOCK_CMDS，分号分隔；命中即拒，不弹确认）
     for extra in getattr(config, "agent_block_cmds", []):
         if extra and extra in lower:

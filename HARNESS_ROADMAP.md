@@ -44,6 +44,7 @@ HTTP 路由（`ctx.route(method, path, handler)` → `/plugins/{插件名}/…`�
 用户消息钩子（`ctx.on_user_message(fn)`）、回复钩子（`ctx.on_reply(fn)`）。
 可选 `PLUGIN_META = {name, version, description, author}` 供管理界面展示。
 启动时自动加载，改文件热重载；设置面板「插件」区可启停/重载。
+编写规范见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)；
 完整示例见 `plugins/currency.py`，详细设计见 `docs/PLUGIN-SYSTEM-V2.md`。
 
 ## 架构原则

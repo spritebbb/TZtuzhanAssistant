@@ -96,6 +96,9 @@ _PINYIN_ALIASES: tuple[str, ...] = (
     "siquanjia", "quanjiasi", "草", "艹",
 )
 
+# 英文辱骂词（词界匹配，避免「asb」「sbxi」等子串误伤）
+_ABUSE_EN_WORDS = ("sb", "cnm", "fuck", "shit", "bitch")
+
 
 def _expand_abuse_words() -> frozenset[str]:
     """运行时展开辱骂词变体集合（缓存，进程内只算一次）。"""
@@ -129,9 +132,6 @@ _ABUSE_WORDS_NEED_CONTEXT = {
     "恶心": ("吃多了", "有点恶心", "恶心的"),
     "妈的": ("他妈", "你妈"),
 }
-
-# 英文辱骂词（词界匹配，避免「asb」「sbxi」等子串误伤）
-_ABUSE_EN_WORDS = ("sb", "cnm", "fuck", "shit", "bitch")
 
 # 辱骂词指向"别人"时的对象词：当辱骂词和目标对象词同时出现，判断不是在骂菟菚。
 # 例子：「傻逼领导」「妈的，那领导...」「sb同事」——骂的是对方，不该扣菟菚好感。
@@ -399,7 +399,16 @@ def _penalty_ok(user_id: str, delta: int) -> bool:
 
 
 async def on_message(user_id: str, text: str) -> None:
-    """每次收到用户消息时调用：处理好感度即时规则与日期回滚。"""
+    """每次收到用户消息时调用：处理好感度时间维度规则与日期回滚。
+
+    职责边界（拟人核心层改造后的约定）：
+    - 冷落衰减（久没聊 → 心情先降）、心情倍率读取；
+    - 基础聊天奖励（每次 +1，日上限 10）、每日首次/陪伴奖励、跨天回滚；
+    - 刷屏扣分（纯频率维度，语义感知不覆盖）；
+    - 恋人达成触发第二次称呼确认。
+    注意：不在此处做「辱骂」关键词扣分——那由 pipeline 在语义感知降级/失败时
+    走 apply_abuse_penalty 兜底，避免与语义 affection_delta 双重计分。
+    """
     user = db.ensure_user(user_id)
     today = date.today()
 
@@ -408,11 +417,13 @@ async def on_message(user_id: str, text: str) -> None:
         _cleanup_timestamps()
 
     # ---- 心情读取（只读，不再独立算互动增减）----
-    # 拟人核心层改造：这句话对心情的影响统一由 pipeline 的 apply_impulse（语义感知）
-    # 驱动，这里只做两件事：
+    # 拟人核心层改造：这句话对「心情」的影响统一由 pipeline 的 apply_impulse
+    # （语义感知）驱动，这里的心情相关只做两件事：
     #   1. 应用「冷落衰减」（久没聊 → 心情先降），这是纯时间维度、语义感知不覆盖；
     #   2. 读取当前心情值，用于下面好感度增减的倍率缩放（心情好加分多、扣分少）。
     # 不再调用 mood.on_user_message（它会做关键词互动检测，与语义感知重复计心情）。
+    # 此外本函数还负责「好感度时间维度规则」：基础聊天奖励、每日首次/陪伴奖励、
+    # 跨天回滚、刷屏扣分、恋人确认（见函数 docstring），这些与语义感知不重叠。
     import asyncio as _asyncio
     from .mood import idle_decay_if_due, mood_bonus_multiplier, today_weather as _today_weather
     from .config import config
@@ -433,7 +444,9 @@ async def on_message(user_id: str, text: str) -> None:
         if delta >= 0:
             return round(delta * mult)
         # 心情差时扣分更狠：低落(0.6) → 扣分×1.4；雀跃(1.5) → 扣分×0.5
-        return round(delta * (2.0 - mult))
+        # 负向变动至少保底 delta 本身：避免雀跃时 round(-0.5)=0 把轻微扣分吞掉
+        scaled = round(delta * (2.0 - mult))
+        return min(delta, scaled)
 
     def _scaled(delta: int, reason: str) -> int:
         """按心情倍率缩放好感度变动并落库，返回实际 delta（0 表示不变动）。"""
@@ -497,17 +510,52 @@ async def on_message(user_id: str, text: str) -> None:
             _scaled(DAILY_COMPANION, "当日陪伴")
             _mark_daily_bonus(user_id, "first_chat")
 
-    # ---- 即时扣分（含每日上限检查；用缩放后的实际 delta 判断，避免心情差时超限）----
+    # ---- 即时扣分：仅「刷屏」（含每日上限检查）----
+    # 刷屏是纯频率维度、语义感知不覆盖，保留在此。
+    # 「辱骂」扣分已移至 pipeline 的语义兜底路径（apply_abuse_penalty），
+    # 因为语义感知成功时辱骂影响已由 apply_impulse 的 affection_delta 精确表达，
+    # 这里再扣一次会造成「关键词 -5 + 语义 delta」双重计分。
     if _spam_hit(user_id):
         actual = _scale_delta(SPAM_PENALTY)
         if _penalty_ok(user_id, actual):
             _scaled(SPAM_PENALTY, "刷屏")
-    if check_abuse(text):
-        actual = _scale_delta(ABUSE_PENALTY)
-        if _penalty_ok(user_id, actual):
-            _scaled(ABUSE_PENALTY, "辱骂")
 
     # ---- 恋人达成（首次）→ 触发第二次称呼确认 ----
     user = db.get_user(user_id)
     if user["affection"] >= 75 and not user["lover_confirm"]:
         db.set_lover_confirm(user_id)
+
+
+def apply_abuse_penalty(user_id: str, text: str) -> bool:
+    """关键词辱骂兜底扣分（供 pipeline 在语义感知降级/失败时调用）。
+
+    拟人核心层的唯一计分约定：语义感知成功时，辱骂的好感影响已由
+    apply_impulse 的 affection_delta 精确表达，pipeline 不得再调本函数；
+    仅当感知降级（degraded）或完全失败（perc=None）时，才用本函数做
+    关键词辱骂扣分，避免「关键词 -5 + 语义 delta」双重计分。
+
+    返回是否实际执行了扣分。
+    """
+    if not check_abuse(text):
+        return False
+    from .config import config
+    from .mood import idle_decay_if_due, mood_bonus_multiplier
+
+    try:
+        mood = idle_decay_if_due(user_id, city=config.mood_city)
+        mult = mood_bonus_multiplier(mood)
+    except Exception:
+        mult = 1.0
+
+    def _scale(delta: int) -> int:
+        if delta >= 0:
+            return round(delta * mult)
+        scaled = round(delta * (2.0 - mult))
+        return min(delta, scaled)
+
+    actual = _scale(ABUSE_PENALTY)
+    if not _penalty_ok(user_id, actual):
+        return False
+    if actual != 0:
+        db.update_affection(user_id, actual, "辱骂")
+    return actual != 0

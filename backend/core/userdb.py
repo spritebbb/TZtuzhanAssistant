@@ -212,7 +212,95 @@ class UserDB:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+        # 用户身份统一迁移：历史版本聊天链路用 f"session_{session_id}"（单一会话
+        # 下即 "session_current"），现统一为 "assistant-main"，与 agent 任务代理、
+        # contextvar 默认值对齐。此处把旧的 session_current 数据合并进 assistant-main，
+        # 避免菟菚「失忆」（好感度/心情/记忆/待办全部保留）。幂等：无旧数据时无副作用。
+        self._migrate_legacy_user_identity()
         self.conn.commit()
+
+    def _migrate_legacy_user_identity(self, legacy: str = "session_current",
+                                      target: str = "assistant-main") -> None:
+        """把旧身份（legacy）名下所有数据合并到统一身份（target）。幂等。
+
+        - users：好感度取两者较大值，昵称/恋人/日期取 target 缺失时回填 legacy；
+        - 其余表：把 legacy 的行改挂到 target（user_id 列 UPDATE）；有唯一约束的
+          表（user_meta / kv_store / diary）用 INSERT OR IGNORE 兜底避免主键冲突。
+        """
+        legacy_row = self.conn.execute(
+            "SELECT * FROM users WHERE user_id = ?", (legacy,)
+        ).fetchone()
+        if legacy_row is None:
+            return
+        target_row = self.conn.execute(
+            "SELECT * FROM users WHERE user_id = ?", (target,)
+        ).fetchone()
+        if target_row is None:
+            # target 不存在：直接把 legacy 的 users 行改名即可（其余表仍走 UPDATE）
+            self.conn.execute(
+                "UPDATE users SET user_id = ? WHERE user_id = ?", (target, legacy)
+            )
+        else:
+            # 双方都存在：好感度取较大，昵称/恋人确认/日期取 target 缺失时回填 legacy
+            merged_affection = max(target_row["affection"], legacy_row["affection"])
+            nickname = target_row["nickname_pref"] or legacy_row["nickname_pref"]
+            lover = max(target_row["lover_confirm"], legacy_row["lover_confirm"])
+            first_chat = max(target_row["first_chat_done"], legacy_row["first_chat_done"])
+            last_chat = target_row["last_chat_date"] or legacy_row["last_chat_date"]
+            last_batch = target_row["last_batch_date"] or legacy_row["last_batch_date"]
+            mood = max(target_row["mood_value"], legacy_row["mood_value"])
+            mood_updated = target_row["mood_updated_at"] or legacy_row["mood_updated_at"]
+            style = target_row["style_profile"] or legacy_row["style_profile"]
+            self.conn.execute(
+                "UPDATE users SET affection=?, nickname_pref=?, lover_confirm=?, "
+                "first_chat_done=?, last_chat_date=?, last_batch_date=?, "
+                "mood_value=?, mood_updated_at=?, style_profile=? WHERE user_id=?",
+                (merged_affection, nickname, lover, first_chat, last_chat, last_batch,
+                 mood, mood_updated, style, target),
+            )
+            self.conn.execute("DELETE FROM users WHERE user_id = ?", (legacy,))
+
+        # 有唯一约束、直接 UPDATE 可能主键冲突的表：先删 target 侧可能冲突的行再改，
+        # 或改用 INSERT OR IGNORE。这里统一策略：把 legacy 行改挂 target 时，
+        # 若 target 已有同名 key，保留 target 原值（legacy 行删除）。
+        for table in ("user_meta",):
+            self.conn.execute(
+                f"INSERT OR IGNORE INTO {table} (user_id, last_fact_msg_id, last_profile_msg_id) "
+                f"SELECT ?, last_fact_msg_id, last_profile_msg_id FROM {table} WHERE user_id = ?",
+                (target, legacy),
+            )
+            self.conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (legacy,))
+
+        # kv_store：复合主键 (user_id, key)，逐 key 迁移，target 已有则跳过
+        legacy_kvs = self.conn.execute(
+            "SELECT key, value FROM kv_store WHERE user_id = ?", (legacy,)
+        ).fetchall()
+        for kv in legacy_kvs:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO kv_store (user_id, key, value) VALUES (?, ?, ?)",
+                (target, kv["key"], kv["value"]),
+            )
+        self.conn.execute("DELETE FROM kv_store WHERE user_id = ?", (legacy,))
+
+        # diary：唯一约束 (user_id, date)，同样逐行 INSERT OR IGNORE
+        legacy_diaries = self.conn.execute(
+            "SELECT date, content, mood, ts FROM diary WHERE user_id = ?", (legacy,)
+        ).fetchall()
+        for d in legacy_diaries:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO diary (user_id, date, content, mood, ts) VALUES (?, ?, ?, ?, ?)",
+                (target, d["date"], d["content"], d["mood"], d["ts"]),
+            )
+        self.conn.execute("DELETE FROM diary WHERE user_id = ?", (legacy,))
+
+        # 其余「纯 append」表：直接把 user_id 改挂 target（无唯一约束冲突风险）
+        for table in (
+            "messages", "long_memory", "facts", "affection_log", "important_dates",
+            "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
+        ):
+            self.conn.execute(
+                f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
+            )
 
     # ---- users ----
     @_locked
@@ -223,6 +311,7 @@ class UserDB:
         self.conn.commit()
         return self.get_user(user_id)
 
+    @_locked
     def get_user(self, user_id: str):
         row = self.conn.execute(
             "SELECT * FROM users WHERE user_id = ?", (user_id,)
@@ -262,6 +351,7 @@ class UserDB:
         self.conn.commit()
         return cur.lastrowid or 0
 
+    @_locked
     def list_tasks(self, user_id: str, status: str | None = None) -> list[dict]:
         """列出任务。status 可选过滤（pending / in_progress / completed / blocked）。"""
         if status:
@@ -279,6 +369,7 @@ class UserDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    @_locked
     def get_task(self, user_id: str, task_id: int) -> dict | None:
         """获取单个任务详情。"""
         r = self.conn.execute(
@@ -300,6 +391,7 @@ class UserDB:
         elif "status" in updates and updates["status"] != "completed":
             # 从已完成回退到其它状态：清理完成时间，避免残留误导
             updates["completed_at"] = None
+        # 字段名已由白名单约束，值全部走参数绑定（含 None 也能正确写入 SQL NULL）
         set_clause = ", ".join(f"{k}=?" for k in updates)
         vals = list(updates.values()) + [user_id, task_id]
         self.conn.execute(
@@ -317,6 +409,7 @@ class UserDB:
         self.conn.commit()
         return cur.rowcount > 0
 
+    @_locked
     def get_mood(self, user_id: str) -> tuple[int, str | None]:
         """读取心情值与上次更新时间 (mood, updated_at)。"""
         row = self.conn.execute(
@@ -344,6 +437,7 @@ class UserDB:
         )
         self.conn.commit()
 
+    @_locked
     def get_style(self, user_id: str) -> str:
         row = self.conn.execute(
             "SELECT style_profile FROM users WHERE user_id = ?", (user_id,)
@@ -420,6 +514,7 @@ class UserDB:
         )
         self.conn.commit()
 
+    @_locked
     def recent_messages(self, user_id: str, limit: int):
         return self.conn.execute(
             "SELECT role, content FROM messages WHERE user_id = ? "
@@ -427,6 +522,7 @@ class UserDB:
             (user_id, limit),
         ).fetchall()[::-1]
 
+    @_locked
     def recent_messages_with_ids(self, user_id: str, limit: int):
         """最近 limit 条消息（含 id，按时间升序）。供需要推进游标的场景。"""
         return self.conn.execute(
@@ -435,6 +531,7 @@ class UserDB:
             (user_id, limit),
         ).fetchall()[::-1]
 
+    @_locked
     def messages_between(self, user_id: str, start: date, end: date):
         return self.conn.execute(
             "SELECT id, role, content, ts FROM messages WHERE user_id = ? "
@@ -477,6 +574,7 @@ class UserDB:
             self.conn.commit()
         return removed
 
+    @_locked
     def search_long_memory(self, user_id: str, query: str, top_k: int):
         """v1 关键词检索：按中文字符二元组重叠打分，取 top_k。
 
@@ -501,6 +599,7 @@ class UserDB:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [{"content": c} for _, c in scored[:top_k]]
 
+    @_locked
     def search_long_memory_multi(self, user_id: str, queries: list[str], top_k: int):
         """多查询词合并检索：每个查询独立打分后按最高分汇总，取 top_k。
 
@@ -533,6 +632,7 @@ class UserDB:
         return [{"content": c} for _, c in ranked[:top_k]]
 
     # ---- facts（LLM 提炼的长期事实）----
+    @_locked
     def add_fact(self, user_id: str, content: str) -> int | None:
         """存一条事实；与已有事实二元组重叠≥50% 视为重复则跳过。
 
@@ -559,6 +659,7 @@ class UserDB:
         self.conn.commit()
         return cur.lastrowid
 
+    @_locked
     def search_facts(self, user_id: str, query: str, top_k: int):
         """按关键词（二元组）检索事实，取 top_k。
 
@@ -612,6 +713,7 @@ class UserDB:
         self.conn.commit()
         return cur.lastrowid
 
+    @_locked
     def get_profile(self, user_id: str, category: str | None = None) -> list[dict]:
         """读取画像条目；category 为空返回全部（按分类分组排序）。"""
         if category:
@@ -675,6 +777,7 @@ class UserDB:
         self.conn.commit()
         return True
 
+    @_locked
     def get_terms(self, user_id: str, limit: int = 30) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, term, category, meaning, count FROM user_terms "
@@ -719,6 +822,7 @@ class UserDB:
         self.conn.commit()
         return True
 
+    @_locked
     def get_style_map(self, user_id: str, limit: int = 20) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, situation, style, count FROM user_style_map "
@@ -736,6 +840,7 @@ class UserDB:
         return cur.rowcount > 0
 
     # ---- 事实提炼游标 ----
+    @_locked
     def get_last_fact_msg_id(self, user_id: str) -> int:
         row = self.conn.execute(
             "SELECT last_fact_msg_id FROM user_meta WHERE user_id = ?", (user_id,)
@@ -751,6 +856,7 @@ class UserDB:
         )
         self.conn.commit()
 
+    @_locked
     def get_last_profile_msg_id(self, user_id: str) -> int:
         row = self.conn.execute(
             "SELECT last_profile_msg_id FROM user_meta WHERE user_id = ?", (user_id,)
@@ -766,24 +872,28 @@ class UserDB:
         )
         self.conn.commit()
 
+    @_locked
     def messages_after(self, user_id: str, after_id: int, limit: int):
         return self.conn.execute(
             "SELECT id, role, content FROM messages WHERE user_id = ? AND id > ? ORDER BY id LIMIT ?",
             (user_id, after_id, limit),
         ).fetchall()
 
+    @_locked
     def max_message_id(self, user_id: str) -> int:
         row = self.conn.execute(
             "SELECT MAX(id) AS m FROM messages WHERE user_id = ?", (user_id,)
         ).fetchone()
         return row["m"] or 0
 
+    @_locked
     def last_message_ts(self, user_id: str) -> str | None:
         row = self.conn.execute(
             "SELECT ts FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)
         ).fetchone()
         return row["ts"] if row else None
 
+    @_locked
     def last_assistant_message(self, user_id: str) -> str | None:
         row = self.conn.execute(
             "SELECT content FROM messages WHERE user_id = ? AND role = 'assistant' "
@@ -826,6 +936,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "triples",
+                "tasks",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
@@ -882,19 +993,21 @@ def get_today_important_dates(user_id: str) -> list[dict]:
     """
     today = date.today().strftime("%m-%d")
     cur_year = date.today().year
-    rows = db.conn.execute(
-        "SELECT * FROM important_dates WHERE user_id = ? AND date = ? "
-        "AND (kind IN ('birthday', 'anniversary') OR year IS NULL OR year = ?) ORDER BY kind",
-        (user_id, today, cur_year),
-    ).fetchall()
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM important_dates WHERE user_id = ? AND date = ? "
+            "AND (kind IN ('birthday', 'anniversary') OR year IS NULL OR year = ?) ORDER BY kind",
+            (user_id, today, cur_year),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
 def get_all_important_dates(user_id: str) -> list[dict]:
     """查询该用户所有特殊日子。"""
-    rows = db.conn.execute(
-        "SELECT * FROM important_dates WHERE user_id = ? ORDER BY date", (user_id,)
-    ).fetchall()
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM important_dates WHERE user_id = ? ORDER BY date", (user_id,)
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -948,10 +1061,11 @@ def save_sticker(user_id: str, file: str, url: str, desc: str, emotion: str = ""
 
 def get_stickers(user_id: str, limit: int = 50) -> list[dict]:
     """取该用户收藏的表情包（按出现次数排序，热门靠前）。"""
-    rows = db.conn.execute(
-        "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC, id DESC LIMIT ?",
-        (user_id, limit),
-    ).fetchall()
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC, id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -965,16 +1079,17 @@ def get_sticker_by_desc(user_id: str, keyword: str, limit: int = 30) -> list[dic
     kw = [k for k in kw if k]
     if not kw:
         return []
-    rows = db.conn.execute(
-        "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC LIMIT 300",
-        (user_id,),
-    ).fetchall()
-    scored = []
-    for r in rows:
-        desc = r["desc"] or ""
-        hits = sum(1 for k in kw if k in desc)
-        if hits > 0:
-            scored.append((hits, dict(r)))
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC LIMIT 300",
+            (user_id,),
+        ).fetchall()
+        scored = []
+        for r in rows:
+            desc = r["desc"] or ""
+            hits = sum(1 for k in kw if k in desc)
+            if hits > 0:
+                scored.append((hits, dict(r)))
     scored.sort(key=lambda x: (x[0], x[1].get("count", 0)), reverse=True)
     return [d for _, d in scored[:limit]]
 
@@ -988,15 +1103,16 @@ def get_sticker_by_emotion(user_id: str, emotion: str, limit: int = 10) -> list[
     emotion = emotion.strip()
     if not emotion:
         return []
-    rows = db.conn.execute(
-        "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC LIMIT 300",
-        (user_id,),
-    ).fetchall()
-    hits = []
-    for r in rows:
-        emo = (r["emotion"] or "").split(",")
-        if any(emotion in e.strip() or e.strip() in emotion for e in emo if e.strip()):
-            hits.append(dict(r))
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM stickers WHERE user_id = ? ORDER BY count DESC LIMIT 300",
+            (user_id,),
+        ).fetchall()
+        hits = []
+        for r in rows:
+            emo = (r["emotion"] or "").split(",")
+            if any(emotion in e.strip() or e.strip() in emotion for e in emo if e.strip()):
+                hits.append(dict(r))
     hits.sort(key=lambda x: -x.get("count", 0))
     return hits[:limit]
 
@@ -1030,9 +1146,10 @@ db = UserDB()
 
 def kv_get(user_id: str, key: str) -> str | None:
     """读取 kv 值；不存在返回 None。"""
-    row = db.conn.execute(
-        "SELECT value FROM kv_store WHERE user_id=? AND key=?", (user_id, key)
-    ).fetchone()
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT value FROM kv_store WHERE user_id=? AND key=?", (user_id, key)
+        ).fetchone()
     return row["value"] if row else None
 
 

@@ -16,11 +16,18 @@ from ..core.pipeline import process
 from ..core.current_user import current_user_id
 from ..session.store import CURRENT_SESSION_ID, append_messages, get_messages
 
-# 从 session_id 派生用户身份（每个会话完全隔离，互不影响）
+# 单一会话模式下，用户身份统一为 assistant-main（与 agent 任务代理、meta 兜底、
+# contextvar 默认值保持一致），保证聊天与任务代理共用同一份好感度/心情/记忆画像，
+# 避免「同一个菟菚」在聊天和任务两条线上割裂成两条互不相通的数据记录。
 def _user_id(session_id: str) -> str:
-    return f"session_{session_id}"
+    return "assistant-main"
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+# 后台生成任务的强引用集合：asyncio.create_task 返回的 Task 若无强引用，
+# 可能在任意 await 点被 GC 回收导致 _runner 被静默取消（回复不落库）。
+# 与 pipeline._memory_tasks / agent._agent_bg_tasks 同一做法。
+_bg_tasks: set[asyncio.Task] = set()
 
 
 def _sse(obj: dict) -> str:
@@ -28,11 +35,14 @@ def _sse(obj: dict) -> str:
 
 
 @router.post("/chat")
-async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool = Form(False)):
+async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool = Form(False), image: str = Form("")):
     """SSE 流式对话：逐字推送 data: {"piece": "..."}，结束时发 {"done": "完整回复"}。
 
     单一会话模式：session_id 固定为 'current'。不传则自动使用固定会话；
     传了则校验是否为 'current'，其余 id 一律视为不存在。
+
+    可选 image：识图等场景下 user 消息附带的图片 URL（已落盘的 /api/images/...），
+    会随 user 消息一起持久化，保证刷新/归档后仍能看到原图。
     """
     text = text.strip()
     if not text:
@@ -46,8 +56,11 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
     if msgs is None:
         return JSONResponse({"ok": False, "error": "会话不存在，请刷新页面"}, status_code=404)
 
-    # 记录用户消息（立即持久化）
-    saved = await append_messages(session_id, [{"role": "user", "content": text, "ts": time.time()}])
+    # 记录用户消息（立即持久化；识图场景附带 image）
+    user_msg = {"role": "user", "content": text, "ts": time.time()}
+    if image:
+        user_msg["image"] = image
+    saved = await append_messages(session_id, [user_msg])
     if not saved:
         # 会话可能在校验后被删除：用户消息不落库会静默丢失，这里明确报错
         from ..core.log import logger as _lg
@@ -69,6 +82,10 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
         _state["pending_img"] = url
         await q.put(("__image__", url))
 
+    async def _progress_cb(event: dict) -> None:
+        # 工具循环阶段进展：把事件透传给前端（前端气泡显示「正在思考/调用 XX」）
+        await q.put(("__tool__", event))
+
     async def _runner() -> None:
         """后台生成任务：完成时自行持久化，不依赖 SSE 连接生命周期。"""
         # 设置当前会话的用户身份（工具/记忆/待办按此隔离）
@@ -86,7 +103,7 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
         _PROCESS_TOTAL_TIMEOUT = 300
         try:
             reply = await asyncio.wait_for(
-                process(_user_id(session_id), text, mock=mock, stream_cb=_cb, image_cb=_image_cb),
+                process(_user_id(session_id), text, mock=mock, stream_cb=_cb, image_cb=_image_cb, progress_cb=_progress_cb),
                 timeout=_PROCESS_TOTAL_TIMEOUT,
             )
             # 后台完成：持久化 bot 消息到原会话（即使客户端已断开）
@@ -116,6 +133,8 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
 
     async def sse() -> AsyncGenerator[str, None]:
         task = asyncio.create_task(_runner())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
         try:
             while True:
                 item = await q.get()
@@ -125,6 +144,10 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
                     continue
                 if isinstance(item, tuple) and item[0] == "__image__":
                     yield _sse({"image_url": item[1]})
+                    continue
+                if isinstance(item, tuple) and item[0] == "__tool__":
+                    # 工具循环进度事件：转发给前端展示「正在思考/调用 XX」
+                    yield _sse({"tool": item[1]})
                     continue
                 if isinstance(item, tuple) and item[0] == "__done__":
                     yield _sse({"done": item[1]})

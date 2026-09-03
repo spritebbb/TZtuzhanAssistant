@@ -46,7 +46,7 @@ def _vision_conf() -> tuple[str, str, str]:
     return (
         config.llm_base_url,
         config.llm_api_key,
-        config.vision_model or "deepseek-v4-flash-vision-exp",
+        config.vision_model or _DEFAULT_VL_MODEL,
     )
 
 
