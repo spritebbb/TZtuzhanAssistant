@@ -125,11 +125,15 @@ function stopBackend(): void {
   if (backendProcess) {
     try {
       const pid = backendProcess.pid
-      // 优雅关闭：让后端先做 checkpoint + 备份（有 1.5s 兜底强杀）
+      // 优雅关闭：让后端先做 checkpoint + 备份（强杀兜底留足时间）。
+      // 后端 /api/health/shutdown 会先返回 200，再后台执行 checkpoint+备份+退出；
+      // 这里给足 8s 兜底窗口——备份含 imgs/screenshots 目录拷贝，可能较慢，
+      // 过早强杀会丢最后一次备份。后端正常退出后 backendProcess 会被 on('exit')
+      // 置 null，下方 setTimeout 里的判断会跳过强杀。
       if (pid) {
         const http = require('http')
         const req = http.request(
-          { host: '127.0.0.1', port: 8801, path: '/api/health/shutdown', method: 'POST', timeout: 1200 },
+          { host: '127.0.0.1', port: 8801, path: '/api/health/shutdown', method: 'POST', timeout: 500 },
           () => {}
         )
         req.on('error', () => {})
@@ -142,7 +146,7 @@ function stopBackend(): void {
         backendProcess.kill()
         backendProcess = null
       }
-    }, 1500)
+    }, 8000)
   }
 }
 
@@ -241,6 +245,10 @@ ipcMain.handle('get-backend-url', () => BACKEND_HOST)
 ipcMain.handle('get-version', () => app.getVersion())
 ipcMain.handle('notify', (_e, { title, body }: { title: string; body: string }) => {
   // 系统通知：菟菚主动消息。点击通知 → 聚焦并显示窗口。
+  // 去重：与轮询通道（pollInitiative）共享 lastNotifiedText，避免「渲染进程 SSE
+  // 先消费 + 主进程轮询后到」时同一条消息弹两次。谁先到都只弹一次。
+  if (body === lastNotifiedText) return false
+  lastNotifiedText = body
   if (Notification.isSupported()) {
     const n = new Notification({ title, body, silent: false })
     n.on('click', () => {

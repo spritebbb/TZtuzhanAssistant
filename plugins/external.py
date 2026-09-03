@@ -25,13 +25,17 @@ from backend.tools.base import ToolRegistry
 # Codex CLI 候选根目录（实际路径按版本目录自动探测，避免写死版本号）
 _CODEX_BIN_DIR = Path(os.path.expandvars(r"%LOCALAPPDATA%\OpenAI\Codex\bin"))
 
-# DSH CLI 默认路径
+# DSH CLI 默认路径：优先读环境变量 DSH_CLI，其次 DSH_ROOT 推导，最后兜底到
+# 相对 PROJECT_ROOT 的兄弟目录，避免把开发者本机 D:\DSH 写死（跨机器失效）。
 _DSH_CLI_DEFAULT = Path(
-    r"D:\DSH\deepseek-harness\apps\cli\lib\bin.js"
+    os.getenv(
+        "DSH_CLI",
+        os.path.join(os.getenv("DSH_ROOT", str(PROJECT_ROOT.parent)), "deepseek-harness", "apps", "cli", "lib", "bin.js"),
+    )
 ).resolve()
 
 # 当前工作目录（DSH 项目根；可用 DSH_CWD 环境变量覆盖）
-_DSH_CWD = os.getenv("DSH_CWD", r"D:\DSH")
+_DSH_CWD = os.getenv("DSH_CWD", os.getenv("DSH_ROOT", str(PROJECT_ROOT.parent)))
 
 
 def _codex_path() -> str:

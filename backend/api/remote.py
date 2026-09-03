@@ -105,6 +105,7 @@ async def api_remote_task(request: Request):
             _remote_tasks[task_id] = {
                 "status": "done",
                 "result": result,
+                "user_id": uid,
                 "created_at": time.time(),
             }
         except Exception as e:
@@ -112,6 +113,7 @@ async def api_remote_task(request: Request):
             _remote_tasks[task_id] = {
                 "status": "failed",
                 "result": f"（执行失败：{type(e).__name__}: {e}）",
+                "user_id": uid,
                 "created_at": time.time(),
             }
 

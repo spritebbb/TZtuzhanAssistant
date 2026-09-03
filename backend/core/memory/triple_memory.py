@@ -98,37 +98,40 @@ def save_triples(user_id: str, triples: list[list[str]], source_msg: str = "") -
     now = datetime.now().isoformat(timespec="seconds")
     count = 0
     inserted_ids: list[int] = []
-    for t in triples:
-        if len(t) < 5:
-            continue
-        sub, st, pred, obj, ot = t[:5]
-        dup = db.conn.execute(
-            "SELECT id FROM triples WHERE user_id=? AND subject=? AND predicate=? AND object=?",
-            (user_id, sub, pred, obj),
-        ).fetchone()
-        if dup:
-            continue
-        cur = db.conn.execute(
-            "INSERT INTO triples (user_id, subject, subject_type, predicate, object, object_type, source_msg, created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (user_id, sub, st, pred, obj, ot, source_msg[:200], now),
-        )
-        inserted_ids.append(cur.lastrowid)
-        count += 1
-    db.conn.commit()
+    with db._lock:
+        for t in triples:
+            if len(t) < 5:
+                continue
+            sub, st, pred, obj, ot = t[:5]
+            dup = db.conn.execute(
+                "SELECT id FROM triples WHERE user_id=? AND subject=? AND predicate=? AND object=?",
+                (user_id, sub, pred, obj),
+            ).fetchone()
+            if dup:
+                continue
+            cur = db.conn.execute(
+                "INSERT INTO triples (user_id, subject, subject_type, predicate, object, object_type, source_msg, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (user_id, sub, st, pred, obj, ot, source_msg[:200], now),
+            )
+            inserted_ids.append(cur.lastrowid)
+            count += 1
+        db.conn.commit()
     # 异步建向量索引（triples kind）
     if inserted_ids:
-        import asyncio as _asyncio
+        import asyncio
         from . import vector_store as vec
+        from .engine import _spawn
 
         def _idx():
             for rid in inserted_ids:
-                row = db.conn.execute(
-                    "SELECT subject, predicate, object FROM triples WHERE id=?", (rid,)
-                ).fetchone()
+                with db._lock:
+                    row = db.conn.execute(
+                        "SELECT subject, predicate, object FROM triples WHERE id=?", (rid,)
+                    ).fetchone()
                 if row:
                     vec.add(user_id, "triples", rid, f"{row['subject']} {row['predicate']} {row['object']}")
         try:
-            _asyncio.ensure_future(_asyncio.to_thread(_idx))
+            _spawn(asyncio.to_thread(_idx))
         except Exception:
             pass
     return count
@@ -136,10 +139,11 @@ def save_triples(user_id: str, triples: list[list[str]], source_msg: str = "") -
 
 def query_triples(user_id: str, query: str, top_k: int = _RETRIEVE_TOP_K) -> list[tuple[str, str, str, str, str]]:
     """检索与 query 相关的五元组。向量语义优先，TF-IDF 兜底。"""
-    rows = db.conn.execute(
-        "SELECT id, subject, subject_type, predicate, object, object_type FROM triples WHERE user_id=?",
-        (user_id,),
-    ).fetchall()
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, subject, subject_type, predicate, object, object_type FROM triples WHERE user_id=?",
+            (user_id,),
+        ).fetchall()
     if not rows:
         return []
 

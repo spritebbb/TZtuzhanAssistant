@@ -20,9 +20,7 @@ export interface PendingRequest {
 }
 
 const responding = ref<Set<string>>(new Set())
-// 每个请求的剩余秒数（倒计时显示）
 const remain = ref<Record<string, number>>({})
-// 定时器句柄
 const timers = new Map<string, ReturnType<typeof setInterval>>()
 
 async function respond(requestId: string, allow: boolean) {
@@ -38,23 +36,19 @@ async function respond(requestId: string, allow: boolean) {
       emit('resolve', requestId, allow, false)
     }
   } catch {
-    // 网络错误：确认请求可能已超时，前端自动移除
     emit('resolve', requestId, false, false)
   } finally {
     responding.value.delete(requestId)
   }
 }
 
-// 对每个新到的确认请求启动倒计时：到期自动按拒绝移除（后端同样会超时拒绝）
 watch(() => props.pending.map(p => p.request_id), (ids) => {
-  // 清理已不在列表中的请求计时器
   for (const [rid, timer] of timers) {
     if (!ids.includes(rid)) {
       clearInterval(timer)
       timers.delete(rid)
     }
   }
-  // 为新请求启动倒计时
   for (const p of props.pending) {
     if (timers.has(p.request_id)) continue
     remain.value[p.request_id] = p.timeout || 60
@@ -64,7 +58,7 @@ watch(() => props.pending.map(p => p.request_id), (ids) => {
         clearInterval(timers.get(p.request_id))
         timers.delete(p.request_id)
         delete remain.value[p.request_id]
-        emit('resolve', p.request_id, false, false) // 超时 → 按拒绝移除
+        emit('resolve', p.request_id, false, false)
       } else {
         remain.value[p.request_id] = cur
       }
@@ -78,9 +72,9 @@ onBeforeUnmount(() => {
 })
 
 function dangerColor(d: string): string {
-  if (d === 'high' || d === 'critical') return '#e0584a'
-  if (d === 'normal') return '#d9a860'
-  return '#a4b85c'
+  if (d === 'high' || d === 'critical') return 'var(--danger)'
+  if (d === 'normal') return 'var(--accent)'
+  return 'var(--primary)'
 }
 
 function dangerLabel(d: string): string {
@@ -93,7 +87,7 @@ function dangerLabel(d: string): string {
 
 <template>
   <div v-if="props.pending.length > 0" class="confirm-overlay">
-    <div class="confirm-panel" v-for="pr in props.pending" :key="pr.request_id">
+    <div class="confirm-panel glass" v-for="pr in props.pending" :key="pr.request_id">
       <div class="confirm-header">
         <span class="danger-badge" :style="{ background: dangerColor(pr.danger) }">{{ dangerLabel(pr.danger) }}</span>
         <span class="confirm-tool"><code>{{ pr.tool }}</code></span>
@@ -131,18 +125,12 @@ function dangerLabel(d: string): string {
   flex-shrink: 0;
 }
 .confirm-panel {
-  background: #fffdf5;
-  border: 1px solid #e8e0c8;
-  border-left: 4px solid #d9a860;
-  border-radius: 14px;
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-md);
   padding: 12px 16px;
-  box-shadow: 0 6px 24px rgba(40, 50, 25, 0.14);
-  animation: slideUp 0.25s ease both;
+  box-shadow: var(--shadow-md);
+  animation: fadeUp 0.25s ease both;
   max-width: 560px;
-}
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 .confirm-header {
   display: flex;
@@ -160,10 +148,10 @@ function dangerLabel(d: string): string {
 }
 .confirm-tool {
   font-size: 0.82rem;
-  color: #6a6048;
+  color: var(--text-dim);
 }
 .confirm-tool code {
-  background: #f0ede4;
+  background: var(--bg-hover);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 0.8rem;
@@ -171,12 +159,12 @@ function dangerLabel(d: string): string {
 .confirm-countdown {
   margin-left: auto;
   font-size: 0.7rem;
-  color: #b09a68;
+  color: var(--accent);
   white-space: nowrap;
 }
 .confirm-msg {
   font-size: 0.9rem;
-  color: #3a3428;
+  color: var(--text);
   margin-bottom: 6px;
   line-height: 1.5;
 }
@@ -190,12 +178,12 @@ function dangerLabel(d: string): string {
   padding: 2px 0;
 }
 .arg-key {
-  color: #8a7e66;
+  color: var(--text-faint);
   min-width: 60px;
   flex-shrink: 0;
 }
 .arg-val {
-  color: #3a3428;
+  color: var(--text-dim);
   word-break: break-all;
   max-height: 60px;
   overflow: hidden;
@@ -216,13 +204,14 @@ function dangerLabel(d: string): string {
 }
 .cf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .cf-btn.reject {
-  background: #f5ede8;
-  color: #8a6050;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
-.cf-btn.reject:hover { background: #ecdcd4; }
+.cf-btn.reject:hover { background: rgba(224, 138, 109, 0.22); }
 .cf-btn.allow {
-  background: #c6d680;
-  color: #3a4428;
+  background: var(--primary-soft);
+  color: var(--primary-text);
+  border: 1px solid var(--border-light);
 }
-.cf-btn.allow:hover { background: #b8c86e; }
+.cf-btn.allow:hover { background: var(--primary); color: var(--text-invert); }
 </style>

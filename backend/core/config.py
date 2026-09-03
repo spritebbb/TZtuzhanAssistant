@@ -42,9 +42,16 @@ class Config:
         self.llm_model: str = os.getenv("LLM_MODEL", "deepseek-chat")
         self.llm_temperature: float = _env_float("LLM_TEMPERATURE", 0.8)
         self.llm_max_tokens: int = _env_int("LLM_MAX_TOKENS", 500)
+        # 流式逃生开关：某些端点不支持 stream 时退回整句返回（1=关流式，0=开）
+        self.llm_stream_disable: bool = os.getenv("LLM_STREAM_DISABLE", "0") != "0"
         # 主 LLM 单次请求超时（秒）。网络不稳时调小，让失败更快暴露、更快重试；
         # 默认 45。max_tokens 配得很大时需适当调大，否则会误杀正常长生成。
         self.llm_timeout: int = _env_int("LLM_TIMEOUT", 45)
+
+        # LLM 请求代理。默认空（openai SDK 读系统代理环境变量）。
+        # 本机若存在随会话漂移的临时代理（如 127.0.0.1:xxxxx），会导致外网请求
+        # 间歇性全挂；此时设 LLM_PROXY=off 强制直连（trust_env=False）即可绕过。
+        self.llm_proxy: str = os.getenv("LLM_PROXY", "").strip()
 
         # 感知层独立小模型：语义感知（perception）是高频轻量调用（每条消息一次），
         # 用它专属的模型/端点可显著降低延迟与成本。留空则复用主 LLM。
@@ -181,6 +188,10 @@ def update_env_file(updates: dict[str, str]) -> list[str]:
         value = str(value).strip()
         # 过滤换行/控制字符，防止通过配置值注入额外的 KEY=value 行
         value = re.sub(r"[\r\n\x00-\x1f\x7f]", "", value).strip()
+        # dotenv 语义：值内含 # 会被当注释截断、含空格/引号也需包裹；
+        # 对含这些字符的值用双引号包裹并转义内部引号，保证密钥/路径不被静默截断。
+        if any(ch in value for ch in ("#", " ", "\t", '"', "'")):
+            value = '"' + value.replace('"', '\\"') + '"'
         # 跳过脱敏占位符（前端没改就不动）
         if value.startswith("****") or value.endswith("****") or "****" in value:
             continue

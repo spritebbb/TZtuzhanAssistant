@@ -8,29 +8,39 @@ const imgUrl = ref('')
 
 onMounted(async () => {
   await ensureBaseUrl()
-  imgUrl.value = `${getBaseUrl()}/persona`
+  imgUrl.value = `${getBaseUrl()}/persona/cutout`
 })
 </script>
 
 <template>
-  <img
-    class="portrait"
-    :src="imgUrl"
-    alt="菟菚"
+  <div
+    class="portrait-wrap"
     :style="{ width: props.size + 'px', height: props.size + 'px' }"
-    @error="imgUrl = ''"
-  />
+  >
+    <img
+      class="portrait"
+      :src="imgUrl"
+      alt="菟菚"
+      @error="imgUrl = ''"
+    />
+  </div>
 </template>
 
 <style scoped>
-.portrait {
+.portrait-wrap {
   border-radius: var(--radius-md);
-  object-fit: cover;
-  border: 2px solid #fff;
-  box-shadow:
-    0 0 0 1px var(--border),
-    var(--shadow-sm);
+  overflow: hidden;
+  position: relative;
   flex-shrink: 0;
   background: var(--primary-soft);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+.portrait {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 12%;
+  display: block;
 }
 </style>

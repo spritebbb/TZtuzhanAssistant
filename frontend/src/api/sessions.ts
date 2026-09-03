@@ -27,6 +27,15 @@ export interface ArchiveDetail extends ArchiveInfo {
   messages: Message[]
 }
 
+/** 归档搜索结果摘要（列表展示用，不含完整消息）。 */
+export interface ArchiveSearchResult {
+  id: string
+  title: string
+  created_at: number
+  message_count: number
+  preview: string
+}
+
 // 单一会话固定 id（与后端 CURRENT_SESSION_ID 对齐）
 export const CURRENT_SESSION_ID = 'current'
 
@@ -60,6 +69,14 @@ export async function getArchive(id: string): Promise<ArchiveDetail | null> {
   if (!r.ok) return null
   const d = await r.json()
   return d.archive ?? null
+}
+
+/** 按关键词搜索归档（标题 + 内容），后端返回摘要列表（标题/条数/命中预览）。 */
+export async function searchArchives(q: string): Promise<ArchiveSearchResult[]> {
+  const r = await apiFetch(`/api/sessions/archives/search?q=${encodeURIComponent(q)}`)
+  if (!r.ok) return []
+  const d = await r.json()
+  return d.results ?? []
 }
 
 // 菟菚主动消息：后端已生成、待投递队列里的一条（取走后即清空）

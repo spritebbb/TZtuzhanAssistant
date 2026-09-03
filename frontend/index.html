@@ -3,10 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#141c12" />
+    <meta name="description" content="菟丝子拟人AI助手——细藤缠绕，温润坚韧" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="菟菚" />
     <title>菟菚 · 桌面助手</title>
   </head>
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      // 仅在浏览器 PWA 形态注册 Service Worker。
+      // Electron 生产形态下 preload 会注入 window.electronAPI，此时不注册：
+      // 避免 SW 无差别拦截 http://127.0.0.1:8801 的同源 SSE 流与 API 写请求。
+      if ('serviceWorker' in navigator && !window.electronAPI) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {})
+        })
+      }
+    </script>
   </body>
 </html>

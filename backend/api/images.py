@@ -12,6 +12,8 @@ from ..core.config import config
 
 _DATA_DIR = config.data_dir
 _PERSONA_IMG = Path(__file__).resolve().parents[2] / "assets" / "persona.png"
+_PERSONA_CUTOUT = Path(__file__).resolve().parents[2] / "assets" / "persona_cutout.png"
+_PERSONA_FULL = Path(__file__).resolve().parents[2] / "assets" / "hotaru_v1_nohalo.png"
 
 router = APIRouter(tags=["images"])
 
@@ -44,6 +46,22 @@ async def persona_image():
     if _PERSONA_IMG.exists():
         return FileResponse(_PERSONA_IMG, media_type="image/png")
     return JSONResponse({"ok": False, "error": "人设图未找到"}, status_code=404)
+
+
+@router.get("/persona/cutout")
+async def persona_cutout():
+    """菟菚透明半身立绘（抠图，用于头像/侧栏）。"""
+    if _PERSONA_CUTOUT.exists():
+        return FileResponse(_PERSONA_CUTOUT, media_type="image/png")
+    return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
+
+
+@router.get("/persona/full")
+async def persona_full():
+    """菟菚透明全身立绘（抠图，用于主区角色背景）。"""
+    if _PERSONA_FULL.exists():
+        return FileResponse(_PERSONA_FULL, media_type="image/png")
+    return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 
 @router.get("/favicon.ico")

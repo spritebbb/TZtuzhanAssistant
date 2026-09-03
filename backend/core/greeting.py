@@ -17,10 +17,11 @@ from .config import config
 from .llm import chat
 from .log import logger
 from .persona import build_system_prompt
-from .userdb import db, kv_get, kv_set
+from .userdb import db, kv_del, kv_get, kv_set
 
 _GREET_KEY = "web_last_seen"  # kv 键名
 _GREET_HOURS = 8  # 隔多久算"久别"
+_GREET_PENDING_KEY = "web_greet_pending"  # 问候生成中占位（并发去重）
 # 并发防护：读-判-写需要原子，避免两个并发请求都生成问候
 _greet_lock = threading.Lock()
 
@@ -135,10 +136,19 @@ async def greeting_for(
             if gap < _GREET_HOURS * 3600:
                 _set_last_seen(user_id, now)
                 return None  # 间隔短，不问候
+        # 先占位标记「问候已生成中」：即使 _greeting_text 在锁外 await，
+        # 并发请求也会因已占位而跳过，避免重复问候。
+        if kv_get(user_id, _GREET_PENDING_KEY):
+            return None
+        kv_set(user_id, _GREET_PENDING_KEY, str(now))
         _set_last_seen(user_id, now)
 
-    # 生成问候并持久化到会话
-    text = await _greeting_text(user_id)
+    try:
+        # 生成问候并持久化到会话
+        text = await _greeting_text(user_id)
+    finally:
+        # 无论成功失败都释放占位，避免一次失败后永久卡住问候
+        kv_del(user_id, _GREET_PENDING_KEY)
     if not text:
         return None
 

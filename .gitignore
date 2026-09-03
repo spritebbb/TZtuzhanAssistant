@@ -15,3 +15,18 @@ frontend/.npm-cache/
 frontend/.npm-tmp/
 frontend/*.tsbuildinfo
 frontend/_electron_*.log
+
+# 本地日志
+*.log
+
+# 本地大模型权重（不入库）
+models/
+scripts/models/
+
+# 本地 agent 工作记忆
+.workbuddy/
+
+# 私人图片资产：立绘与 UI 截图不入公开仓库
+assets/hotaru_v1_nohalo.png
+assets/persona_cutout.png
+frontend/ui_*.png

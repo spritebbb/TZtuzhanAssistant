@@ -280,6 +280,8 @@ async function save() {
     saveOk.value = true
     saveNote.value = '已保存并热重载。记忆/生图相关模型变更建议重启后端后生效。'
     setTimeout(() => saveOk.value = false, 2000)
+    // 通知 ToolBar 等组件刷新工具开关状态（联网/天气/生图/识图等可能因配置变化）
+    window.dispatchEvent(new CustomEvent('tztuzhan:config-saved'))
   } catch (e: unknown) {
     alert('保存失败：' + ((e as Error).message || e))
   } finally {
@@ -305,7 +307,7 @@ function confirmLabel(c: string): string {
 <template>
   <Teleport to="body">
     <div class="overlay" :class="{ show }" @click.self="emit('close')">
-      <div class="settings">
+      <div class="settings glass-strong">
         <div class="s-head">
           <div class="s-head-left">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -375,7 +377,7 @@ function confirmLabel(c: string): string {
             插件
           </div>
           <div v-if="plugins.length === 0" class="mcp-empty">plugins/ 目录暂无插件</div>
-          <div v-for="p in plugins" :key="p.name" class="plug-item" :class="{ off: p.disabled }">
+          <div v-for="p in plugins" :key="p.name" class="plug-item glass-sub" :class="{ off: p.disabled }">
             <div class="plug-row1">
               <span class="plug-name">{{ p.display_name }}</span>
               <span v-if="p.version" class="plug-ver">v{{ p.version }}</span>
@@ -400,7 +402,7 @@ function confirmLabel(c: string): string {
           </div>
           <div v-if="pluginMsg" class="mcp-msg" :class="{ err: pluginMsg.startsWith('✗') }">{{ pluginMsg }}</div>
           <div v-if="pluginSource" class="psrc-mask" @click.self="closeSource">
-            <div class="psrc-box">
+            <div class="psrc-box glass-strong">
               <div class="psrc-head">
                 <span>插件源码 · {{ pluginSourceName }}</span>
                 <button class="plug-btn" @click="closeSource">关闭</button>
@@ -415,7 +417,7 @@ function confirmLabel(c: string): string {
           </div>
           <div class="mcp-list">
             <div v-if="mcpServers.length === 0" class="mcp-empty">暂无已注册的外部 MCP 服务器</div>
-            <div v-for="s in mcpServers" :key="s.name" class="mcp-item">
+            <div v-for="s in mcpServers" :key="s.name" class="mcp-item glass-sub">
               <div class="mcp-info">
                 <span class="mcp-name">{{ s.name }}</span>
                 <span class="mcp-url">{{ s.url }}</span>
@@ -426,7 +428,7 @@ function confirmLabel(c: string): string {
           </div>
           <div class="mcp-add">
             <input v-model="mcpName" type="text" placeholder="服务器名称" class="mcp-input" />
-            <input v-model="mcpUrl" type="text" placeholder="http://127.0.0.1:8801/mcp" class="mcp-input" />
+            <input v-model="mcpUrl" type="text" placeholder="https://example.com/mcp（仅支持公网 http/https）" class="mcp-input" />
             <button class="mcp-btn" :disabled="mcpBusy" @click="addMcpServer">连接</button>
           </div>
           <div v-if="mcpMsg" class="mcp-msg" :class="{ err: mcpMsg.startsWith('✗') }">{{ mcpMsg }}</div>
@@ -442,7 +444,7 @@ function confirmLabel(c: string): string {
           <div v-if="auditBusy" class="audit-empty">加载中…</div>
           <div v-else-if="auditLog.length === 0" class="audit-empty">暂无工具调用记录</div>
           <div v-else class="audit-list">
-            <div v-for="(row, i) in auditLog" :key="i" class="audit-item">
+            <div v-for="(row, i) in auditLog" :key="i" class="audit-item glass-sub">
               <div class="audit-row1">
                 <span class="audit-time">{{ fmtTime(row.ts) }}</span>
                 <span class="audit-tool">{{ row.tool }}</span>
@@ -475,9 +477,9 @@ function confirmLabel(c: string): string {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(20, 35, 30, 0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(10, 15, 10, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   z-index: 100;
   display: none;
   align-items: center;
@@ -487,7 +489,7 @@ function confirmLabel(c: string): string {
 }
 .overlay.show { display: flex; }
 .settings {
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: min(640px, 96vw);
@@ -496,6 +498,10 @@ function confirmLabel(c: string): string {
   flex-direction: column;
   box-shadow: var(--shadow-lg);
   animation: popIn 0.25s ease both;
+}
+.glass-strong {
+  backdrop-filter: blur(26px) saturate(1.25);
+  -webkit-backdrop-filter: blur(26px) saturate(1.25);
 }
 .s-head {
   display: flex;
@@ -544,7 +550,7 @@ function confirmLabel(c: string): string {
   margin: 16px 0 6px;
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--primary-deep);
+  color: var(--primary-text);
   letter-spacing: 0.3px;
   text-transform: uppercase;
 }
@@ -565,7 +571,7 @@ function confirmLabel(c: string): string {
 }
 .srow input[type=text], .srow input[type=password], .srow input[type=number], .srow select {
   flex: 1;
-  background: var(--bg);
+  background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
@@ -590,7 +596,7 @@ function confirmLabel(c: string): string {
   cursor: pointer;
   font-weight: 600;
   transition: all 0.18s ease;
-  box-shadow: 0 3px 10px rgba(77, 182, 160, 0.35);
+  box-shadow: 0 3px 10px rgba(124, 154, 85, 0.3);
 }
 .s-foot .btn:hover { background: var(--bg-user-deep); transform: translateY(-1px); }
 .s-foot .btn.ghost { background: transparent; color: var(--text-dim); box-shadow: none; border: 1px solid var(--border); }
@@ -599,7 +605,7 @@ function confirmLabel(c: string): string {
   display: none;
   align-items: center;
   gap: 4px;
-  color: var(--primary-deep);
+  color: var(--primary-text);
   font-size: 0.82rem;
   font-weight: 600;
   margin-right: auto;
@@ -613,39 +619,44 @@ function confirmLabel(c: string): string {
 .mcp-empty { font-size: 0.8rem; color: var(--text-faint); padding: 6px 0; }
 .mcp-item {
   display: flex; align-items: center; gap: 8px;
-  background: var(--bg); border: 1px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 4px;
   transition: border-color 0.15s;
 }
+.glass-sub {
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
 .mcp-item:hover { border-color: var(--border-light); }
 .mcp-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mcp-name { font-size: 0.85rem; color: var(--primary-deep); font-weight: 600; }
+.mcp-name { font-size: 0.85rem; color: var(--primary-text); font-weight: 600; }
 .mcp-url { font-size: 0.72rem; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-tools { font-size: 0.75rem; color: var(--primary); }
 .mcp-del { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 0.9rem; padding: 2px 6px; border-radius: 6px; transition: all 0.15s; }
 .mcp-del:hover { color: var(--danger); background: var(--danger-soft); }
 .mcp-add { display: flex; gap: 6px; margin: 8px 0; }
-.mcp-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text); font-size: 0.82rem; outline: none; min-width: 0; transition: border-color 0.2s; }
+.mcp-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text); font-size: 0.82rem; outline: none; min-width: 0; transition: border-color 0.2s; }
 .mcp-input:focus { border-color: var(--primary); box-shadow: var(--glow); }
 .mcp-btn { background: var(--bg-user); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0 16px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.15s; }
 .mcp-btn:hover { background: var(--bg-user-deep); }
 .mcp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.mcp-msg { font-size: 0.78rem; color: var(--primary-deep); margin: 4px 0; padding: 6px 10px; background: var(--primary-soft); border-radius: var(--radius-sm); }
+.mcp-msg { font-size: 0.78rem; color: var(--primary-text); margin: 4px 0; padding: 6px 10px; background: var(--primary-soft); border-radius: var(--radius-sm); }
 .mcp-msg.err { color: var(--danger); background: var(--danger-soft); }
 
-.plug-item { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; transition: border-color 0.15s; }
+.plug-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; transition: border-color 0.15s; }
 .plug-item:hover { border-color: var(--border-light); }
 .plug-item.off { opacity: 0.55; }
 .plug-row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.plug-name { font-size: 0.85rem; font-weight: 600; color: var(--primary-deep); }
+.plug-name { font-size: 0.85rem; font-weight: 600; color: var(--primary-text); }
 .plug-ver { font-size: 0.7rem; color: var(--text-faint); }
 .plug-status { font-size: 0.68rem; padding: 1px 8px; border-radius: 10px; }
-.plug-status.ok { background: #e6f4ea; color: #2e7d52; }
+.plug-status.ok { background: var(--ok-soft); color: var(--ok); }
 .plug-status.fail { background: var(--danger-soft); color: var(--danger); }
-.plug-status.disabled { background: #eee9dd; color: var(--text-faint); }
+.plug-status.disabled { background: var(--bg-hover); color: var(--text-faint); }
 .plug-actions { margin-left: auto; display: flex; gap: 6px; }
-.plug-btn { background: var(--primary-soft); color: var(--primary-deep); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 3px 10px; font-size: 0.72rem; cursor: pointer; font-weight: 600; transition: all 0.15s; }
-.plug-btn:hover { background: var(--primary); color: #fff; }
+.plug-btn { background: var(--primary-soft); color: var(--primary-text); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 3px 10px; font-size: 0.72rem; cursor: pointer; font-weight: 600; transition: all 0.15s; }
+.plug-btn:hover { background: var(--primary); color: var(--text-invert); }
 .plug-btn.danger { background: var(--danger-soft); color: var(--danger); }
 .plug-btn.danger:hover { background: var(--danger); color: #fff; }
 .plug-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -653,31 +664,31 @@ function confirmLabel(c: string): string {
 .plug-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .plug-err { font-size: 0.72rem; color: var(--danger); margin-top: 4px; word-break: break-all; }
 
-.psrc-mask { position: fixed; inset: 0; background: rgba(20, 35, 30, 0.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.psrc-box { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg); width: min(760px, 94vw); max-height: 80vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
-.psrc-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 0.9rem; font-weight: 700; color: var(--primary-deep); }
+.psrc-mask { position: fixed; inset: 0; background: rgba(10, 15, 10, 0.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.psrc-box { border: 1px solid var(--border); border-radius: var(--radius-lg); width: min(760px, 94vw); max-height: 80vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
+.psrc-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 0.9rem; font-weight: 700; color: var(--primary-text); }
 .psrc-body { flex: 1; overflow: auto; margin: 0; padding: 12px 16px; font-family: Consolas, 'Courier New', monospace; font-size: 0.78rem; line-height: 1.55; color: var(--text); white-space: pre; tab-size: 4; }
 
 .audit-bar { display: flex; gap: 6px; margin: 6px 0 8px; }
-.audit-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text); font-size: 0.82rem; outline: none; min-width: 0; transition: border-color 0.2s; }
+.audit-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text); font-size: 0.82rem; outline: none; min-width: 0; transition: border-color 0.2s; }
 .audit-input:focus { border-color: var(--primary); box-shadow: var(--glow); }
 .audit-btn { background: var(--bg-user); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0 16px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.15s; }
 .audit-btn:hover { background: var(--bg-user-deep); }
 .audit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .audit-empty { font-size: 0.8rem; color: var(--text-faint); padding: 8px 0; }
 .audit-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
-.audit-item { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.audit-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
 .audit-row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .audit-time { font-size: 0.7rem; color: var(--text-faint); }
-.audit-tool { font-size: 0.82rem; font-weight: 600; color: var(--primary-deep); }
-.audit-confirm { font-size: 0.68rem; padding: 1px 8px; border-radius: 10px; background: var(--primary-soft); color: var(--primary-deep); }
-.audit-confirm.allow { background: #e6f4ea; color: #2e7d52; }
+.audit-tool { font-size: 0.82rem; font-weight: 600; color: var(--primary-text); }
+.audit-confirm { font-size: 0.68rem; padding: 1px 8px; border-radius: 10px; background: var(--primary-soft); color: var(--primary-text); }
+.audit-confirm.allow { background: var(--ok-soft); color: var(--ok); }
 .audit-confirm.deny, .audit-confirm.blocked { background: var(--danger-soft); color: var(--danger); }
-.audit-confirm.timeout { background: #fdf3d7; color: #a47e1a; }
-.audit-ok { font-size: 0.7rem; color: var(--primary); }
+.audit-confirm.timeout { background: rgba(217, 168, 96, 0.18); color: var(--accent); }
+.audit-ok { font-size: 0.7rem; color: var(--ok); }
 .audit-ok.fail { color: var(--danger); }
 .audit-ms { font-size: 0.68rem; color: var(--text-faint); }
 .audit-args { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.arg-chip { font-size: 0.68rem; color: var(--text-dim); background: #f0ede4; padding: 1px 6px; border-radius: 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arg-chip { font-size: 0.68rem; color: var(--text-dim); background: var(--bg-hover); padding: 1px 6px; border-radius: 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audit-result { font-size: 0.74rem; color: var(--text-dim); margin-top: 4px; word-break: break-all; max-height: 40px; overflow: hidden; }
 </style>

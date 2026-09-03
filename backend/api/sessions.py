@@ -19,6 +19,7 @@ from ..session.store import (
     get_archive,
     get_messages,
     list_archives,
+    search_archives,
 )
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -39,6 +40,17 @@ async def api_sessions_archive():
 async def api_archives_list():
     """归档列表（只读回看）。"""
     return {"ok": True, "archives": await list_archives()}
+
+
+@router.get("/archives/search")
+async def api_archives_search(q: str = ""):
+    """按关键词搜索归档（标题 + 内容），返回摘要列表（标题/条数/命中预览）。
+
+    只返回列表展示所需字段，不含完整消息；点进详情再走 /archives/{id} 拉完整内容。
+    注意：必须声明在 /archives/{archive_id} 之前，否则会被动态路由吞掉。
+    """
+    results = await search_archives(q)
+    return {"ok": True, "results": results}
 
 
 @router.get("/archives/{archive_id}")

@@ -77,6 +77,31 @@ async def _run_python(code: str = "") -> str:
 _RUN_PY_TIMEOUT = 60  # 子进程执行上限（秒）
 
 
+async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+    """终止子进程及其孙进程（Windows 用 taskkill /T，其他平台 kill 进程组）。"""
+    try:
+        if os.name == "nt":
+            # /T 会连同子进程树一起结束；/F 强制。用 taskkill 而非 proc.kill，
+            # 否则子进程若再 spawn 孙进程会残留孤儿进程。
+            kill = await asyncio.create_subprocess_exec(
+                "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await kill.wait()
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        await proc.wait()
+    except Exception:
+        pass
+
+
 async def _exec_in_subprocess(code: str) -> str:
     """在受限子进程中执行代码（超时 kill，不阻塞事件循环）。
 
@@ -100,8 +125,7 @@ async def _exec_in_subprocess(code: str) -> str:
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(payload.encode("utf-8")), timeout=_RUN_PY_TIMEOUT)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await _kill_tree(proc)
             return f"（代码执行超时（>{_RUN_PY_TIMEOUT}s），已终止）"
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace")[:500] if stderr else ""
@@ -128,7 +152,8 @@ _RUN_CHILD_SRC = (
     "_old = sys.stdout\n"
     "sys.stdout = buf\n"
     "try:\n"
-    "    exec(code, {'__builtins__': safe}, {})\n"
+    "    g = {'__builtins__': safe}\n"
+    "    exec(code, g, g)\n"
     "    out = buf.getvalue()\n"
     "    sys.stdout = _old\n"
     "    print(out if out.strip() else '（执行成功，无输出）')\n"
@@ -208,12 +233,8 @@ async def _run_command(command: str = "", cwd: str = "") -> str:
             output = output[:2500] + f"\n…（输出过长，中间省略 {len(output) - 5000} 字符）…\n" + output[-2500:]
         return output
     except asyncio.TimeoutError:
-        # 超时只取消 await 不会终止子进程，这里显式 kill，避免孤儿进程残留
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        # 超时只取消 await 不会终止子进程，这里显式 kill（含孙进程），避免孤儿进程残留
+        await _kill_tree(proc)
         return "（命令执行超时，已终止）"
     except FileNotFoundError:
         return "（命令未找到：请检查命令是否可用）"

@@ -87,6 +87,9 @@ async def api_config_set(request: Request):
     try:
         from ..core import llm as _llm
         _llm._client = None
+        # 感知层独立 client 也缓存于 get_perception_client._client，改了
+        # LLM_PERCEPTION_* 端点/模型后必须一并清掉，否则仍用旧端点。
+        _llm.get_perception_client._client = None
     except Exception:
         pass
     try:

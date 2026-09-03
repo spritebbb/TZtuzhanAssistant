@@ -8,12 +8,29 @@ v2 优化：超时 + 指数退避重试（网络抖动自动恢复，不把错�
 import asyncio
 import json
 
+import httpx
 from openai import AsyncOpenAI
 
 from .config import config
 from .log import logger
 
 _client: AsyncOpenAI | None = None
+
+
+def _build_http_client() -> httpx.AsyncClient | None:
+    """构建 LLM 请求的底层 HTTP 客户端。
+
+    默认返回 None（openai SDK 自建，会读系统代理环境变量）。
+    若设置了 LLM_PROXY 环境变量，则用指定代理；设为「off/direct/none」时
+    强制直连（trust_env=False），规避本机残留的失效本地代理
+    （如 127.0.0.1:57622 这类随会话漂移的临时代理端口）导致的外网请求全挂。
+    """
+    proxy = (config.llm_proxy or "").strip().lower()
+    if not proxy:
+        return None
+    if proxy in ("off", "direct", "none", "no"):
+        return httpx.AsyncClient(trust_env=False, timeout=config.llm_timeout)
+    return httpx.AsyncClient(proxy=proxy, trust_env=False, timeout=config.llm_timeout)
 
 # 重试策略
 _MAX_RETRIES = 2                 # 最多重试 2 次（共 3 次尝试）
@@ -57,6 +74,7 @@ def get_client() -> AsyncOpenAI:
             api_key=config.llm_api_key,
             timeout=config.llm_timeout,
             max_retries=0,  # 自己控制重试，避免 SDK 与这里双重退避
+            http_client=_build_http_client(),
         )
     return _client
 
@@ -87,6 +105,7 @@ def get_perception_client() -> AsyncOpenAI:
                 api_key=key,
                 timeout=config.llm_perception_timeout,
                 max_retries=0,
+                http_client=_build_http_client(),
             )
             get_perception_client._client = pc
         return pc

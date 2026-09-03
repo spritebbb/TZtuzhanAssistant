@@ -294,8 +294,12 @@ def current_mood(user_id: str, *, city: str = "") -> tuple[int, str]:
             # 日程时段切换校正已移除（日程模块被砍）
 
             if hours > 0.25:  # 超过 15 分钟才漂移
-                mood = _drift(mood, baseline, hours)
-                db.set_mood(user_id, mood)
+                new_mood = _drift(mood, baseline, hours)
+                # 漂移结果与当前值相同则跳过写库，避免「读心情」高频触发无意义的
+                # SQLite 写（on_message 链路里 current_mood 可能被多次调用）。
+                if new_mood != mood:
+                    mood = new_mood
+                    db.set_mood(user_id, mood)
         except Exception:
             pass
     label, _ = mood_label(mood)

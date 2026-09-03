@@ -26,6 +26,8 @@ _TOPIC_IDLE_MINUTES = 30
 _RESET_MARK = "\x00RESET\x00"
 # 生图开始标记：流式模式下在发起生图前推送给前端，用于显示"正在画图"占位
 _IMAGE_START_MARK = "\x00IMAGESTART\x00"
+# 工具循环整段返回后切片推送的粒度（模拟打字机，与前端逐字累积一致）
+_STREAM_CHUNK = 6
 _DUP_MIN_LEN = 8      # 短于该长度的回复不判重复（避免"嗯""好"误伤）
 _DUP_RATIO = 0.75     # 字符级相似度阈值
 _DUP_RECENT_N = 3     # 与最近几条菟菚回复比对
@@ -181,7 +183,11 @@ def _asked_address(last_assistant: str | None) -> bool:
     return bool(last_assistant) and any(w in last_assistant for w in _ADDRESS_ASK_WORDS)
 
 
-_SEARCH_KEYS = ("搜索", "搜一下", "查一下", "帮我查", "查查", "新闻", "天气", "多少钱", "价格", "汇率", "现在几点", "最新", "今天有", "今天有没有")
+_SEARCH_KEYS = ("搜索", "搜一下", "查一下", "帮我查", "查查", "新闻", "天气", "多少钱", "价格", "汇率", "现在几点", "最新", "今天有", "今天有没有",
+                 # 天气类：与下方天气分支（MOOD_CITY 真实天气查询）的关键词保持一致，
+                 # 否则"冷/热/下雨/温度/气温/多少度"这些常见问法会因 _needs_search 总开关未命中
+                 # 而永远不触发真实天气查询（历史死代码 bug）
+                 "冷", "热", "下雨", "温度", "气温", "天气预报", "多少度")
 
 
 def _needs_search(text: str) -> bool:
@@ -195,7 +201,7 @@ _TOOL_LOOP_KEYS = (
     "待办", "记一下", "记住", "记忆", "搜索", "查一下", "帮我查", "查查",
     "写文件", "读文件", "打开", "执行", "运行", "删除", "创建", "整理",
     "保存", "画", "生成", "截图", "进程", "窗口", "文件", "命令", "代码",
-    "汇率", "转换", "换算", "搜索一下", "查",
+    "汇率", "转换", "换算", "搜索一下",
     # 外部 Agent 桥 / 通用工具诉求（曾因漏词导致模型只能嘴上说"我去调"却无法真调）
     "codex", "dsh", "harness", "桥接", "插件", "工具", "调动", "调用",
     "脚本", "接口", "能力", "确认一下", "测试一下", "验证一下",
@@ -210,7 +216,50 @@ def _needs_tool_loop(text: str, intent: dict | None) -> bool:
     return any(k in t for k in _TOOL_LOOP_KEYS)
 
 
-# 天气查询专用：用 MOOD_CITY 城市查真实天气（wttr.in，含温度/风速），
+# 常见城市名 → wttr.in 查询名（中文城市直接用中文名查询即可，wttr.in 支持中文；
+# 这里主要处理英文/拼音别名和易歧义名，其余城市名原样透传）
+_CITY_ALIASES: dict[str, str] = {
+    "北京": "Beijing", "上海": "Shanghai", "广州": "Guangzhou", "深圳": "Shenzhen",
+    "武汉": "Wuhan", "襄阳": "Xiangyang", "杭州": "Hangzhou", "成都": "Chengdu",
+    "重庆": "Chongqing", "西安": "Xi'an", "南京": "Nanjing", "天津": "Tianjin",
+    "苏州": "Suzhou", "长沙": "Changsha", "郑州": "Zhengzhou", "青岛": "Qingdao",
+    "大连": "Dalian", "厦门": "Xiamen", "昆明": "Kunming", "贵阳": "Guiyang",
+    "兰州": "Lanzhou", "哈尔滨": "Harbin", "沈阳": "Shenyang", "合肥": "Hefei",
+    "福州": "Fuzhou", "南昌": "Nanchang", "济南": "Jinan", "石家庄": "Shijiazhuang",
+    "太原": "Taiyuan", "呼和浩特": "Hohhot", "南宁": "Nanning", "海口": "Haikou",
+    "银川": "Yinchuan", "西宁": "Xining", "乌鲁木齐": "Urumqi", "拉萨": "Lhasa",
+    "香港": "Hong Kong", "澳门": "Macau", "台北": "Taipei", "高雄": "Kaohsiung",
+}
+
+
+def _extract_city(text: str) -> str | None:
+    """从用户消息里提取城市名（用于天气查询）。
+
+    规则：优先用已知城市别名表匹配（覆盖国内主要城市，可靠且不会误抓动词），
+    命中直接返回；未命中时再用「城市名紧贴天气词」的正则兜底（覆盖港澳台/国外等
+    不在表里的城市）。返回 None 表示没提到城市，调用方应回落到 mood_city。
+    """
+    import re as _re
+
+    # 1) 已知城市别名表优先（含中文名，避免「查一下上海」把动词一起吸进去）
+    for name in _CITY_ALIASES:
+        if name in text:
+            return name
+    # 2) 正则兜底：中文城市 2~6 字 + 天气词（覆盖表外城市）
+    m = _re.search(r"([\u4e00-\u9fa5]{2,6}?)的?(?:今天|明天|现在)?(?:天气|气温|温度|多少度|下雨|下雪|晴|阴)", text)
+    if m:
+        city = m.group(1).strip()
+        # 剥离常见动词/虚词前缀，避免「我想知道巴黎天气」误抓成「我想知道巴黎」
+        for prefix in ("我想知道", "我想查", "请问", "帮我查", "查一下", "查", "一下", "帮我", "请", "今天", "明天", "现在", "这", "那"):
+            if city.startswith(prefix):
+                city = city[len(prefix):]
+        city = city.strip()
+        if city and len(city) >= 2:
+            return city
+    return None
+
+
+# 天气查询专用：用城市查真实天气（wttr.in，含温度/风速），
 # 避免"问天气不带城市"时搜索返回全国杂乱结果、LLM 只能瞎猜。
 def _fetch_weather(city: str) -> str | None:
     """返回如「襄阳：晴 30°C 微风」的天气描述；失败返回 None。"""
@@ -218,7 +267,8 @@ def _fetch_weather(city: str) -> str | None:
         import urllib.parse
         import urllib.request
 
-        url = f"https://wttr.in/{urllib.parse.quote(city)}?format=4&lang=zh"
+        query = _CITY_ALIASES.get(city, city)
+        url = f"https://wttr.in/{urllib.parse.quote(query)}?format=4&lang=zh"
         # 与 web_fetch 同一 SSRF 防线：出网前统一过 check_url（公网 http(s) 校验）
         from ..tools.safety import check_url
 
@@ -399,7 +449,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -410,6 +460,9 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
 
     image_cb：可选的异步回调 async (local_path: str) -> None，生图成功时把本地
     图片路径交给调用方（Web 端用它拼 URL 渲染）。
+
+    progress_cb：可选的异步回调 async (event: dict) -> None，工具循环阶段进展
+    （thinking/tool/tool_done）实时推送，供前端在工具执行期间展示进度而非空窗。
     """
     async with _user_lock(user_id):
         # 插件消息钩子（v2）：用户消息入口改写（异常已在 context 层过滤）
@@ -421,11 +474,11 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
             pass
         return await _process_locked(
             user_id, text, mock=mock, merged_msg=merged_msg,
-            stream_cb=stream_cb, image_cb=image_cb,
+            stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None) -> str:
     user = db.ensure_user(user_id)
     first_chat = not user["first_chat_done"]
     # 取存档前的最后一条消息时间戳：跨场判定必须基于「本轮之前」的消息，
@@ -485,6 +538,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             affection.try_daily_bonus(user_id, "memory", affection.MEMORY_REFERENCE_BONUS, "提到共同经历/回忆")
         # 以下信号：真语义成功时已计入 affection_delta，跳过；降级/失败时走关键词兜底
         if not semantic_ok:
+            # 辱骂：语义成功时已由 apply_impulse 的 affection_delta 扣分，这里只在
+            # 降级/失败时用关键词兜底，避免「关键词 -5 + 语义 delta」双重计分。
+            affection.apply_abuse_penalty(user_id, text)
             # 关心菟菚
             if affection.check_care(text):
                 affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, "关心菟菚")
@@ -611,11 +667,12 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     if not mock and _needs_search(text):
         import asyncio as _asyncio
 
-        # 天气类查询：直接用 MOOD_CITY 查真实天气，避免无城市搜索返回全国杂乱天气
-        if any(k in text for k in ("天气", "温度", "冷", "热", "下雨", "气温", "天气预报")):
+        # 天气类查询：先提取用户这句话里提到的城市，没提到才回落到 MOOD_CITY。
+        # 否则「北京今天天气」会答成配置城市的天气、标题还写错城市名。
+        if any(k in text for k in ("天气", "温度", "冷", "热", "下雨", "气温", "天气预报", "多少度")):
             try:
                 from .config import config as _cfg
-                city = _cfg.mood_city
+                city = _extract_city(text) or _cfg.mood_city
                 if city:
                     weather_line = await _asyncio.to_thread(_fetch_weather, city)
                     if weather_line:
@@ -995,6 +1052,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 技能注入失败（不影响回复）")
 
+    # 思考/话题/生图三类 system 提示统一在 user 之前注入，保证「user 是最后一条」。
+    # 若放在 user 之后追加，普通流式路径会形成 user→system 的非法顺序（多数 LLM API
+    # 要求消息以 user/assistant 结尾），与第 5 段注释「user 必须最后」矛盾。
+    if think_block:
+        messages.append({"role": "system", "content": think_block})
+    if topic_block:
+        messages.append({"role": "system", "content": topic_block})
+    if drawn_note:
+        messages.append({"role": "system", "content": drawn_note})
+
     # 用户消息统一在最后追加（所有 system 注入之后），确保 user 是发给模型的最后一条。
     messages.append({"role": "user", "content": text})
 
@@ -1002,6 +1069,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         from ..tools.service import run_tool_round
         from .llm import chat_native
 
+        # 工具循环把 system 指令拆到 final_instruction 单独传递，主 messages 里
+        # 已注入的 think/topic/drawn 与这里保持一致即可，无需重复。
         final_instruction = [{"role": "system", "content": think_block}]
         if topic_block:
             final_instruction.append({"role": "system", "content": topic_block})
@@ -1013,13 +1082,19 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             chat_native=lambda ms, tools: chat_native(ms, tools, mock=mock),
             max_loops=2,
             final_instruction=final_instruction,
+            on_progress=progress_cb,
         )
+        # 工具循环是整段返回，不经过 chat_stream，前端气泡会空窗到 done 帧才
+        # 整段「哐」出来。这里在拿到最终文本后切片推一次 stream_cb，让工具类
+        # 消息也享受打字机效果（与流式路径一致，推的都是 raw，最终 done 帧
+        # 仍是后处理后的 reply，二者允许有差异）。
+        if stream_cb is not None and not mock and raw:
+            try:
+                for i in range(0, len(raw), _STREAM_CHUNK):
+                    await stream_cb(raw[i:i + _STREAM_CHUNK])
+            except Exception:
+                pass
     else:
-        messages.append({"role": "system", "content": think_block})
-        if topic_block:
-            messages.append({"role": "system", "content": topic_block})
-        if drawn_note:
-            messages.append({"role": "system", "content": drawn_note})
         if stream_cb is not None and not mock:
             # 流式生成：逐块回调推送，同时累积完整文本用于后处理
 
