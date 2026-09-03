@@ -147,4 +147,5 @@ async def main() -> None:
     print("\n=== P5 外部桥: 5 项全部通过 ===")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

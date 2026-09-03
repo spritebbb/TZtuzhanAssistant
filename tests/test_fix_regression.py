@@ -75,4 +75,5 @@ async def main() -> None:
     print("\n=== 修复回归: 3 项全部通过 ===")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

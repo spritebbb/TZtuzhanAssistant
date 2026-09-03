@@ -25,6 +25,9 @@ def _tool_status() -> dict:
 
 def _memory_status() -> dict:
     """记忆引擎运行状态（向量库可用性/embedding 模式/条目数），失败静默。"""
+    # 记忆明确关闭时，状态查询不得为了展示一个状态而初始化 Chroma 或触发模型加载。
+    if not config.memory_v2:
+        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "disabled", "mem0": False}
     try:
         from ..core.memory import vector_store as vec
         from ..core.memory import embedding as emb

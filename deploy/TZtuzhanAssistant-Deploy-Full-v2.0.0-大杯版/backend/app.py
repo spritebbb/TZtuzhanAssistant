@@ -114,6 +114,9 @@ def create_app() -> FastAPI:
     # 除健康探针外，所有 API、插件网关和人物图片均可能泄露私人数据或触发动作；
     # 非回环来源必须统一鉴权，不能只保护写接口而把会话/配置/日志的 GET 裸露在 LAN。
     _PUBLIC_REMOTE_PATHS = {"/api/health"}
+    # remote/task 兼容 token 放在 JSON/form body 的既有调用协议；HTTP 中间件还未
+    # 解析 body，故该一个入口由路由自身执行同一套来源+常量时间 token 校验。
+    _BODY_AUTH_REMOTE_PATHS = {"/api/remote/task"}
 
     @app.middleware("http")
     async def _remote_auth_guard(request, call_next):
@@ -122,7 +125,11 @@ def create_app() -> FastAPI:
             path.startswith("/plugins/")
             or path.startswith("/mcp/")
             or path.startswith("/persona")
-            or (path.startswith("/api/") and path not in _PUBLIC_REMOTE_PATHS)
+            or (
+                path.startswith("/api/")
+                and path not in _PUBLIC_REMOTE_PATHS
+                and path not in _BODY_AUTH_REMOTE_PATHS
+            )
         )
         if not protected:
             return await call_next(request)
@@ -202,14 +209,15 @@ def create_app() -> FastAPI:
             needs_migration = await asyncio.to_thread(ensure_ready)
         except Exception:
             logger.exception("[记忆] 记忆引擎初始化失败（降级为旧版检索）")
-        # 用户身份统一迁移：把向量库里旧身份（session_current）的向量改挂
-        # assistant-main，与 userdb 的 SQLite 身份迁移保持一致（幂等，无旧数据则无副作用）
-        try:
-            from .core.memory import vector_store as _vec
+        # 用户身份统一迁移：只有启用记忆时才触碰向量库。否则 /api/meta 和启动
+        # 都不应因一个关闭的可选功能初始化 Chroma/embedding 依赖。
+        if _cfg.memory_v2:
+            try:
+                from .core.memory import vector_store as _vec
 
-            _vec.migrate_user_id("session_current", "assistant-main")
-        except Exception:
-            logger.exception("[记忆] 向量用户身份迁移失败（不影响主流程）")
+                _vec.migrate_user_id("session_current", "assistant-main")
+            except Exception:
+                logger.exception("[记忆] 向量用户身份迁移失败（不影响主流程）")
         # embedding 模型后台预热：下载/加载可能耗时数分钟，绝不能阻塞启动；
         # 预热失败会进哈希降级态并打明确告警（见 embedding.warmup）
         try:

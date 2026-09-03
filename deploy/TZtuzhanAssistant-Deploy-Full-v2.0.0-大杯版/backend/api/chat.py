@@ -150,13 +150,21 @@ async def api_chat(
             async with user_write_guard(request_epoch):
                 await append_messages(session_id, [bot_msg])
             await q.put(("__done__", reply))
+        except ResetSuperseded:
+            # reset 可在 epoch 检查和落库之间开始。无论发生在哪个写入点，
+            # SSE 都必须有终止帧，不能让前端永久等待 q.get()。
+            await q.put(("__error__", "请求因重置而取消"))
         except asyncio.CancelledError:
             from ..core.reset import epoch_is_current
             if epoch_is_current(request_epoch):
                 note = "（已停止）"
-                async with user_write_guard(request_epoch):
-                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
-                await q.put(("__error__", note))
+                try:
+                    async with user_write_guard(request_epoch):
+                        await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+                except ResetSuperseded:
+                    await q.put(("__error__", "请求因重置而取消"))
+                else:
+                    await q.put(("__error__", note))
             raise
         except asyncio.TimeoutError:
             logger.warning(
@@ -170,6 +178,7 @@ async def api_chat(
                 async with user_write_guard(request_epoch):
                     await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
             except ResetSuperseded:
+                await q.put(("__error__", "请求因重置而取消"))
                 return
             await q.put(("__error__", note))
         except Exception as e:
@@ -185,6 +194,7 @@ async def api_chat(
                     async with user_write_guard(request_epoch):
                         await append_messages(session_id, [bot_msg])
                 except ResetSuperseded:
+                    await q.put(("__error__", "请求因重置而取消"))
                     return
             # 面向用户的通用错误提示（不泄露内部异常原文），并作为 error 帧回传。
             note = "回复生成中断，请重试"
@@ -192,6 +202,7 @@ async def api_chat(
                 async with user_write_guard(request_epoch):
                     await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
             except ResetSuperseded:
+                await q.put(("__error__", "请求因重置而取消"))
                 return
             await q.put(("__error__", note))
         finally:

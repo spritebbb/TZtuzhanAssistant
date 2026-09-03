@@ -169,4 +169,5 @@ async def main():
     print("\n=== 核心工具集成测试: 5 项全部通过 ===")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
