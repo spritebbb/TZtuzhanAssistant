@@ -1,7 +1,13 @@
 # 菟菚桌面助手（TZtuzhanAssistant）
 
-> 类 DeepSeek Harness 的拟人 AI 助手 — **Electron 本地桌面版本**。
+> 类 DeepSeek Harness 的拟人 AI 助手 — **本地桌面 / 浏览器版本**。
 > 完全脱离 QQ / NoneBot，单用户 · 本机运行 · 完整人格 · 记忆 · 好感度 · 插件化工具链。
+
+![Release](https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Python](https://img.shields.io/badge/python-3.11%20~%203.13-green)
+![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
+![Frontend](https://img.shields.io/badge/frontend-Electron%20%2B%20Vue3-4FC08D)
 
 ## 特性
 
@@ -20,38 +26,150 @@
 - 👋 **久别问候**：长时间未见再次打开时主动问候
 - 🖼️ **静态立绘**：桌面窗口显示菟菚人设图
 
-## 快速开始
+---
+
+# 🚀 部署指南
+
+三种运行形态按需选择：
+
+| 形态 | 适合人群 | 需要安装 | 下载 |
+|---|---|---|---|
+| **① 一键部署包**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [Deploy zip（约 5 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe（约 80 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
+
+**通用前置要求**（三种方式都需要）：
+
+- Windows 10 / 11
+- **Python 3.11 ~ 3.13**（[python.org 下载](https://www.python.org/downloads/)，安装时务必勾选 **"Add python.exe to PATH"**；过旧或过新的版本可能导致 `torch` / `sentence-transformers` 安装失败）
+- 可联网（首次安装依赖约 1~2 GB，之后日常流量很小）
+- 现代浏览器（Chrome / Edge）
+
+**唯一必填配置**：一个 OpenAI 兼容的 LLM API Key（如 [DeepSeek](https://platform.deepseek.com)），其余全部可选、留空即关闭对应功能。
+
+---
+
+## 方式一：一键部署包（推荐，全程 5 分钟）
+
+不需要 Node.js、不需要 Electron 打包环境。后端会自动托管前端页面，双击脚本即可。
+
+### 步骤
+
+1. **下载**：到 [Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) 下载 `TZtuzhanAssistant-Deploy-vX.X.X.zip`。
+2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
+3. **双击 `Start-Tuzhan.bat`**。脚本会自动完成：
+   - 检测 / 创建 `.venv` 虚拟环境；
+   - 安装 `requirements.txt` 全部依赖（首次较慢，1~2 GB，请耐心等待）；
+   - 从 `.env.example` 生成 `.env`；
+   - 若 `LLM_API_KEY` 为空，自动用记事本打开 `.env` 让你填写；
+   - 启动后端（`http://127.0.0.1:8801`）并打开浏览器页面。
+4. **填写 API Key**：在弹出的记事本里把 `LLM_API_KEY=sk-你的真实Key` 填好，保存关闭，回到黑窗口按任意键继续。
+5. 浏览器自动打开菟菚界面，开始聊天 🎉
+
+### 日常使用
+
+- **启动**：双击 `Start-Tuzhan.bat`（后端已在运行时会直接复用并打开页面）
+- **停止**：双击 `Stop-Tuzhan.bat`，或关闭任务栏上名为 `Tuzhan-backend` 的最小化窗口
+- **数据备份**：聊天记录、记忆、图片都存在包内 `data/` 目录，删除/更新包前请先备份整个目录
+- 立绘、人格、技能、插件都已内置，无需额外配置
+
+> 脚本找不到 Python？重装 Python 并勾选 PATH 后**重开**启动脚本即可。
+
+---
+
+## 方式二：桌面安装包（Electron 窗口）
+
+1. 到 [Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) 下载 `TZtuzhanAssistant-Setup-vX.X.X-win-x64.exe` 并安装。
+2. **注意：安装包仅含前端 Electron 壳，不内置 Python 运行时**（后端依赖含 torch/chromadb 体积过大）。首次使用前先手动启动后端：
+
+```bat
+:: 在仓库源码目录执行（见方式三的 1~3 步）
+.venv\Scripts\python backend\main.py --host 127.0.0.1 --port 8801
+```
+
+3. 打开桌面端「菟菚桌面助手」，它会自动探测 `http://127.0.0.1:8801`：后端已在运行则直接连接，没有则提示你先启动后端。
+
+> 日常使用其实更推荐方式一（不需要手动管后端）；方式二适合想要独立桌面窗口 + 立绘常驻的场景。
+
+---
+
+## 方式三：源码部署（开发者）
 
 ```powershell
-# 1. 后端：创建虚拟环境并安装依赖
+# 1. 拉取源码
+git clone https://github.com/spritebbb/TZtuzhanAssistant.git
+cd TZtuzhanAssistant
+
+# 2. 后端：创建虚拟环境并安装依赖（首次 1~2 GB）
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2. 配置
+# 3. 配置
 copy .env.example .env
 # 编辑 .env，至少填 LLM_API_KEY（详见下方「配置项」）
 
-# 3. 启动后端（独立模式）
+# 4. 启动后端（默认 127.0.0.1:8801）
 python -m backend.main
 
-# 或者 4. 启动桌面应用（前后端一起）
-cd frontend
-npm install
-npm run dev          # 开发模式（Vite + Electron 热重载）
-npm run dist:win     # 打包 Windows 安装包
+# 5. 前端（二选一）
+#    a) 只用浏览器访问：先构建一次，之后后端自动托管页面
+cd frontend; npm install; npm run build; cd ..
+#    b) 开发模式（Vite + Electron 热重载）
+cd frontend; npm install; npm run dev
+
+# 6. 打包 Windows 安装包
+cd frontend; npm run dist:win
 ```
 
-> **打包版注意**：`dist:win` 产出的安装包**不内置 Python 运行时与 LLM 依赖**，
-> 安装后 Electron 会检测本机 8801 端口是否有后端；没有的话需要自行先启动后端
-> （`python -m backend.main`）再打开应用。本机开发/日常使用推荐 `npm run dev`。
+- 后端入口支持 `python -m backend.main --host 127.0.0.1 --port 8801 --debug`
+- 后端检测到 `frontend/dist` 存在时会自动托管前端页面，浏览器访问 `http://127.0.0.1:8801` 即可使用，无需单独跑前端 dev server
+- 打包部署包（生成 `deploy/` 一键包）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1
+```
+
+---
+
+## 局域网访问与安全
+
+- 默认只监听本机回环地址（`127.0.0.1`），**局域网设备无法访问**，这是安全默认。
+- 如需局域网访问：手动用 `--host 0.0.0.0` 启动后端，并阅读 `.env.example` 中 `AGENT_REMOTE_TOKEN` / `AGENT_ALLOWED_HOSTS` 的说明配置鉴权 token。未配置 token 时，受控端点（写操作、MCP、Agent 桥、插件管理）对非本机来源一律拒绝。
+
+## 常见问题
+
+**Q1：提示 "Python not found"**
+安装 Python 3.11~3.13 并勾选 "Add python.exe to PATH"，然后重新运行启动脚本。
+
+**Q2：依赖安装失败 / 超时**
+
+```bat
+.venv\Scripts\python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**Q3：首次对话较慢 / 后台下载数据**
+记忆系统首次会下载 embedding 模型。部署包默认使用较小的 `BAAI/bge-small-zh-v1.5`（约 100MB，经 `HF_ENDPOINT=https://hf-mirror.com` 国内镜像下载）；想要更好的语义检索可改 `BAAI/bge-m3`（约 1.2GB），或设 `MEMORY_EMBED_FORCE=1` 走零依赖哈希回退。
+
+**Q4：页面打不开 / 端口被占用**
+
+```bat
+netstat -ano | findstr 8801
+```
+
+关闭占用 8801 端口的程序后重试，或换端口启动后端。
+
+**Q5：LLM 请求报代理错误**
+`.env` 中设置 `LLM_PROXY=off` 强制直连（本机有失效代理时）。
+
+---
 
 ## 项目结构
 
 ```
 backend/                      # Python 后端
 ├── main.py                   # 启动入口（--host/--port，默认 127.0.0.1:8801）
-├── app.py                    # FastAPI 应用工厂（路由挂载 + 中间件 + 工具注册）
+├── app.py                    # FastAPI 应用工厂（路由挂载 + 中间件 + 工具注册 + 静态托管）
 ├── api/                      # API 路由层
 │   ├── chat.py               # SSE 流式对话
 │   ├── sessions.py           # 会话 CRUD + 归档 + 归档搜索
@@ -100,16 +218,18 @@ backend/                      # Python 后端
 │   └── store.py              # SQLite 会话/消息/归档持久化
 ├── skills/                   # 技能目录
 ├── maintenance/              # 后台维护（周期任务/截图清理/备份）
-├── data/                     # 运行时数据（bot.db/sessions.db/截图等）
+├── data/                     # 运行时数据（bot.db/sessions.db/截图等，不入库）
 └── models/                   # 数据模型
 
 frontend/                     # Electron + Vue 3 + TS 前端
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts            # Electron 形态配置
+├── vite.web.config.ts        # 纯浏览器形态配置（不启 Electron 壳）
 ├── electron/
 │   ├── main.ts               # Electron 主进程（通知/后端拉起/进程管理）
 │   └── preload.ts            # 预加载脚本
-├── public/                   # 静态资源（sw.js 离线缓存/图标/立绘）
+├── public/                   # 静态资源（sw.js 离线缓存/图标/PWA manifest）
+├── release/                  # electron-builder 打包产物（不入库）
 └── src/
     ├── App.vue               # 根组件
     ├── components/           # 组件
@@ -126,6 +246,11 @@ frontend/                     # Electron + Vue 3 + TS 前端
     ├── utils/                # 工具函数（markdown/图片处理）
     └── style.css             # 全局样式
 
+scripts/                      # 工具脚本
+├── build_deploy.ps1          # 一键部署包打包脚本
+└── deploy_assets/            # 部署模板（.env.example / 使用说明）
+
+deploy/                       # 一键部署包产物（见 Releases）
 persona-菟菚.md               # 人格源文件
 ```
 
@@ -166,19 +291,22 @@ persona-菟菚.md               # 人格源文件
 
 ## 配置项（.env）
 
-完整示例见 `.env.example`，含注释说明。核心变量：
+完整示例见 [.env.example](.env.example)（含注释说明）；部署包内为 `scripts/deploy_assets/.env.example`。核心变量：
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `LLM_BASE_URL` | ✅ | OpenAI 兼容端点 |
+| `LLM_BASE_URL` | ✅ | OpenAI 兼容端点（默认 `https://api.deepseek.com/v1`） |
 | `LLM_API_KEY` | ✅ | LLM 密钥 |
-| `LLM_MODEL` | ✅ | 模型名 |
+| `LLM_MODEL` | ✅ | 模型名（默认 `deepseek-chat`，任意 OpenAI 兼容模型均可） |
+| `LLM_PROXY` | | 设 `off` 强制直连（本机有失效代理时） |
 | `LLM_PERCEPTION_*` | | 感知层独立小模型（情绪/辱骂分类，留空复用主 LLM） |
+| `PERSONA_FILE` | | 人格文件路径（默认 `persona-菟菚.md`） |
 | `SEARCH_API_KEY` | | 搜索密钥（博查优先，留空自动回退 bing/ddg） |
 | `IMAGE_API_KEY` | | 文生图密钥（SiliconFlow，留空关闭生图） |
 | `VISION_API_KEY` | | 识图密钥（留空复用 IMAGE key） |
 | `MOOD_CITY` | | 心情城市（如"北京"） |
-| `MEMORY_EMBED_MODEL` | | 记忆 embedding 模型（默认 bge-m3，可换 bge-small-zh） |
+| `MEMORY_EMBED_MODEL` | | 记忆 embedding 模型（部署包默认 bge-small-zh-v1.5，可换 bge-m3） |
 | `HF_ENDPOINT` | | HuggingFace 镜像（默认 hf-mirror.com，国内友好） |
 | `AGENT_REMOTE_TOKEN` | | 受控端点鉴权 token（非回环来源必填） |
+| `AGENT_ALLOWED_HOSTS` | | 受控端点允许的 Host 白名单 |
 | `AGENT_CODEX_*` / `AGENT_DSH_*` | | 外部 Agent 桥配置（Codex CLI / DSH） |
