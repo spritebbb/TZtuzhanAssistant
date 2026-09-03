@@ -107,11 +107,17 @@ class ConfirmService:
             if now - s.get("ts", 0) > timeout
         ]
         for rid in expired:
-            cls._pending.pop(rid, None)
+            state = cls._pending.pop(rid, None)
+            if state:
+                state["decision"] = "deny"
+                state["event"].set()
         while len(cls._pending) >= cls._PENDING_MAX:
             # 丢弃最旧的挂起请求（dict 保持插入序，取第一个即可）
             oldest = next(iter(cls._pending))
-            cls._pending.pop(oldest, None)
+            state = cls._pending.pop(oldest, None)
+            if state:
+                state["decision"] = "deny"
+                state["event"].set()
 
 
 # 敏感参数名（展示时脱敏）

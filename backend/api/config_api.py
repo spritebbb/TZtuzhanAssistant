@@ -63,6 +63,9 @@ async def api_config_set(request: Request):
         "vision_base_url": False, "vision_model": False, "vision_api_key": True,
         "mood_city": False, "memory_semantic": False,
     }
+    clear_fields = body.get("clear_fields", [])
+    clear_fields = set(clear_fields) if isinstance(clear_fields, list) else set()
+    required_nonempty = {"llm_base_url", "llm_model"}
     updates: dict[str, str] = {}
     for field, is_secret in fields.items():
         if field not in body:
@@ -71,11 +74,23 @@ async def api_config_set(request: Request):
         if val is None:
             continue
         val = str(val).strip()
-        if is_secret and (not val or "****" in val):
-            continue
-        if not val:
+        if field in required_nonempty and not val:
+            return JSONResponse({"ok": False, "error": f"{field} 不能为空"}, status_code=400)
+        if is_secret and field not in clear_fields and (not val or "****" in val):
             continue
         updates[field.upper()] = val
+
+    try:
+        if "LLM_TEMPERATURE" in updates:
+            temperature = float(updates["LLM_TEMPERATURE"])
+            if not 0 <= temperature <= 2:
+                raise ValueError("LLM_TEMPERATURE 必须在 0 到 2 之间")
+        if "LLM_MAX_TOKENS" in updates:
+            max_tokens = int(updates["LLM_MAX_TOKENS"])
+            if not 1 <= max_tokens <= 32768:
+                raise ValueError("LLM_MAX_TOKENS 必须在 1 到 32768 之间")
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     if not updates:
         return {"ok": True, "updated": [], "note": "没有需要保存的变更"}
@@ -86,10 +101,19 @@ async def api_config_set(request: Request):
     # 重置依赖配置的缓存，让新配置立即生效
     try:
         from ..core import llm as _llm
+        old_clients = [_llm._client, getattr(_llm.get_perception_client, "_client", None)]
         _llm._client = None
         # 感知层独立 client 也缓存于 get_perception_client._client，改了
         # LLM_PERCEPTION_* 端点/模型后必须一并清掉，否则仍用旧端点。
         _llm.get_perception_client._client = None
+        closed: set[int] = set()
+        for client in old_clients:
+            if client is not None and id(client) not in closed:
+                closed.add(id(client))
+                try:
+                    await client.close()
+                except Exception:
+                    pass
     except Exception:
         pass
     try:

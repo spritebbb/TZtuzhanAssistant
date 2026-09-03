@@ -14,7 +14,7 @@ import os
 import sys
 import traceback
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.tools.safety import check_command, check_cwd
 
 
@@ -35,7 +35,7 @@ async def _run_python(code: str = "") -> str:
     - 子进程隔离 stdout 重定向，避免污染主进程的 sys.stdout
     """
     if not code:
-        return "（缺少代码）"
+        return tool_failure("（缺少代码）")
     # 静态扫描：禁止危险模块导入 + 反射逃逸链
     import ast
 
@@ -51,13 +51,13 @@ async def _run_python(code: str = "") -> str:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name in _RESTRICTED_MODULES or any(alias.name.startswith(m + ".") for m in _RESTRICTED_MODULES):
-                        return f"（不允许使用 {alias.name} 模块）"
+                        return tool_failure(f"（不允许使用 {alias.name} 模块）")
             elif isinstance(node, ast.ImportFrom):
                 if node.module and (node.module in _RESTRICTED_MODULES or any(node.module.startswith(m + ".") for m in _RESTRICTED_MODULES)):
-                    return f"（不允许使用 {node.module} 模块）"
+                    return tool_failure(f"（不允许使用 {node.module} 模块）")
             elif isinstance(node, ast.Attribute):
                 if node.attr in _FORBIDDEN_ATTRS:
-                    return f"（不允许访问 {node.attr}（反射逃逸防护））"
+                    return tool_failure(f"（不允许访问 {node.attr}（反射逃逸防护））")
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
                 # getattr(obj, "__xxx__") 动态反射同样拦截：
                 # 第二参数为字符串字面量且命中名单 → 拒；
@@ -65,11 +65,11 @@ async def _run_python(code: str = "") -> str:
                 if len(node.args) >= 2:
                     if isinstance(node.args[1], ast.Constant):
                         if isinstance(node.args[1].value, str) and node.args[1].value in _FORBIDDEN_ATTRS:
-                            return f"（不允许 getattr 访问 {node.args[1].value}）"
+                            return tool_failure(f"（不允许 getattr 访问 {node.args[1].value}）")
                     else:
-                        return "（不允许动态 getattr（反射逃逸防护））"
+                        return tool_failure("（不允许动态 getattr（反射逃逸防护））")
     except SyntaxError as e:
-        return f"（代码语法错误：{e}）"
+        return tool_failure(f"（代码语法错误：{e}）")
 
     return await _exec_in_subprocess(code)
 
@@ -126,16 +126,23 @@ async def _exec_in_subprocess(code: str) -> str:
             stdout, stderr = await asyncio.wait_for(proc.communicate(payload.encode("utf-8")), timeout=_RUN_PY_TIMEOUT)
         except asyncio.TimeoutError:
             await _kill_tree(proc)
-            return f"（代码执行超时（>{_RUN_PY_TIMEOUT}s），已终止）"
+            return tool_failure(f"（代码执行超时（>{_RUN_PY_TIMEOUT}s），已终止）")
+        except asyncio.CancelledError:
+            await _kill_tree(proc)
+            raise
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace")[:500] if stderr else ""
         if len(out) > 5000:
             out = out[:2500] + f"\n…（输出过长，中间省略 {len(out) - 5000} 字符）…\n" + out[-2500:]
         if err and err.strip():
             out = (out + f"\n（stderr: {err.strip()}）") if out else f"（stderr: {err.strip()}）"
+        if proc.returncode:
+            return tool_failure(out or f"（代码执行失败，退出码 {proc.returncode}）")
         return out or "（执行成功，无输出）"
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        return f"（执行失败：{e}）"
+        return tool_failure(f"（执行失败：{e}）")
 
 
 # 子进程内的受限执行模板（白名单 builtins + io 捕获，JSON stdin 传 code）
@@ -160,6 +167,7 @@ _RUN_CHILD_SRC = (
     "except BaseException as e:\n"
     "    sys.stdout = _old\n"
     "    print(f'（执行错误：{e}\\n{_tb.format_exc()[:500]}）')\n"
+    "    raise SystemExit(1)\n"
 )
 
 
@@ -189,28 +197,29 @@ def _cmd_builtin(command: str) -> bool:
 async def _run_command(command: str = "", cwd: str = "") -> str:
     """执行系统命令（subprocess 列表参数，避免 shell 注入）。"""
     if not command:
-        return "（缺少命令）"
+        return tool_failure("（缺少命令）")
     # 1) 安全黑名单检查
     ok, err = check_command(command)
     if not ok:
-        return err
+        return tool_failure(err)
     # 2) cwd 白名单检查
     cwd_ok, cwd_err = check_cwd(cwd)
     if not cwd_ok:
-        return cwd_err
+        return tool_failure(cwd_err)
     # 3) 解析命令为列表参数（避免 shell 注入）
     import shlex
     try:
         args = shlex.split(command, posix=False)
     except ValueError as e:
-        return f"（命令解析失败：{e}）"
+        return tool_failure(f"（命令解析失败：{e}）")
     if not args:
-        return "（空的命令）"
+        return tool_failure("（空的命令）")
     # Windows：cmd 内建命令（dir/type/cd/echo 等）不存在独立 exe，
     # 工具示例里的 `dir /w` 直接 CreateProcess 会 100% FileNotFoundError。
     # 命中内建表时改经 `cmd /c <原命令>` 执行（黑名单在进入本分支前已检查）。
     if os.name == "nt" and _cmd_builtin(command):
         args = ["cmd", "/c", command]
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -226,6 +235,8 @@ async def _run_command(command: str = "", cwd: str = "") -> str:
                 output += f"\n（stderr: {err}）"
             else:
                 output = f"（stderr: {err}）"
+        if proc.returncode:
+            return tool_failure(output or f"（命令执行失败，退出码 {proc.returncode}）")
         if not output:
             return "（命令执行成功，无输出）"
         # 结果截断（超过 5000 字符保留头尾）
@@ -235,11 +246,15 @@ async def _run_command(command: str = "", cwd: str = "") -> str:
     except asyncio.TimeoutError:
         # 超时只取消 await 不会终止子进程，这里显式 kill（含孙进程），避免孤儿进程残留
         await _kill_tree(proc)
-        return "（命令执行超时，已终止）"
+        return tool_failure("（命令执行超时，已终止）")
+    except asyncio.CancelledError:
+        if proc is not None:
+            await _kill_tree(proc)
+        raise
     except FileNotFoundError:
-        return "（命令未找到：请检查命令是否可用）"
+        return tool_failure("（命令未找到：请检查命令是否可用）")
     except Exception as e:
-        return f"（命令执行失败：{e}）"
+        return tool_failure(f"（命令执行失败：{e}）")
 
 
 def register(ctx=None) -> None:

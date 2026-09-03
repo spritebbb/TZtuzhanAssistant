@@ -7,6 +7,6 @@ interface Window {
     notify: (title: string, body: string) => Promise<boolean>
     focusWindow: () => Promise<boolean>
     setActiveSession: (sessionId: string | null) => Promise<boolean>
-    onInitiativeMessage: (cb: (text: string) => void) => void
+    onInitiativeMessage: (cb: (text: string) => void) => (() => void)
   }
 }

@@ -153,43 +153,108 @@ def check_url(url: str) -> tuple[bool, str]:
     域名会解析一次，任一解析结果为内网地址也拒绝。
     调用方必须对每个重定向跳转目标重新调用本函数复检。
     """
+    ok, error, _ = resolve_public_url(url)
+    return ok, error
+
+
+def resolve_public_url(url: str) -> tuple[bool, str, str | None]:
+    """校验公网 URL，并返回本次连接必须使用的已验证 IP。
+
+    调用方应把返回 IP 交给 :func:`build_pinned_opener`，避免校验后连接前再次
+    DNS 解析形成 DNS rebinding/TOCTOU 窗口。
+    """
     import ipaddress
     import socket
     import urllib.parse
 
     if not url:
-        return False, "（缺少 URL）"
+        return False, "（缺少 URL）", None
     try:
         parsed = urllib.parse.urlparse(url)
     except Exception:
-        return False, "（URL 无法解析）"
+        return False, "（URL 无法解析）", None
     if parsed.scheme not in ("http", "https"):
-        return False, "（仅支持 http/https 链接）"
+        return False, "（仅支持 http/https 链接）", None
     host = (parsed.hostname or "").strip().strip("[]").lower()
     if not host:
-        return False, "（链接缺少主机名）"
+        return False, "（链接缺少主机名）", None
     if host in ("localhost", "localhost.localdomain"):
-        return False, "（出于安全考虑，不支持访问本地/内网地址）"
+        return False, "（出于安全考虑，不支持访问本地/内网地址）", None
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         ip = None
     if ip is not None:
         if _ip_private(ip):
-            return False, "（出于安全考虑，不支持访问本地/内网地址）"
-        return True, ""
+            return False, "（出于安全考虑，不支持访问本地/内网地址）", None
+        return True, "", str(ip)
     try:
-        infos = socket.getaddrinfo(host, None)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
-        return False, "（域名解析失败，按内网地址拒绝）"
+        return False, "（域名解析失败，按内网地址拒绝）", None
+    public: list[str] = []
     for info in infos:
         try:
             addr = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
         if _ip_private(addr):
-            return False, "（出于安全考虑，不支持访问本地/内网地址）"
-    return True, ""
+            return False, "（出于安全考虑，不支持访问本地/内网地址）", None
+        value = str(addr)
+        if value not in public:
+            public.append(value)
+    if not public:
+        return False, "（域名没有可用的公网地址）", None
+    return True, "", public[0]
+
+
+def build_pinned_opener(resolved_ip: str, *handlers):
+    """构造把 TCP 连接固定到 ``resolved_ip`` 的 urllib opener。
+
+    HTTP Host 头、HTTPS 证书校验与 SNI 仍使用原始域名；只有底层 TCP 目的地址
+    被替换为校验阶段得到的公网 IP。禁用环境代理，防止代理层重新解析目标域名。
+    """
+    import http.client
+    import socket
+    import urllib.request
+
+    class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            def factory(host, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, **kwargs):
+                conn = http.client.HTTPConnection(host, timeout=timeout, **kwargs)
+                original = conn._create_connection
+                conn._create_connection = lambda address, *a, **kw: original(
+                    (resolved_ip, address[1]), *a, **kw
+                )
+                return conn
+
+            return self.do_open(factory, req)
+
+    class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            def factory(host, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, **kwargs):
+                conn = http.client.HTTPSConnection(
+                    host,
+                    timeout=timeout,
+                    context=self._context,
+                    check_hostname=self._check_hostname,
+                    **kwargs,
+                )
+                original = conn._create_connection
+                conn._create_connection = lambda address, *a, **kw: original(
+                    (resolved_ip, address[1]), *a, **kw
+                )
+                return conn
+
+            return self.do_open(factory, req)
+
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _PinnedHTTPHandler(),
+        _PinnedHTTPSHandler(),
+        *handlers,
+    )
 
 
 # ---- 远程/受控端点鉴权（统一"来源 IP"语义，供 /mcp/*、/api/mcp/*、/api/agent/*、

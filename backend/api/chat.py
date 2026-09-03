@@ -28,6 +28,10 @@ router = APIRouter(prefix="/api", tags=["chat"])
 # 可能在任意 await 点被 GC 回收导致 _runner 被静默取消（回复不落库）。
 # 与 pipeline._memory_tasks / agent._agent_bg_tasks 同一做法。
 _bg_tasks: set[asyncio.Task] = set()
+_bg_by_request: dict[str, asyncio.Task] = {}
+
+_MAX_TEXT_LENGTH = 20_000
+_MAX_IMAGE_REF_LENGTH = 1_024
 
 
 def _sse(obj: dict) -> str:
@@ -35,7 +39,13 @@ def _sse(obj: dict) -> str:
 
 
 @router.post("/chat")
-async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool = Form(False), image: str = Form("")):
+async def api_chat(
+    text: str = Form(""),
+    session_id: str = Form(""),
+    mock: bool = Form(False),
+    image: str = Form(""),
+    request_id: str = Form(""),
+):
     """SSE 流式对话：逐字推送 data: {"piece": "..."}，结束时发 {"done": "完整回复"}。
 
     单一会话模式：session_id 固定为 'current'。不传则自动使用固定会话；
@@ -47,6 +57,14 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
     text = text.strip()
     if not text:
         return JSONResponse({"ok": False, "error": "消息为空"}, status_code=400)
+    if len(text) > _MAX_TEXT_LENGTH:
+        return JSONResponse({"ok": False, "error": "消息过长"}, status_code=413)
+    if len(image) > _MAX_IMAGE_REF_LENGTH:
+        return JSONResponse({"ok": False, "error": "图片引用过长"}, status_code=413)
+    from ..core.reset import ResetSuperseded, reset_epoch, reset_in_progress, user_write_guard
+    if reset_in_progress():
+        return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
+    request_epoch = reset_epoch()
 
     # 单一会话：无 session_id 时落到固定会话 'current'（首次写入时 store 已保证存在）
     if not session_id:
@@ -60,7 +78,11 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
     user_msg = {"role": "user", "content": text, "ts": time.time()}
     if image:
         user_msg["image"] = image
-    saved = await append_messages(session_id, [user_msg])
+    try:
+        async with user_write_guard(request_epoch):
+            saved = await append_messages(session_id, [user_msg])
+    except ResetSuperseded:
+        return JSONResponse({"ok": False, "error": "请求因重置而取消"}, status_code=409)
     if not saved:
         # 会话可能在校验后被删除：用户消息不落库会静默丢失，这里明确报错
         from ..core.log import logger as _lg
@@ -110,16 +132,32 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
         # 防止客户端断开后后台任务无限累积
         _PROCESS_TOTAL_TIMEOUT = 300
         try:
+            from ..core.reset import epoch_is_current
+            if not epoch_is_current(request_epoch):
+                await q.put(("__error__", "请求因重置而取消"))
+                return
             reply = await asyncio.wait_for(
                 process(_user_id(session_id), text, mock=mock, stream_cb=_cb, image_cb=_image_cb, progress_cb=_progress_cb),
                 timeout=_PROCESS_TOTAL_TIMEOUT,
             )
+            if not epoch_is_current(request_epoch):
+                await q.put(("__error__", "请求因重置而取消"))
+                return
             # 后台完成：持久化 bot 消息到原会话（即使客户端已断开）
             bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
             if _state.get("pending_img"):
                 bot_msg["image"] = _state["pending_img"]
-            await append_messages(session_id, [bot_msg])
+            async with user_write_guard(request_epoch):
+                await append_messages(session_id, [bot_msg])
             await q.put(("__done__", reply))
+        except asyncio.CancelledError:
+            from ..core.reset import epoch_is_current
+            if epoch_is_current(request_epoch):
+                note = "（已停止）"
+                async with user_write_guard(request_epoch):
+                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+                await q.put(("__error__", note))
+            raise
         except asyncio.TimeoutError:
             logger.warning(
                 "[chat] 处理超时（{}s），会话 {} 已中止。副作用核对：sessions 已存用户消息；"
@@ -128,7 +166,11 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
             )
             note = f"处理超时（>{_PROCESS_TOTAL_TIMEOUT}s），请重试或换个说法"
             # 失败也补存一条 bot 消息：避免会话历史出现"只有用户消息、没有回复"的残缺回合
-            await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+            try:
+                async with user_write_guard(request_epoch):
+                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+            except ResetSuperseded:
+                return
             await q.put(("__error__", note))
         except Exception as e:
             logger.exception("[chat] 处理用户消息失败（会话 {}）", session_id)
@@ -139,10 +181,18 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
                 bot_msg = {"role": "bot", "content": partial, "ts": time.time()}
                 if _state.get("pending_img"):
                     bot_msg["image"] = _state["pending_img"]
-                await append_messages(session_id, [bot_msg])
+                try:
+                    async with user_write_guard(request_epoch):
+                        await append_messages(session_id, [bot_msg])
+                except ResetSuperseded:
+                    return
             # 面向用户的通用错误提示（不泄露内部异常原文），并作为 error 帧回传。
             note = "回复生成中断，请重试"
-            await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+            try:
+                async with user_write_guard(request_epoch):
+                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+            except ResetSuperseded:
+                return
             await q.put(("__error__", note))
         finally:
             current_sse_push.set(None)
@@ -151,6 +201,12 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
         task = asyncio.create_task(_runner())
         _bg_tasks.add(task)
         task.add_done_callback(_bg_tasks.discard)
+        if request_id:
+            _bg_by_request[request_id] = task
+            def _drop_request(done: asyncio.Task) -> None:
+                if _bg_by_request.get(request_id) is done:
+                    _bg_by_request.pop(request_id, None)
+            task.add_done_callback(_drop_request)
         try:
             while True:
                 item = await q.get()
@@ -186,3 +242,12 @@ async def api_chat(text: str = Form(""), session_id: str = Form(""), mock: bool 
             pass
 
     return StreamingResponse(sse(), media_type="text/event-stream")
+
+
+@router.post("/chat/{request_id}/cancel")
+async def api_chat_cancel(request_id: str):
+    task = _bg_by_request.get(request_id)
+    if task is None or task.done():
+        return JSONResponse({"ok": False, "error": "请求不存在或已结束"}, status_code=404)
+    task.cancel()
+    return {"ok": True}

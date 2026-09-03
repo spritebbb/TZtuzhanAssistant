@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ..base import ToolRegistry
+from ..base import ToolRegistry, tool_failure
 from ...core import userdb
 from ...core.current_user import current_user_id
 from ...core.log import logger
@@ -24,7 +24,7 @@ def _uid() -> str:
 async def _memory_search(query: str = "", top_k: int = 0) -> str:
     """语义检索长期记忆与事实，返回相关内容。"""
     if not query:
-        return "（缺少检索内容）"
+        return tool_failure("（缺少检索内容）")
     uid = _uid()
     k = max(1, min(top_k or _TOP_K, 20))
 
@@ -57,7 +57,7 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
                 lm.append(row["content"])
     except Exception as e:
         # 向量兜底失败只影响召回丰富度，不阻断主流程；记日志而非静默吞掉
-        logger.warning("[memory_search] 向量兜底检索失败: %s", e)
+        logger.warning("[memory_search] 向量兜底检索失败: {}", e)
 
     parts = []
     if lm:
@@ -72,7 +72,7 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
 async def _memory_add(content: str = "") -> str:
     """写入一条长期记忆。"""
     if not content:
-        return "（缺少记忆内容）"
+        return tool_failure("（缺少记忆内容）")
     uid = _uid()
     mid = userdb.db.add_long_memory(uid, content)
     # 建语义向量索引（失败静默）

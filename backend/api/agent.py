@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 # 运行中的 Agent 后台任务强引用（防 GC 静默取消）
 _agent_bg_tasks: set[asyncio.Task] = set()
+# task_id → asyncio.Task；取消接口必须能定位并真正取消对应协程。
+_agent_bg_by_id: dict[str, asyncio.Task] = {}
 
 # 延迟清理通道的后台任务强引用（防 _drop_channel_later 的 sleep 任务被 GC 回收，
 # 导致对应 channel 永不清理、_task_channels 无限增长）
@@ -70,6 +72,11 @@ async def api_agent_create(request: Request):
         user_id = user_id or str(body.get("user_id") or "").strip()
     if not objective:
         return JSONResponse({"ok": False, "error": "缺少目标"}, status_code=400)
+    if len(objective) > 20_000 or len(user_id) > 64:
+        return JSONResponse({"ok": False, "error": "目标或用户标识过长"}, status_code=413)
+    from ..core.reset import reset_in_progress
+    if reset_in_progress():
+        return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
     uid = user_id or "assistant-main"
     try:
         task = await agent_session.create_task(uid, objective)
@@ -121,6 +128,10 @@ async def api_agent_confirm_all(task_id: str, allow: bool = True):
 @router.post("/tasks/{task_id}/run")
 async def api_agent_run(task_id: str):
     """开始执行任务（后台）。确认事件经 GET /tasks/{id}/stream 推送。"""
+    from ..core.reset import reset_epoch, reset_in_progress
+    if reset_in_progress():
+        return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
+    request_epoch = reset_epoch()
     task = agent_session._load(task_id)
     if task is None:
         return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
@@ -157,6 +168,9 @@ async def api_agent_run(task_id: str):
 
     async def _run():
         try:
+            from ..core.reset import epoch_is_current
+            if not epoch_is_current(request_epoch):
+                return
             # 总超时保护：任务卡死（LLM 挂起等）到点自动取消
             await asyncio.wait_for(
                 agent_session.run_task(task_id),
@@ -165,9 +179,15 @@ async def api_agent_run(task_id: str):
         except asyncio.TimeoutError:
             logger.warning("[Agent] 任务 {} 执行超时（{}s），自动取消", task_id, agent_session.TASK_TIMEOUT)
             agent_session.cancel_task(task_id)
+        except asyncio.CancelledError:
+            agent_session.cancel_task(task_id)
+            raise
         except Exception as e:
             logger.exception("[Agent] 执行任务 {} 异常", task_id)
         finally:
+            current = asyncio.current_task()
+            if _agent_bg_by_id.get(task_id) is current:
+                _agent_bg_by_id.pop(task_id, None)
             await push({"type": "task_done", "task_id": task_id})
             _t = asyncio.create_task(_drop_channel_later(task_id))
             _channel_cleanup_tasks.add(_t)
@@ -179,6 +199,7 @@ async def api_agent_run(task_id: str):
     # POST /run 恒 500，Agent 任务从未被 HTTP 端点真正启动过（HTTP 层无测试漏网）。
     bg = ctx.run(asyncio.create_task, _run())
     _agent_bg_tasks.add(bg)
+    _agent_bg_by_id[task_id] = bg
     bg.add_done_callback(_agent_bg_tasks.discard)
     return {"ok": True, "status": "running"}
 
@@ -189,6 +210,9 @@ async def api_agent_cancel(task_id: str):
     task = agent_session.cancel_task(task_id)
     if task is None:
         return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
+    bg = _agent_bg_by_id.get(task_id)
+    if bg is not None and not bg.done():
+        bg.cancel()
     return {"ok": True, "task": agent_session.to_dict(task)}
 
 

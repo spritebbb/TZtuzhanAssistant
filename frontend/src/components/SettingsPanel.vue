@@ -250,7 +250,7 @@ async function save() {
   saving.value = true
   const body: Record<string, string | boolean> = {}
   const f = form.value
-  // 文本/数字字段：非空才提交；密钥字段留空表示保持当前值
+  // 非密钥字段始终提交，允许把城市/图像端点等可选项明确清空；密钥留空仍表示保持。
   const strFields: Array<[string, boolean]> = [
     ['llm_base_url', false], ['llm_model', false],
     ['llm_temperature', false], ['llm_max_tokens', false],
@@ -263,7 +263,6 @@ async function save() {
   for (const [field, isSecret] of strFields) {
     const v = String(f[field] ?? '').trim()
     if (isSecret && !v) continue
-    if (!v) continue
     body[field] = v
   }
   body.search_enabled = f.search_enabled ? '1' : '0'

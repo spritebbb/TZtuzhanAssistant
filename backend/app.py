@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -110,25 +111,18 @@ def create_app() -> FastAPI:
     # 受控端点统一鉴权（来源 IP 语义，见 tools/safety.remote_token_ok_by_peer）：
     # - 回环来源免 token（本机 UI/AgentPanel/聊天不受影响，无论服务绑在哪）；
     # - 非回环来源必须携带有效 token（局域网/公网裸调一律 403）。
-    # 覆盖范围：
-    #   /mcp/*、/api/mcp/*、/api/agent/*（含 GET，工具/任务元数据也敏感）；
-    #   /api/plugins/*（含 GET——插件源码/管理信息对局域网也敏感）；
-    #   /api/* 的全部写方法（POST/PUT/PATCH/DELETE——/api/config、/api/chat、
-    #     /api/sessions、/api/audit 等不再裸奔）；
-    #   /plugins/*（插件网关可执行任意插件路由，含 GET）。
-    _WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+    # 除健康探针外，所有 API、插件网关和人物图片均可能泄露私人数据或触发动作；
+    # 非回环来源必须统一鉴权，不能只保护写接口而把会话/配置/日志的 GET 裸露在 LAN。
+    _PUBLIC_REMOTE_PATHS = {"/api/health"}
 
     @app.middleware("http")
     async def _remote_auth_guard(request, call_next):
         path = request.url.path
-        method = request.method.upper()
         protected = (
             path.startswith("/plugins/")
-            or path.startswith("/api/plugins/")
             or path.startswith("/mcp/")
-            or path.startswith("/api/mcp/")
-            or path.startswith("/api/agent/")
-            or (path.startswith("/api/") and method in _WRITE_METHODS)
+            or path.startswith("/persona")
+            or (path.startswith("/api/") and path not in _PUBLIC_REMOTE_PATHS)
         )
         if not protected:
             return await call_next(request)
@@ -177,7 +171,6 @@ def create_app() -> FastAPI:
         app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
         logger.info("[前端] 静态资源已挂载: {}", _DIST)
 
-    @app.on_event("startup")
     async def _startup() -> None:
         # 启动配置校验：缺 LLM_API_KEY 不打断启动，但打一条 ERROR 日志，
         # 让运维/用户在上线前就能从日志发现「首条消息才会抛 RuntimeError」的隐患，
@@ -300,6 +293,21 @@ def create_app() -> FastAPI:
                 logger.info("[MCP] 已恢复 {} 个外部服务器", n)
         except Exception:
             logger.exception("[MCP] 外部服务器恢复失败")
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        await _startup()
+        try:
+            yield
+        finally:
+            tasks = list(_bg_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            checkpoint_all()
+
+    app.router.lifespan_context = _lifespan
 
     return app
 

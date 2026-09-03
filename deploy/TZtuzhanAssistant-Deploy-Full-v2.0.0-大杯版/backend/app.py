@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -25,6 +26,7 @@ from .api import (
     remote,
     sessions,
     tts,
+    user_reset,
     vision,
 )
 from .maintenance.loop import checkpoint_all, maintenance_loop
@@ -109,25 +111,18 @@ def create_app() -> FastAPI:
     # 受控端点统一鉴权（来源 IP 语义，见 tools/safety.remote_token_ok_by_peer）：
     # - 回环来源免 token（本机 UI/AgentPanel/聊天不受影响，无论服务绑在哪）；
     # - 非回环来源必须携带有效 token（局域网/公网裸调一律 403）。
-    # 覆盖范围：
-    #   /mcp/*、/api/mcp/*、/api/agent/*（含 GET，工具/任务元数据也敏感）；
-    #   /api/plugins/*（含 GET——插件源码/管理信息对局域网也敏感）；
-    #   /api/* 的全部写方法（POST/PUT/PATCH/DELETE——/api/config、/api/chat、
-    #     /api/sessions、/api/audit 等不再裸奔）；
-    #   /plugins/*（插件网关可执行任意插件路由，含 GET）。
-    _WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+    # 除健康探针外，所有 API、插件网关和人物图片均可能泄露私人数据或触发动作；
+    # 非回环来源必须统一鉴权，不能只保护写接口而把会话/配置/日志的 GET 裸露在 LAN。
+    _PUBLIC_REMOTE_PATHS = {"/api/health"}
 
     @app.middleware("http")
     async def _remote_auth_guard(request, call_next):
         path = request.url.path
-        method = request.method.upper()
         protected = (
             path.startswith("/plugins/")
-            or path.startswith("/api/plugins/")
             or path.startswith("/mcp/")
-            or path.startswith("/api/mcp/")
-            or path.startswith("/api/agent/")
-            or (path.startswith("/api/") and method in _WRITE_METHODS)
+            or path.startswith("/persona")
+            or (path.startswith("/api/") and path not in _PUBLIC_REMOTE_PATHS)
         )
         if not protected:
             return await call_next(request)
@@ -160,6 +155,7 @@ def create_app() -> FastAPI:
     app.include_router(greeting.router)
     app.include_router(initiative.router)
     app.include_router(tts.router)
+    app.include_router(user_reset.router)
     app.include_router(mcp_servers.router)
     app.include_router(mcp_server.router)
     app.include_router(plugins_api.router)
@@ -175,22 +171,35 @@ def create_app() -> FastAPI:
         app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")
         logger.info("[前端] 静态资源已挂载: {}", _DIST)
 
-    @app.on_event("startup")
     async def _startup() -> None:
+        # 启动配置校验：缺 LLM_API_KEY 不打断启动，但打一条 ERROR 日志，
+        # 让运维/用户在上线前就能从日志发现「首条消息才会抛 RuntimeError」的隐患，
+        # 而不是等到真正对话时才暴露。
+        try:
+            from .core.config import config as _cfg
+
+            if not (_cfg.llm_api_key and _cfg.llm_api_key.strip()):
+                logger.error(
+                    "[配置] 未检测到 LLM_API_KEY：对话功能将不可用，首条消息会抛错。"
+                    "请复制 .env.example 为 .env 并填写 LLM_API_KEY 后再启动。"
+                )
+            if not (_cfg.persona_file and _cfg.persona_file.exists()):
+                logger.error(
+                    "[配置] persona 文件不存在（{}）：人格系统将降级。请检查 PERSONA_FILE 配置。",
+                    _cfg.persona_file,
+                )
+        except Exception:
+            logger.exception("[配置] 启动配置校验失败（不影响启动）")
         session_store.init()
-        # 记忆引擎 v2 初始化（后台：Chroma + embedding + 存量迁移，不阻塞启动）
+        # 记忆引擎 v2 初始化（后台：Chroma + embedding + 存量迁移，不阻塞启动）。
+        # 注意：存量迁移必须等 embedding 模型就绪后再跑，否则 migrate 会以 768 维
+        # 哈希回退向量去写已锁 1024 维的 collection，整批写入失败（见下方 prewarm
+        # 完成后统一调度 migrate，而非这里立即触发）。
+        needs_migration = False
         try:
             from .core.memory.engine import ensure_ready
 
             needs_migration = await asyncio.to_thread(ensure_ready)
-            if needs_migration:
-                # 迁移（embedding 批量推理）在工作线程执行，但调度必须在事件循环线程
-                from .core.memory.migration import migrate
-                from .core.memory.engine import _background_tasks
-
-                task = asyncio.create_task(asyncio.to_thread(migrate))
-                _background_tasks.add(task)
-                task.add_done_callback(_background_tasks.discard)
         except Exception:
             logger.exception("[记忆] 记忆引擎初始化失败（降级为旧版检索）")
         # 用户身份统一迁移：把向量库里旧身份（session_current）的向量改挂
@@ -214,6 +223,18 @@ def create_app() -> FastAPI:
                     await asyncio.wait_for(asyncio.to_thread(_warmup), timeout=600)
                 except asyncio.TimeoutError:
                     logger.warning("[记忆] embedding 预热超时（>600s），服务已放行，后台线程继续加载")
+                finally:
+                    # 预热结束（模型就绪或已进哈希降级冷却）后再跑存量迁移——
+                    # 保证 migrate 以正确的 embedding 维度写入，避免启动竞态期
+                    # 用 768 维哈希向量去写已锁 1024 维 collection 导致整批失败。
+                    # 此时已在后台线程，慢（含重试）不阻塞主服务。
+                    if needs_migration:
+                        try:
+                            from .core.memory.migration import migrate
+
+                            _spawn_bg(asyncio.to_thread(migrate))
+                        except Exception:
+                            logger.exception("[记忆] 存量迁移调度失败")
 
             if _cfg.memory_v2:
                 _spawn_bg(_prewarm_embedding())
@@ -272,6 +293,21 @@ def create_app() -> FastAPI:
                 logger.info("[MCP] 已恢复 {} 个外部服务器", n)
         except Exception:
             logger.exception("[MCP] 外部服务器恢复失败")
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        await _startup()
+        try:
+            yield
+        finally:
+            tasks = list(_bg_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            checkpoint_all()
+
+    app.router.lifespan_context = _lifespan
 
     return app
 

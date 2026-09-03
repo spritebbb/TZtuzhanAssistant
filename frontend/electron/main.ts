@@ -1,12 +1,12 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
-import { join, resolve } from 'path'
+import { dirname, join, resolve } from 'path'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import http from 'http'
 
 // ESM 模式没有 __dirname，用 import.meta.url 推导（指向 dist-electron/ 或 electron/ 源码目录）
-const _dirname = fileURLToPath(new URL('.', import.meta.url))
+const _dirname = dirname(fileURLToPath(import.meta.url))
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -80,7 +80,7 @@ function checkBackend(): Promise<boolean> {
 }
 
 /** 启动后端 Python 进程 */
-async function startBackend(): Promise<void> {
+async function startBackend(): Promise<boolean> {
   const isDev = !app.isPackaged
   // 开发模式：_dirname = dist-electron/（或 electron/），需向上两级到项目根
   const rootDir = isDev ? resolve(_dirname, '../..') : process.resourcesPath
@@ -90,16 +90,16 @@ async function startBackend(): Promise<void> {
   // 先检查后端是否已经在运行
   if (await checkBackend()) {
     console.log('[electron] 后端已在运行，跳过启动')
-    return
+    return true
   }
 
   if (!existsSync(script)) {
     console.warn('[electron] 后端未随应用打包（backend/main.py 不存在），请先单独启动后端：python backend/main.py')
-    return
+    return false
   }
   if (!existsSync(python)) {
     console.warn(`[electron] 未找到后端 Python（${python}），请先单独启动后端：python backend/main.py`)
-    return
+    return false
   }
 
   console.log('[electron] 启动后端...')
@@ -119,6 +119,11 @@ async function startBackend(): Promise<void> {
     console.log(`[backend] 进程退出 (code: ${code})`)
     backendProcess = null
   })
+  for (let i = 0; i < 60; i++) {
+    if (await checkBackend()) return true
+    await new Promise(resolve_ => setTimeout(resolve_, 500))
+  }
+  return false
 }
 
 function stopBackend(): void {
@@ -150,7 +155,7 @@ function stopBackend(): void {
   }
 }
 
-function createWindow(): void {
+function createWindow(backendReady = true): void {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -183,7 +188,10 @@ function createWindow(): void {
 
   // 开发模式加载 Vite 开发服务器，生产模式加载后端服务（同源，Origin 可信；
   // file:// 的 Origin 是 null，会被后端 CORS/Origin 守卫拒绝，不可用）
-  if (process.env.VITE_DEV_SERVER_URL) {
+  if (!backendReady) {
+    const html = '<!doctype html><meta charset="utf-8"><style>body{font:16px sans-serif;padding:40px;color:#24342d}code{background:#eee;padding:2px 6px}</style><h2>菟菚后端未能启动</h2><p>请确认部署包完整，并检查 <code>backend/python.exe</code> 与 <code>backend/main.py</code>。</p>'
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  } else if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
     mainWindow.loadURL(BACKEND_HOST)
@@ -283,12 +291,13 @@ ipcMain.handle('set-active-session', (_e, sessionId: string | null) => {
 })
 
 app.whenReady().then(async () => {
-  await startBackend()
-  createWindow()
+  const backendReady = await startBackend()
+  if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或后端在 30 秒内未能启动。')
+  createWindow(backendReady)
   createTray()
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  app.on('activate', async () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
   })
 })
 

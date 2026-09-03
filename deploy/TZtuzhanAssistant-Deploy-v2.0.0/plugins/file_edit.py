@@ -16,7 +16,7 @@ PLUGIN_META = {
 import os
 from pathlib import Path
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.tools.safety import check_path
 
 _WORK_DIR = Path(os.getcwd())
@@ -37,24 +37,24 @@ async def _edit_file(path: str = "", old_string: str = "", new_string: str = "",
                      replace_all: bool = False) -> str:
     """编辑文件：将 old_string 替换为 new_string（对标 Harness 的 edit）。"""
     if not path or not old_string:
-        return "（缺少文件路径或待替换内容）"
+        return tool_failure("（缺少文件路径或待替换内容）")
     p = _resolve_path(path)
     if p is None:
-        return "（路径不允许：只能在工作目录下操作）"
+        return tool_failure("（路径不允许：只能在工作目录下操作）")
     try:
         if not p.exists():
-            return f"（文件不存在: {path}）"
+            return tool_failure(f"（文件不存在: {path}）")
         if p.is_dir():
-            return f"（{path} 是目录，非文件）"
+            return tool_failure(f"（{path} 是目录，非文件）")
         content = p.read_text(encoding="utf-8")
     except PermissionError:
-        return "（无权限读取）"
+        return tool_failure("（无权限读取）")
     except Exception as e:
-        return f"（读取失败：{e}）"
+        return tool_failure(f"（读取失败：{e}）")
 
     if replace_all:
         if old_string not in content:
-            return f"（未找到匹配: {old_string[:50]}）"
+            return tool_failure(f"（未找到匹配: {old_string[:50]}）")
         count = content.count(old_string)
         new_content = content.replace(old_string, new_string)
         if not new_string:
@@ -64,10 +64,10 @@ async def _edit_file(path: str = "", old_string: str = "", new_string: str = "",
     else:
         idx = content.find(old_string)
         if idx == -1:
-            return f"（未找到匹配: {old_string[:50]}）"
+            return tool_failure(f"（未找到匹配: {old_string[:50]}）")
         # 确认只出现一次（除非用户明确 replace_all）
         if content.count(old_string) > 1:
-            return f"（匹配出现 {content.count(old_string)} 次，请加 replace_all=true 避免歧义）"
+            return tool_failure(f"（匹配出现 {content.count(old_string)} 次，请加 replace_all=true 避免歧义）")
         new_content = content[:idx] + new_string + content[idx + len(old_string):]
         msg = "（已替换 1 处）"
 
@@ -75,9 +75,9 @@ async def _edit_file(path: str = "", old_string: str = "", new_string: str = "",
         p.write_text(new_content, encoding="utf-8")
         return msg
     except PermissionError:
-        return "（无权限写入）"
+        return tool_failure("（无权限写入）")
     except Exception as e:
-        return f"（写入失败：{e}）"
+        return tool_failure(f"（写入失败：{e}）")
 
 
 def register(ctx=None) -> None:

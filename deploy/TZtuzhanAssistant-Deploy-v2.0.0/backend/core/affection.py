@@ -222,6 +222,43 @@ def set_affection(user_id: str, value: int) -> None:
     db.set_affection_absolute(user_id, value)
 
 
+def display(user_id: str) -> dict:
+    """好感度前端展示负载：数值 + 阶段/羁绊标签 + 下一阶段信息。
+
+    value: 0-100 当前好感度
+    stage: 阶段名（初识/熟悉/亲密/恋人）
+    bond: 恋人羁绊等级（眷恋/热恋/白头）；非恋人阶段为空串
+    next/next_at: 下一阶段名与所需数值；已满级则两者为空
+    fill: 0-100 供进度条按绝对好感度渲染
+    """
+    u = db.get_user(user_id)
+    if not u:
+        return {"value": 0, "stage": STAGE_THRESHOLDS[0][1], "bond": "",
+                "next": STAGE_THRESHOLDS[1][1], "next_at": STAGE_THRESHOLDS[1][0], "fill": 0}
+    aff = u["affection"]
+    stage = stage_of(aff)
+    bl = bond_level(aff)
+    bond = bl[0] if bl else ""
+    # 找下一阶段（高于当前值的最近阈值）；恋人阶段后仍有羁绊梯度，统一指向"圆满"
+    nt_name, nt_at = "", None
+    for t, s in STAGE_THRESHOLDS:
+        if t > aff:
+            nt_name, nt_at = s, t
+            break
+    if nt_at is None:
+        nt_name, nt_at = "圆满", 100
+    if aff >= 100:
+        nt_name, nt_at = "", None
+    return {
+        "value": aff,
+        "stage": stage,
+        "bond": bond,
+        "next": nt_name,
+        "next_at": nt_at,
+        "fill": aff,
+    }
+
+
 def describe(user_id: str) -> str:
     """返回该用户好感度与阶段的描述文本（含进度条）。"""
     u = db.get_user(user_id)

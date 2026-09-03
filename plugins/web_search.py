@@ -9,14 +9,14 @@ PLUGIN_META = {
     "author": "tuzhan",
 }
 
-from backend.tools.base import ToolRegistry
+from backend.tools.base import ToolRegistry, tool_failure
 from backend.core.search import web_search
 
 
 async def _web_search(query: str = "") -> str:
     """联网搜索。"""
     if not query:
-        return "（搜索缺少关键词）"
+        return tool_failure("（搜索缺少关键词）")
     import asyncio
 
     hits = await asyncio.to_thread(web_search, query)

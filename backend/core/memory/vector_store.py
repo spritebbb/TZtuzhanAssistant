@@ -45,6 +45,20 @@ def _ef():
     from . import embedding as emb
 
     class _LocalEF(EmbeddingFunction):
+        def __init__(self):
+            pass
+
+        @staticmethod
+        def name() -> str:
+            return "tztuzhan-local"
+
+        def get_config(self) -> dict:
+            return {}
+
+        @staticmethod
+        def build_from_config(config: dict):
+            return _LocalEF()
+
         def __call__(self, input):  # noqa: A002
             if isinstance(input, str):
                 texts = [input]

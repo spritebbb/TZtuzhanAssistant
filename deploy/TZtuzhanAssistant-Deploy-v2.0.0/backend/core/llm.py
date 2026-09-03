@@ -195,6 +195,9 @@ async def chat_native(
             for tc in (msg.tool_calls or []):
                 try:
                     args = json.loads(tc.function.arguments or "{}")
+                    if not isinstance(args, dict):
+                        logger.warning("[LLM] 工具 {} 参数不是对象，已按空对象处理", tc.function.name)
+                        args = {}
                 except Exception as je:
                     logger.warning("[LLM] 工具 {} 的参数 JSON 解析失败：{}", tc.function.name, je)
                     args = {}

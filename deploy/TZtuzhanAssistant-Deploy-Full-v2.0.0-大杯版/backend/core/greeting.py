@@ -128,6 +128,10 @@ async def greeting_for(
     """如果用户久别归来，生成问候语。返回问候文本或 None。
     force=True 时跳过时间检查，总是生成（用于首次启动）。
     """
+    from .reset import reset_epoch, reset_in_progress
+    if reset_in_progress():
+        return None
+    epoch = reset_epoch()
     now = time.time()
     with _greet_lock:
         last_ts = _last_seen_ts(user_id)
@@ -151,15 +155,21 @@ async def greeting_for(
         kv_del(user_id, _GREET_PENDING_KEY)
     if not text:
         return None
+    from .reset import ResetSuperseded, epoch_is_current, user_write_guard
+    if not epoch_is_current(epoch):
+        return None
 
     # 持久化到会话存储
     try:
         from ..session.store import append_messages
 
-        await append_messages(
-            session_id,
-            [{"role": "bot", "content": text, "ts": now}],
-        )
+        async with user_write_guard(epoch):
+            await append_messages(
+                session_id,
+                [{"role": "bot", "content": text, "ts": now}],
+            )
+    except ResetSuperseded:
+        return None
     except Exception as e:
         logger.warning(f"[问候] 持久化失败: {e}")
 

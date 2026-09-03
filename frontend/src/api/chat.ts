@@ -24,11 +24,13 @@ export async function streamChat(
   signal: AbortSignal,
   cb: ChatCallbacks,
   image?: string | null,
+  requestId?: string,
 ): Promise<void> {
   const body = new URLSearchParams()
   body.set('text', text)
   if (sessionId) body.set('session_id', sessionId)
   if (image) body.set('image', image)
+  if (requestId) body.set('request_id', requestId)
 
   const res = await apiFetch('/api/chat', {
     method: 'POST',

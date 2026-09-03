@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setActiveSession: (sessionId: string | null) => ipcRenderer.invoke('set-active-session', sessionId),
   // 订阅主进程转发的主动消息（主进程轮询到后推送过来，用于追加气泡）
   onInitiativeMessage: (cb: (text: string) => void) => {
-    ipcRenderer.on('initiative-message', (_e, text: string) => cb(text))
+    const listener = (_e: Electron.IpcRendererEvent, text: string) => cb(text)
+    ipcRenderer.on('initiative-message', listener)
+    return () => ipcRenderer.removeListener('initiative-message', listener)
   },
 })

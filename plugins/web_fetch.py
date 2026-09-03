@@ -14,8 +14,8 @@ import re
 import urllib.parse
 import urllib.request
 
-from backend.tools.base import ToolRegistry
-from backend.tools.safety import check_url
+from backend.tools.base import ToolRegistry, tool_failure
+from backend.tools.safety import build_pinned_opener, resolve_public_url
 
 _MAX_BYTES = 2 * 1024 * 1024  # 抓取大小上限（2MB），防异常大页面撑爆内存
 _MAX_REDIRECTS = 5
@@ -32,11 +32,11 @@ def _fetch_sync(url: str) -> str:
     """同步抓取（由调用方放线程池，避免阻塞事件循环）。"""
     import urllib.error
 
-    opener = urllib.request.build_opener(_NoRedirect)
     for _ in range(_MAX_REDIRECTS + 1):
-        ok, err = check_url(url)
+        ok, err, resolved_ip = resolve_public_url(url)
         if not ok:
-            return err
+            return tool_failure(err)
+        opener = build_pinned_opener(resolved_ip, _NoRedirect())
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         try:
             with opener.open(req, timeout=15) as resp:
@@ -46,14 +46,14 @@ def _fetch_sync(url: str) -> str:
             if e.code in (301, 302, 303, 307, 308):
                 loc = e.headers.get("Location")
                 if not loc:
-                    return "（重定向缺少 Location，已停止）"
+                    return tool_failure("（重定向缺少 Location，已停止）")
                 url = urllib.parse.urljoin(url, loc)
                 continue
-            return f"（抓取失败：HTTP {e.code}）"
+            return tool_failure(f"（抓取失败：HTTP {e.code}）")
         except Exception as e:
-            return f"（抓取失败：{e}）"
+            return tool_failure(f"（抓取失败：{e}）")
         if len(html) > _MAX_BYTES:
-            return "（页面超过 2MB，已拒绝抓取）"
+            return tool_failure("（页面超过 2MB，已拒绝抓取）")
         html = html.decode("utf-8", errors="replace")
 
         # 提取正文：有 <body> 取 body 内文本；没有则取整页文本
@@ -71,17 +71,17 @@ def _fetch_sync(url: str) -> str:
         if len(text) > 3000:
             text = text[:3000] + "...（已截断）"
         return text or "（页面内容为空）"
-    return "（重定向次数过多，已停止）"
+    return tool_failure("（重定向次数过多，已停止）")
 
 
 async def _web_fetch(url: str = "") -> str:
     """抓取网页正文内容。"""
     if not url:
-        return "（缺少 URL）"
+        return tool_failure("（缺少 URL）")
     try:
         return await asyncio.to_thread(_fetch_sync, url)
     except Exception as e:
-        return f"（抓取失败：{e}）"
+        return tool_failure(f"（抓取失败：{e}）")
 
 
 def register(ctx=None) -> None:
