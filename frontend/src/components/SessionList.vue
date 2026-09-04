@@ -225,6 +225,7 @@ defineExpose({ load })
         <div class="viewer-head">
           <span class="viewer-title">{{ viewing.title }}</span>
           <span class="viewer-time">{{ fmtTime(viewing.created_at) }}</span>
+          <a class="viewer-export" :href="`/api/keepsake/${viewing.id}`" target="_blank" rel="noopener" title="导出纪念册（可打印为 PDF）">纪念册</a>
           <button class="viewer-close" @click="closeView">✕</button>
         </div>
         <div class="viewer-body">
@@ -574,6 +575,19 @@ defineExpose({ load })
   font-size: 0.8rem;
 }
 .viewer-close:hover { color: var(--danger); background: var(--danger-soft); }
+.viewer-export {
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent);
+  font-size: 0.75rem;
+  text-decoration: none;
+  align-self: center;
+}
+.viewer-export:hover { filter: brightness(1.1); }
 .viewer-body {
   flex: 1;
   overflow-y: auto;
