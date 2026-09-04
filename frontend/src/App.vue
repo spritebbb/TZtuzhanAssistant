@@ -88,28 +88,33 @@ async function doReset() {
 const theme = ref<'dark' | 'light'>('dark')
 const themeStorageKey = 'tztuzhan-theme'
 
-// === 主题切换（暗色/亮色，默认暗色） ===
+// === 主题切换（暗色/亮色；未手动选择时按昼夜自动：7-19 点亮色温室，夜晚暗色月光） ===
 function loadTheme() {
   try {
     // 支持 ?theme=light|dark 查询参数显式指定（用于调试/截图验证）
     const q = new URLSearchParams(location.search).get('theme')
     if (q === 'light' || q === 'dark') { theme.value = q; return }
     const saved = localStorage.getItem(themeStorageKey)
-    if (saved === 'light' || saved === 'dark') theme.value = saved
+    if (saved === 'light' || saved === 'dark') { theme.value = saved; return }
+    // 自动模式：跟随本地时间，不落盘——用户手动切换后才固定偏好
+    const hour = new Date().getHours()
+    theme.value = hour >= 7 && hour < 19 ? 'light' : 'dark'
   } catch { /* 不可用时保持默认 */ }
 }
 
-function applyTheme(t: 'dark' | 'light') {
+function applyTheme(t: 'dark' | 'light', persist = true) {
   document.body.classList.toggle('theme-light', t === 'light')
-  try { localStorage.setItem(themeStorageKey, t) } catch { /* ignore */ }
+  if (persist) {
+    try { localStorage.setItem(themeStorageKey, t) } catch { /* ignore */ }
+  }
 }
 
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
-  applyTheme(theme.value)
+  applyTheme(theme.value, true)  // 手动切换才固定偏好
 }
 
-watch(theme, applyTheme, { immediate: false })
+watch(theme, (t) => applyTheme(t, false), { immediate: false })
 
 // === 键盘快捷键 ===
 function onKeydown(e: KeyboardEvent) {
@@ -135,7 +140,7 @@ function onArchived() {
 onMounted(async () => {
   await ensureBaseUrl()
   loadTheme()
-  applyTheme(theme.value)
+  applyTheme(theme.value, false)  // 初始应用不落盘：自动模式每天重新判断
   document.addEventListener('keydown', onKeydown)
   refreshAffection()  // 首屏载入好感度条
 })
