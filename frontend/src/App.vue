@@ -6,6 +6,7 @@ import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
+import KnowledgePanel from './components/KnowledgePanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
@@ -14,6 +15,7 @@ import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
 const diaryOpen = ref(false)
+const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
 const usageOpen = ref(false)
 const sidebarOpen = ref(false)
@@ -259,6 +261,7 @@ onUnmounted(() => {
     <SettingsPanel :show="settingsOpen" @close="closeSettings" />
     <AgentPanel :show="agentOpen" @close="agentOpen = false" />
     <DiaryPanel :show="diaryOpen" @close="diaryOpen = false" />
+    <KnowledgePanel :show="knowledgeOpen" @close="knowledgeOpen = false" />
     <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
     <UsagePanel :show="usageOpen" @close="usageOpen = false" />
 

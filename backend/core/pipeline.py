@@ -686,6 +686,20 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.exception("[pipeline] 记忆检索失败，按无记忆继续")
         remembered, facts = [], []
 
+    # 3.0) 知识库召回（D2 RAG）：本地向量检索，无云端 LLM 成本；
+    # 距离阈值门控——不像就一条不注入，避免无关内容硬凑带偏回复。
+    kb_hits: list[dict] = []
+    if not mock:
+        try:
+            import asyncio as _asyncio_kb
+
+            from .knowledge import recall_knowledge
+
+            kb_hits = await _asyncio_kb.to_thread(recall_knowledge, user_id, text)
+        except Exception:
+            logger.exception("[pipeline] 知识库检索失败，按无知识继续")
+            kb_hits = []
+
     # 3.1) 长会话压缩：总消息超阈值时，把旧消息摘要成一段记忆，只保留最近的完整消息
     ctx = short_term_messages(user_id)
     compact_summary = None
@@ -998,6 +1012,27 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     + "\n\n".join(memory_lines)
                     + "\n这些都只是你的记忆背景：想起来就自然融入，想不起来就别硬凑；"
                     "不要逐条汇报、不要『我记得你说过…』式开场白刷屏。"
+                ),
+            }
+        )
+    # 知识库（D2）：她"读过"的资料里与当前话题相关的段落。
+    # 与记忆注入分开成独立 system 消息：记忆是"你们的过去"，知识是"她自己的阅读"，
+    # 语气要求一致（自然引用、不报告腔），但来源语义不同，混在一条里容易让模型
+    # 把资料错当成和用户共同的记忆。
+    if kb_hits:
+        kb_lines = "\n".join(
+            f"- （出自《{h['filename']}》）{h['text']}" if h.get("filename") else f"- {h['text']}"
+            for h in kb_hits
+        )
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "你读过的资料里有和当前话题相关的内容：\n"
+                    + kb_lines
+                    + "\n这些是你自己读过、记在心里的东西：用得上就自然揉进回复里，"
+                    "像你刚好知道随口提起；用不上就别提。不要照抄大段原文、不要列清单、"
+                    "不要说「根据文档」「资料显示」这种报告腔。"
                 ),
             }
         )
@@ -1377,6 +1412,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             memory_rows: list[tuple[str, object]] = []
             memory_rows.extend(("相关对话", value) for value in remembered[:2])
             memory_rows.extend(("长期事实", value) for value in facts[:2])
+            memory_rows.extend(
+                ("知识库", f"《{h['filename']}》相关段落" if h.get("filename") else "相关段落")
+                for h in kb_hits[:2]
+            )
             memory_rows.extend(
                 ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
                 for item in triples[:2]

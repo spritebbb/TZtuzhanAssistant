@@ -177,6 +177,26 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at   TEXT NOT NULL,
     completed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS kb_documents (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    filename    TEXT NOT NULL,    -- 原始文件名（展示用）
+    stored_path TEXT NOT NULL,    -- 落盘路径（data/documents/ 下）
+    format      TEXT NOT NULL,    -- pdf / txt / md
+    size_bytes  INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    ts          TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kb_chunks (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    doc_id  INTEGER NOT NULL,     -- 对应 kb_documents.id
+    seq     INTEGER NOT NULL,     -- 文档内分块序号
+    text    TEXT NOT NULL,
+    ts      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_docs_user ON kb_documents(user_id);
+CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks(user_id, doc_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -981,7 +1001,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks", "promises", "usage_log",
+                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()

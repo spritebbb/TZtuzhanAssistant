@@ -11,6 +11,8 @@ Pillow>=10.0.0
 sqlite-vec>=0.1.9
 python-multipart>=0.0.9
 edge-tts>=7.2.0
+# 知识库（D2 RAG）：PDF 文档解析
+pypdf>=4.0.0
 # 记忆系统 v2（重构新增）
 chromadb>=1.5.0
 sentence-transformers>=6.0.0
