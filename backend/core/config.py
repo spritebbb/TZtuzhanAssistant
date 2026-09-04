@@ -124,6 +124,18 @@ class Config:
         self.sticker_min_message_gap: int = max(2, _env_int("STICKER_MIN_MESSAGE_GAP", 10))
         self.sticker_collection_max: int = max(4, _env_int("STICKER_COLLECTION_MAX", 24))
 
+        # 知识库（D2 RAG）：用户投喂 pdf/txt/md，语义检索相关段落注入对话。
+        # 本地检索（BGE-M3）无 LLM 成本；距离阈值门控，不像就不注入，避免硬凑。
+        self.kb_enabled: bool = os.getenv("KB_ENABLED", "1") != "0"
+        self.kb_chunk_size: int = max(200, _env_int("KB_CHUNK_SIZE", 600))
+        self.kb_chunk_overlap: int = max(0, _env_int("KB_CHUNK_OVERLAP", 120))
+        self.kb_recall_top_k: int = max(1, min(10, _env_int("KB_RECALL_TOP_K", 3)))
+        # cosine 距离阈值：小于该值才认为相关（bge-m3 上 0.55 约等于「有点关系」）
+        self.kb_recall_max_distance: float = _env_float("KB_RECALL_MAX_DISTANCE", 0.55)
+        # 单文件大小上限（MB）与单用户文档数上限
+        self.kb_max_file_mb: int = max(1, _env_int("KB_MAX_FILE_MB", 20))
+        self.kb_max_documents: int = max(1, _env_int("KB_MAX_DOCUMENTS", 50))
+
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
         self.vision_api_key: str = os.getenv("VISION_API_KEY", "").strip()

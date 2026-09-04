@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from ..log import logger
 
 # kind 白名单（防止拼写错误创建一堆空 collection）
-_KINDS = {"lm", "facts", "triples", "profile", "topic", "diary", "summary", "sticker", "mem"}
+_KINDS = {"lm", "facts", "triples", "profile", "topic", "diary", "summary", "sticker", "mem", "kb"}
 
 _lock = threading.RLock()
 # 独立锁：串行化对 Chroma PersistentClient（底层 SQLite）的实际读写调用。

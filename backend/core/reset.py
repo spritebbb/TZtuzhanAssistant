@@ -27,7 +27,7 @@ _TABLES = (
     "affection_log", "long_memory", "facts", "user_meta", "messages",
     "users", "kv_store", "important_dates", "stickers",
     "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-    "tasks", "promises", "usage_log",
+    "tasks", "promises", "usage_log", "kb_documents", "kb_chunks",
 )
 
 _reset_lock = asyncio.Lock()
