@@ -63,7 +63,7 @@ backend/api/             # FastAPI 路由（usage.py、keepsake.py、diary.py、
 frontend/src/components/ # Vue 面板（UsagePanel.vue、DiaryPanel.vue、MemoryPanel.vue...）
 tests/                   # pytest，每轮迭代带独立隔离测试
 data/                    # 运行时数据（db/chroma/logs）
-docs/                    # CODE-REVIEW-*.md、DEPLOYMENT-OPTIONS.md、HANDOFF-TO-CODEX.md 等
+docs/                    # EVOLUTION-ROADMAP.md、DEPLOYMENT-OPTIONS.md、HANDOFF-TO-CODEX.md 等（历史评审见 docs/archive/CODE-REVIEW-*.md）
 deliverables/            # 每轮迭代报告
 EVOLUTION-ROADMAP.md     # 路线图（逐项验收 + 版本号）← 主进度文件
 ```
