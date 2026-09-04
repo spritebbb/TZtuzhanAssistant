@@ -51,7 +51,7 @@ backend/api/             # FastAPI 路由（usage.py 是 D5 新增，含「养�
 frontend/src/components/ # Vue 面板（UsagePanel.vue 是 D5 新增）
 tests/                   # pytest，每轮迭代都带隔离测试
 data/                    # 运行时数据（db/chroma/logs）
-docs/                    # 含 CODE-REVIEW-*.md、DEPLOYMENT-OPTIONS.md 等
+docs/                    # 含 CODE-REVIEW-*.md（archive/）、DEPLOYMENT-OPTIONS.md 等
 EVOLUTION-ROADMAP.md     # 路线图，含逐项验收
 deliverables/            # 每轮迭代报告
 ```

@@ -7,7 +7,7 @@
 > - 框架实现：`backend/plugins/loader.py`、`backend/plugins/context.py`
 > - 工具基类/注册表：`backend/tools/base.py`
 > - 安全校验：`backend/tools/safety.py`
-> - 设计文档：`docs/PLUGIN-SYSTEM-V2.md`
+> - 设计文档：`docs/archive/PLUGIN-SYSTEM-V2.md`
 > - 完整示例：`plugins/currency.py`（汇率换算，覆盖全部 ctx 能力）
 > - 管理 API：`backend/api/plugins.py`
 
