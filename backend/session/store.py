@@ -266,20 +266,22 @@ def _search_archives_sync(q: str) -> list[dict]:
         return []
     if len(q) > _SEARCH_QUERY_MAX:
         q = q[:_SEARCH_QUERY_MAX]
-    pattern = f"%{q}%"
+    # LIKE 中的 % 和 _ 是通配符；搜索框应按用户输入的字面内容匹配。
+    escaped = q.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    pattern = f"%{escaped}%"
     conn = _connect()
     try:
         # 标题命中：直接 LIKE 匹配
         title_rows = conn.execute(
             "SELECT id, title, created_at, message_count, messages_json"
-            " FROM archives WHERE title LIKE ? COLLATE NOCASE"
+            " FROM archives WHERE title COLLATE NOCASE LIKE ? ESCAPE '\\'"
             " ORDER BY created_at DESC LIMIT ?",
             (pattern, _SEARCH_LIMIT),
         ).fetchall()
         # 内容命中：messages_json 是 JSON 文本，同样用 LIKE 匹配其字符串形式
         content_rows = conn.execute(
             "SELECT id, title, created_at, message_count, messages_json"
-            " FROM archives WHERE messages_json LIKE ? COLLATE NOCASE"
+            " FROM archives WHERE messages_json COLLATE NOCASE LIKE ? ESCAPE '\\'"
             " ORDER BY created_at DESC LIMIT ?",
             (pattern, _SEARCH_LIMIT),
         ).fetchall()

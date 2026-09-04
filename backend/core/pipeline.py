@@ -2,6 +2,7 @@
 
 Web 助手（assistant.py）与调试共用，保证各处行为一致。
 """
+import asyncio
 import re
 from datetime import datetime, timedelta
 
@@ -492,7 +493,6 @@ _lock_last_used: dict[str, float] = {}
 
 
 def _user_lock(user_id: str) -> "asyncio.Lock":
-    import asyncio
     import time
 
     now = time.monotonic()

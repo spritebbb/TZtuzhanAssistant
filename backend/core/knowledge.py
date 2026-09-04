@@ -133,10 +133,6 @@ def ingest_document(user_id: str, filename: str, data: bytes) -> dict:
     fmt = detect_format(filename)
     if len(data) > config.kb_max_file_mb * 1024 * 1024:
         raise KnowledgeError(f"文件超过 {config.kb_max_file_mb}MB 上限")
-    existing = list_documents(user_id)
-    if len(existing) >= config.kb_max_documents:
-        raise KnowledgeError(f"知识库最多存 {config.kb_max_documents} 份文档，先删掉一些")
-
     text = parse_document(fmt, data)
     chunks = chunk_text(text, config.kb_chunk_size, config.kb_chunk_overlap)
     if not chunks:
@@ -144,6 +140,11 @@ def ingest_document(user_id: str, filename: str, data: bytes) -> dict:
 
     ts = datetime.now().isoformat(timespec="seconds")
     with db._lock:
+        count = db.conn.execute(
+            "SELECT COUNT(*) FROM kb_documents WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        if count >= config.kb_max_documents:
+            raise KnowledgeError(f"知识库最多存 {config.kb_max_documents} 份文档，先删掉一些")
         cur = db.conn.execute(
             "INSERT INTO kb_documents (user_id, filename, stored_path, format, size_bytes, chunk_count, ts) "
             "VALUES (?, ?, '', ?, ?, ?, ?)",

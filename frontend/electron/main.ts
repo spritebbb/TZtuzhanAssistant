@@ -83,6 +83,7 @@ function stopInitiativePolling(): void {
 function checkBackend(): Promise<boolean> {
   return new Promise((resolve_) => {
     const req = http.get(`http://127.0.0.1:${BACKEND_PORT}/api/health`, (res) => {
+      res.resume()
       resolve_(res.statusCode === 200)
     })
     req.on('error', () => resolve_(false))
@@ -120,6 +121,13 @@ async function startBackend(): Promise<boolean> {
     env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
   })
 
+  const spawnedProcess = backendProcess
+  let spawnFailed = false
+  spawnedProcess.on('error', (error) => {
+    spawnFailed = true
+    console.error('[backend] 启动失败：', error)
+    if (backendProcess === spawnedProcess) backendProcess = null
+  })
   backendProcess.stdout?.on('data', (data: Buffer) => {
     console.log(`[backend] ${data.toString().trim()}`)
   })
@@ -131,9 +139,11 @@ async function startBackend(): Promise<boolean> {
     backendProcess = null
   })
   for (let i = 0; i < 60; i++) {
+    if (spawnFailed) return false
     if (await checkBackend()) return true
     await new Promise(resolve_ => setTimeout(resolve_, 500))
   }
+  stopBackend()
   return false
 }
 
@@ -147,10 +157,9 @@ function stopBackend(): void {
       // 过早强杀会丢最后一次备份。后端正常退出后 backendProcess 会被 on('exit')
       // 置 null，下方 setTimeout 里的判断会跳过强杀。
       if (pid) {
-        const http = require('http')
         const req = http.request(
           { host: '127.0.0.1', port: 8801, path: '/api/health/shutdown', method: 'POST', timeout: 500 },
-          () => {}
+          (res) => res.resume()
         )
         req.on('error', () => {})
         req.on('timeout', () => req.destroy())

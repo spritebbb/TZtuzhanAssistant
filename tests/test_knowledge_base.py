@@ -135,8 +135,44 @@ def _test_ingest_and_recall() -> None:
         assert not any(k[2] for k in _FAKE_STORE if k[0] == uid), "向量应同步删除"
         assert knowledge.delete_document(uid, doc["id"]) is False, "重复删除应返回 False"
 
-        # 超限拒绝
+        # 数量上限检查与插入必须同锁完成；两个并发上传不能同时越过上限。
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
         from backend.core.config import config
+
+        old_max_documents = config.kb_max_documents
+        original_parse = knowledge.parse_document
+        barrier = Barrier(2)
+
+        def synchronized_parse(fmt: str, data: bytes) -> str:
+            result = original_parse(fmt, data)
+            barrier.wait(timeout=5)
+            return result
+
+        config.kb_max_documents = 1
+        knowledge.parse_document = synchronized_parse
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(knowledge.ingest_document, uid, f"race-{i}.txt", b"content")
+                    for i in range(2)
+                ]
+                outcomes = []
+                for future in futures:
+                    try:
+                        outcomes.append(future.result())
+                    except KnowledgeError:
+                        outcomes.append(None)
+            assert sum(item is not None for item in outcomes) == 1
+            docs = knowledge.list_documents(uid)
+            assert len(docs) == 1
+            assert knowledge.delete_document(uid, docs[0]["id"])
+        finally:
+            knowledge.parse_document = original_parse
+            config.kb_max_documents = old_max_documents
+
+        # 超限拒绝
         try:
             knowledge.ingest_document(uid, "big.txt", b"x" * (config.kb_max_file_mb * 1024 * 1024 + 1))
             raise AssertionError("超限文件应抛 KnowledgeError")
@@ -149,7 +185,7 @@ def _test_ingest_and_recall() -> None:
             db.conn.execute("DELETE FROM kb_documents WHERE user_id = ?", (uid,))
             db.conn.execute("DELETE FROM kb_chunks WHERE user_id = ?", (uid,))
             db.conn.commit()
-    print("[OK] 入库/检索门控/删除/超限拒绝")
+    print("[OK] 入库/检索门控/删除/超限拒绝/并发上限")
 
 
 def _test_reset_coverage() -> None:
@@ -169,6 +205,7 @@ async def _test_api() -> None:
     from fastapi.testclient import TestClient
 
     from backend.app import create_app
+    from backend.core.config import config
     from backend.core.memory import vector_store
 
     original_add, original_search = vector_store.add, vector_store.search
@@ -195,12 +232,31 @@ async def _test_api() -> None:
             )
             assert bad.json()["ok"] is False and "不支持的格式" in bad.json()["error"]
 
+            # 上传接口必须在读入全部请求体前按配置拒绝超大文件。
+            old_max = config.kb_max_file_mb
+            try:
+                config.kb_max_file_mb = 1
+                too_large = client.post(
+                    "/api/knowledge/upload",
+                    files={
+                        "file": (
+                            "超大.txt",
+                            b"x" * (1024 * 1024 + 1),
+                            "text/plain",
+                        )
+                    },
+                )
+                assert too_large.status_code == 413
+                assert too_large.json()["ok"] is False
+            finally:
+                config.kb_max_file_mb = old_max
+
             # 删除
             assert client.delete(f"/api/knowledge/documents/{doc_id}").json()["ok"] is True
             assert client.delete(f"/api/knowledge/documents/{doc_id}").json()["ok"] is False
     finally:
         vector_store.add, vector_store.search = original_add, original_search
-    print("[OK] API：上传/列表/格式拒绝/删除闭环")
+    print("[OK] API：上传/列表/格式拒绝/大小门控/删除闭环")
 
 
 async def _run() -> None:

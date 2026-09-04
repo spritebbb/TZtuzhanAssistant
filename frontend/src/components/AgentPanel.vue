@@ -73,7 +73,7 @@ async function loadTask(id: string) {
     const d = await r.json()
     if (d.ok) {
       current.value = d.task
-      if (d.task.status === 'running') running.value = true
+      running.value = d.task.status === 'running'
     }
   } catch { /* ignore */ }
 }
