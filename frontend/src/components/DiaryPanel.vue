@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { getDiaries, getResearchReports, type DiaryEntry, type ResearchReport } from '../api/diary'
+import { getUnlocks, type UnlockSlot } from '../api/unlocks'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
-const tab = ref<'diary' | 'research'>('diary')
+const tab = ref<'diary' | 'research' | 'ours'>('diary')
 const diaries = ref<DiaryEntry[]>([])
 const reports = ref<ResearchReport[]>([])
+const unlocks = ref<UnlockSlot[]>([])
 const loading = ref(false)
 const error = ref('')
 
@@ -14,9 +16,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [diaryRows, reportRows] = await Promise.all([getDiaries(), getResearchReports()])
+    const [diaryRows, reportRows, slotRows] = await Promise.all([getDiaries(), getResearchReports(), getUnlocks()])
     diaries.value = diaryRows
     reports.value = reportRows
+    unlocks.value = slotRows
   } catch {
     error.value = '抽屉卡住了，过会儿再翻'
   } finally {
@@ -40,6 +43,7 @@ watch(() => props.show, (show) => { if (show) void load() })
       <nav>
         <button :class="{ active: tab === 'diary' }" @click="tab = 'diary'">私人日记</button>
         <button :class="{ active: tab === 'research' }" @click="tab = 'research'">观察人类</button>
+        <button :class="{ active: tab === 'ours' }" @click="tab = 'ours'">我们之间</button>
       </nav>
       <div class="entries">
         <p v-if="loading" class="empty">正在悄悄拉开抽屉…</p>
@@ -51,13 +55,27 @@ watch(() => props.show, (show) => { if (show) void load() })
           </article>
           <p v-if="!diaries.length" class="empty">还没有日记。聊过一个完整的日子后再来偷看</p>
         </template>
-        <template v-else>
+        <template v-else-if="tab === 'research'">
           <article v-for="report in reports" :key="report.id" class="report">
             <div class="meta"><time>{{ report.period }}</time><span>阶段报告</span></div>
             <h3>{{ report.title }}</h3>
             <p>{{ report.content }}</p>
           </article>
           <p v-if="!reports.length" class="empty">样本还不够。每积累七篇日记，她会写一份阶段报告</p>
+        </template>
+        <template v-else>
+          <article v-for="slot in unlocks" :key="slot.key" :class="['unlock', slot.status]">
+            <div class="meta">
+              <time v-if="slot.delivered_at">{{ slot.delivered_at.slice(0, 10) }}</time>
+              <time v-else>——</time>
+              <span>{{ slot.kind === 'stage' ? '阶段' : slot.kind === 'bond' ? '羁绊' : '彩蛋' }}</span>
+            </div>
+            <h3>{{ slot.status === 'locked' ? '？？？' : slot.title }}</h3>
+            <p v-if="slot.status === 'delivered' && slot.content">{{ slot.content }}</p>
+            <p v-else-if="slot.status === 'pending'" class="hint">她有句话想对你说，下次聊天时留意</p>
+            <p v-else-if="slot.status === 'locked'" class="hint">还没走到这一页</p>
+          </article>
+          <p v-if="!unlocks.length" class="empty">日子还长，慢慢来</p>
         </template>
       </div>
     </section>
@@ -81,4 +99,7 @@ article { margin-bottom: 14px; padding: 16px 17px; border: 1px solid var(--borde
 h3 { margin: 9px 0 3px; font-size: 16px; }
 p { margin: 10px 0 0; line-height: 1.78; white-space: pre-wrap; }
 .empty { color: var(--text-muted); text-align: center; padding: 44px 12px; }
+article.unlock.locked { opacity: .55; border-style: dashed; }
+article.unlock.pending { border-color: var(--accent); }
+article.unlock .hint { color: var(--text-muted); font-size: 13px; }
 </style>
