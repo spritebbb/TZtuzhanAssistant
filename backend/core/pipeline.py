@@ -47,6 +47,21 @@ def pending_memory_tasks() -> int:
     return len(_memory_tasks)
 
 
+# D5 强模型路由：写作/代码/长文类请求走强模型（LLM_MODEL_STRONG 已配置时）
+_STRONG_MODEL_RE = re.compile(
+    r"帮我写|写一篇|写个|写一段|写首|写封|作文|论文|报告|方案|脚本|代码|翻译|总结|分析|"
+    r"小说|诗歌|诗词|debug|code|python|java|javascript|sql|excel|ppt|markdown",
+    re.IGNORECASE,
+)
+_STRONG_MODEL_MIN_LEN = 80  # 超过该长度的消息大概率是复杂任务
+
+
+def _needs_strong_model(text: str) -> bool:
+    """是否走强模型：长消息或命中写作/代码/分析类关键词（误伤代价仅是多花点 tokens）。"""
+    t = (text or "").strip()
+    return len(t) >= _STRONG_MODEL_MIN_LEN or bool(_STRONG_MODEL_RE.search(t))
+
+
 def _spawn_memory_task(coro) -> None:
     """创建后台记忆任务并持有强引用。"""
     import asyncio
@@ -1224,6 +1239,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 用户消息统一在最后追加（所有 system 注入之后），确保 user 是发给模型的最后一条。
     messages.append({"role": "user", "content": text})
 
+    # D5 模型路由：写作/代码/长文类请求走强模型（已配置 LLM_MODEL_STRONG 时）
+    from .config import config as _cfg
+
+    reply_model = (
+        _cfg.llm_model_strong
+        if _cfg.llm_model_strong and not mock and _needs_strong_model(text)
+        else None
+    )
+
     if use_tool_loop:
         from ..tools.service import run_tool_round
         from .llm import chat_native
@@ -1258,7 +1282,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             # 流式生成：逐块回调推送，同时累积完整文本用于后处理
 
             parts: list[str] = []
-            async for piece in chat_stream(messages):
+            async for piece in chat_stream(messages, model=reply_model):
                 parts.append(piece)
                 try:
                     await stream_cb(piece)
@@ -1266,7 +1290,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     pass  # 回调失败不中断生成
             raw = "".join(parts)
         else:
-            raw = await chat(messages, mock=mock)
+            raw = await chat(messages, mock=mock, model=reply_model)
     reply = strip_actions(_extract_reply(raw))
     reply = trim_farewell(text, reply)
     # 兜底：回复为空/只剩思考（LLM 输出异常）时，给一句不冷场的默认回复
@@ -1300,7 +1324,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     except Exception:
                         pass
                     parts2: list[str] = []
-                    async for piece in chat_stream(messages):
+                    async for piece in chat_stream(messages, model=reply_model):
                         parts2.append(piece)
                         try:
                             await stream_cb(piece)
@@ -1308,7 +1332,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                             pass
                     raw2 = "".join(parts2)
                 else:
-                    raw2 = await chat(messages, mock=mock)
+                    raw2 = await chat(messages, mock=mock, model=reply_model)
                 reply2 = strip_actions(_extract_reply(raw2))
                 reply2 = trim_farewell(text, reply2)
                 if reply2.strip():

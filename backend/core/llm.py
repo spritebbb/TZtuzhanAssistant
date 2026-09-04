@@ -112,6 +112,22 @@ def get_perception_client() -> AsyncOpenAI:
     return get_client()
 
 
+def _record_usage(channel: str, model: str, usage, prompt_text: str, completion_text: str) -> None:
+    """记录一次调用的 token 用量（D5 成本面板）。端点未返回 usage 时按字符估算（CJK≈1 token/1.5 字）。"""
+    try:
+        from .userdb import log_usage
+
+        pt = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        ct = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        estimated = not (pt or ct)
+        if estimated:
+            pt = max(1, round(len(prompt_text) / 1.5))
+            ct = max(1, round(len(completion_text) / 1.5))
+        log_usage("assistant-main", channel, model or "", pt, ct, estimated)
+    except Exception:
+        pass
+
+
 async def chat(
     messages: list[dict],
     *,
@@ -119,11 +135,13 @@ async def chat(
     temperature: float | None = None,
     max_tokens: int | None = None,
     perception: bool = False,
+    model: str | None = None,
 ) -> str:
     """非流式整条回复。mock=True 时返回占位回复，便于无 API key 调试。
 
     perception=True 时走感知层独立小模型（LLM_PERCEPTION_* 配置），
     用于高频轻量的语义感知，降低延迟/成本；未配置独立模型时行为与普通 chat 一致。
+    model 显式指定时优先（D5 强模型路由）。
 
     失败自动重试（指数退避），全部失败抛异常（调用方兜底）。
     """
@@ -132,21 +150,25 @@ async def chat(
         last = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
         return f"[模拟回复] 收到啦：{last[:30]}……(￣▽￣)"
     client = get_perception_client() if perception else get_client()
-    model = (
+    effective_model = model or (
         (config.llm_perception_model or config.llm_model)
         if perception
         else config.llm_model
     )
+    prompt_text = "".join(str(m.get("content") or "") for m in messages)
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             resp = await client.chat.completions.create(
-                model=model,
+                model=effective_model,
                 messages=messages,
                 temperature=config.llm_temperature if temperature is None else temperature,
                 max_tokens=config.llm_max_tokens if max_tokens is None else max_tokens,
             )
-            return resp.choices[0].message.content or ""
+            text = resp.choices[0].message.content or ""
+            _record_usage("perception" if perception else "chat", effective_model,
+                          getattr(resp, "usage", None), prompt_text, text)
+            return text
         except Exception as e:
             last_exc = e
             if not _is_retryable(e) or attempt >= _MAX_RETRIES:
@@ -191,6 +213,8 @@ async def chat_native(
             resp = await client.chat.completions.create(**kwargs)
             msg = resp.choices[0].message
             text = msg.content or ""
+            _record_usage("tool", config.llm_model, getattr(resp, "usage", None),
+                          "".join(str(m.get("content") or "") for m in messages), text)
             calls: list[dict] = []
             for tc in (msg.tool_calls or []):
                 try:
@@ -229,37 +253,48 @@ async def chat_stream(
     *,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    model: str | None = None,
 ):
     """流式回复：逐 chunk 产出文本片段（打字机效果）。连接前失败直接抛出，调用方兜底。
 
+    model 显式指定时优先（D5 强模型路由）。
     重试策略：仅在**尚未产出任何片段**时允许重试（连接失败/首块前断开）；
     已经 yield 过内容后再失败，直接抛出——否则重试会从头重新产出已发送的
     片段，前端出现重复文本。
     """
     if getattr(config, "llm_stream_disable", False):
         # 留一个逃生开关：某些端点不支持 stream 时退回整句
-        yield await chat(messages, temperature=temperature, max_tokens=max_tokens)
+        yield await chat(messages, temperature=temperature, max_tokens=max_tokens, model=model)
         return
     client = get_client()
+    effective_model = model or config.llm_model
+    prompt_text = "".join(str(m.get("content") or "") for m in messages)
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         produced = False
+        produced_text = ""
+        usage = None
         try:
             stream = await client.chat.completions.create(
-                model=config.llm_model,
+                model=effective_model,
                 messages=messages,
                 temperature=config.llm_temperature if temperature is None else temperature,
                 max_tokens=config.llm_max_tokens if max_tokens is None else max_tokens,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             async for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
                 piece = getattr(delta, "content", None)
                 if piece:
                     produced = True
+                    produced_text += piece
                     yield piece
+            _record_usage("reply", effective_model, usage, prompt_text, produced_text)
             return
         except Exception as e:
             last_exc = e
