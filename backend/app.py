@@ -21,6 +21,7 @@ from .api import (
     health,
     images,
     initiative,
+    keepsake,
     mcp_servers,
     memory_admin,
     meta,
@@ -156,6 +157,7 @@ def create_app() -> FastAPI:
     app.include_router(confirm.router)
     app.include_router(diary.router)
     app.include_router(memory_admin.router)
+    app.include_router(keepsake.router)
     app.include_router(agent.router)
     app.include_router(vision.router)
     app.include_router(images.router)
