@@ -15,7 +15,9 @@ pytest.ini 配置 python_functions = suite_*，本文件所有测试函数用 su
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -87,6 +89,39 @@ def suite_archive_search_caps_query_length():
 
     assert store._SEARCH_QUERY_MAX == 200
     assert store._SEARCH_LIMIT == 50
+
+
+def suite_archive_search_treats_wildcards_literally(tmp_path, monkeypatch):
+    """搜索框里的 SQL LIKE 通配符应当按普通字符匹配。"""
+    from backend.session import store
+
+    monkeypatch.setattr(store, "_DB", tmp_path / "wildcards.db")
+    store._init()
+    conn = store._connect()
+    try:
+        conn.executemany(
+            "INSERT INTO archives (id, title, created_at, message_count, messages_json) "
+            "VALUES (?, ?, ?, 1, ?)",
+            [
+                ("literal", "100%_done", 2.0, json.dumps([{"content": "literal"}])),
+                ("plain", "ordinary", 1.0, json.dumps([{"content": "plain"}])),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert [row["id"] for row in store._search_archives_sync("%")] == ["literal"]
+    assert [row["id"] for row in store._search_archives_sync("_")] == ["literal"]
+
+
+def suite_pipeline_user_lock_type_hints_resolve():
+    """运行时解析 pipeline 注解不应因 asyncio 只在函数内导入而失败。"""
+    import asyncio
+
+    from backend.core import pipeline
+
+    assert get_type_hints(pipeline._user_lock)["return"] is asyncio.Lock
 
 
 def suite_meta_search_status_matches_real_fallback(monkeypatch):

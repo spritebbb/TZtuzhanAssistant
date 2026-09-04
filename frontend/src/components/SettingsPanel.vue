@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { apiFetch } from '../api'
 import { getTtsAutoPlay, setTtsAutoPlay } from '../utils/tts'
 
@@ -156,6 +156,13 @@ watch(() => props.show, (v) => {
   if (v) {
     pluginTimer = window.setInterval(loadPlugins, 10000)
   } else if (pluginTimer !== null) {
+    window.clearInterval(pluginTimer)
+    pluginTimer = null
+  }
+})
+
+onBeforeUnmount(() => {
+  if (pluginTimer !== null) {
     window.clearInterval(pluginTimer)
     pluginTimer = null
   }
