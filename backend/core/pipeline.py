@@ -912,6 +912,32 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 深夜边界注入失败")
 
+    # 4.6) 共同语言（D1 人格微演化）：你们之间沉淀下来的口头禅/内部梗，
+    # 她可以自然地用——只取出现过 ≥2 次的（稳定才演化），初识阶段不用
+    if stage != "初识":
+        try:
+            shared_terms = [
+                t for t in db.get_terms(user_id, limit=10) if (t.get("count") or 0) >= 2
+            ][:5]
+        except Exception:
+            logger.exception("[pipeline] 共同语言查询失败")
+            shared_terms = []
+        if shared_terms:
+            lines = "、".join(
+                f"「{t['term']}」（{t['meaning']}）" if t.get("meaning") else f"「{t['term']}」"
+                for t in shared_terms
+            )
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"你们之间沉淀下来的说法/梗：{lines}。"
+                        "聊到相关的话题可以自然地用起来，像老朋友之间的默契；"
+                        "别硬塞、别一次全用、别为了用而用——用不出来就算了。"
+                    ),
+                }
+            )
+
     # 4.1) 记忆相关：压缩摘要 + 记忆原文 + 长期事实，合并成一个「记得的过去」块，
     # 减少堆砌：把三条独立 system 消息合成一段，LLM 更容易当背景吸收而不是逐条服从。
     memory_lines: list[str] = []
