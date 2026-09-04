@@ -24,6 +24,8 @@ class BehaviorFrame:
     stage_line: str         # 关系阶段对应的分寸提醒
     archive_line: str = ""  # 长期情绪档案 → 长期态度（她记得这段关系里的情感积累）
     event_line: str = ""    # 事件级长期记忆 → 精确引用「你上次说的某句话」
+    rest_line: str = ""     # 用户让她休息后，真实休息计时在语气里的体现
+    tension_line: str = ""  # 未修复冲突与本轮修复进度
 
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
@@ -32,6 +34,10 @@ class BehaviorFrame:
             parts.append(self.initiative)
         if self.reaction_line:
             parts.append(self.reaction_line)
+        if self.rest_line:
+            parts.append(self.rest_line)
+        if self.tension_line:
+            parts.append(self.tension_line)
         if self.archive_line:
             parts.append(self.archive_line)
         if self.event_line:
@@ -99,6 +105,33 @@ def _reaction_line(s: AgentState) -> str:
         f"你刚刚因为「{hit}」动了点情绪（强度 {weight:.0%}）。"
         "别把这事反复挂在嘴边，但此刻的语气里可以自然带着一点点这个情绪的余温——"
         "被冒犯就还有点冷淡、被夸就还有点高兴，像真的还没完全过去一样。"
+    )
+
+
+def _rest_line(s: AgentState) -> str:
+    if not getattr(s, "resting", False):
+        return ""
+    return (
+        "对方刚刚认真让你去休息，你已经进入休息状态，精力会随时间真实恢复。"
+        "这一轮简短接受这份照顾，不要一边答应休息一边又主动开启长话题。"
+    )
+
+
+def _tension_line(s: AgentState) -> str:
+    level = int(getattr(s, "tension", 0) or 0)
+    repair = str(getattr(s, "repair_hint", "") or "")
+    if level <= 0:
+        if repair:
+            return f"对方刚才用「{repair}」把这次别扭认真修复了，你可以自然软下来，但别突然夸张地热络。"
+        return ""
+    if repair:
+        return (
+            f"你们之间还留有关系张力（{level}/100），但对方刚才在「{repair}」，你感受到了。"
+            "语气可以比刚才缓和一些，同时不要一句话就装作什么都没发生。"
+        )
+    return (
+        f"你们之间还有未修复的关系张力（{level}/100）。不要主动翻旧账或逼问，"
+        "但也不要被普通闲聊瞬间哄好；保持克制、略冷的语气，等对方真正修复。"
     )
 
 
@@ -195,4 +228,6 @@ def build_behavior_frame(state: AgentState) -> BehaviorFrame:
         reaction_line=_reaction_line(state),
         archive_line=_archive_line(state),
         event_line=_event_line(state),
+        rest_line=_rest_line(state),
+        tension_line=_tension_line(state),
     )

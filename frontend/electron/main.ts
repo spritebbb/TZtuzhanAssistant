@@ -26,13 +26,24 @@ const INITIATIVE_POLL_MS = 30000
 let lastNotifiedText = ''  // 已通知过的消息去重
 let archiveDone = false    // 退出归档只执行一次（避免托盘退出 + before-quit 重复归档）
 
+interface ProactiveMessage {
+  text: string
+  image?: string | null
+}
+
 /** 拉取当前会话的菟菚主动消息（轮询后端 /api/initiative） */
 async function pollInitiative(): Promise<void> {
   if (!activeSessionId) return
   try {
     const resp = await fetch(`${BACKEND_HOST}/api/initiative?session_id=${encodeURIComponent(activeSessionId)}`)
     const data = await resp.json()
-    const text: string | null = data?.initiative ?? null
+    const fallbackText: unknown = data?.initiative
+    const rawMessage: unknown = data?.message
+    const message: ProactiveMessage | null = rawMessage && typeof rawMessage === 'object'
+      && typeof (rawMessage as ProactiveMessage).text === 'string'
+      ? rawMessage as ProactiveMessage
+      : typeof fallbackText === 'string' ? { text: fallbackText, image: null } : null
+    const text = message?.text ?? null
     if (!text || text === lastNotifiedText) return
     lastNotifiedText = text
 
@@ -49,7 +60,7 @@ async function pollInitiative(): Promise<void> {
     }
     // 2) 窗口开着时，把消息转发给渲染进程追加气泡
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('initiative-message', text)
+      mainWindow.webContents.send('initiative-message', message)
     }
   } catch {
     // 后端未就绪/网络抖动：静默，下次轮询再试

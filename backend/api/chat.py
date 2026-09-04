@@ -92,7 +92,7 @@ async def api_chat(
 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
-    _state: dict = {"pending_img": None}
+    _state: dict = {"pending_img": None, "explanation": None}
     # 累积流式已推送的文本片段（不含控制标记 \x00...\x00）：供 _cb 追加、_runner 在
     # 流式中途失败时落库「已生成的部分回复」，避免刷新/归档后这段内容丢失。
     _partial: list[str] = []
@@ -114,6 +114,10 @@ async def api_chat(
     async def _progress_cb(event: dict) -> None:
         # 工具循环阶段进展：把事件透传给前端（前端气泡显示「正在思考/调用 XX」）
         await q.put(("__tool__", event))
+
+    async def _explain_cb(snapshot: dict) -> None:
+        _state["explanation"] = snapshot
+        await q.put(("__explanation__", snapshot))
 
     async def _runner() -> None:
         """后台生成任务：完成时自行持久化，不依赖 SSE 连接生命周期。"""
@@ -137,7 +141,10 @@ async def api_chat(
                 await q.put(("__error__", "请求因重置而取消"))
                 return
             reply = await asyncio.wait_for(
-                process(_user_id(session_id), text, mock=mock, stream_cb=_cb, image_cb=_image_cb, progress_cb=_progress_cb),
+                process(
+                    _user_id(session_id), text, mock=mock, stream_cb=_cb,
+                    image_cb=_image_cb, progress_cb=_progress_cb, explain_cb=_explain_cb,
+                ),
                 timeout=_PROCESS_TOTAL_TIMEOUT,
             )
             if not epoch_is_current(request_epoch):
@@ -147,6 +154,8 @@ async def api_chat(
             bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
             if _state.get("pending_img"):
                 bot_msg["image"] = _state["pending_img"]
+            if _state.get("explanation"):
+                bot_msg["explanation"] = _state["explanation"]
             async with user_write_guard(request_epoch):
                 await append_messages(session_id, [bot_msg])
             await q.put(("__done__", reply))
@@ -231,6 +240,9 @@ async def api_chat(
                 if isinstance(item, tuple) and item[0] == "__tool__":
                     # 工具循环进度事件：转发给前端展示「正在思考/调用 XX」
                     yield _sse({"tool": item[1]})
+                    continue
+                if isinstance(item, tuple) and item[0] == "__explanation__":
+                    yield _sse({"explanation": item[1]})
                     continue
                 if isinstance(item, tuple) and item[0] == "__done__":
                     yield _sse({"done": item[1]})

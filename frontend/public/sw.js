@@ -7,7 +7,8 @@
 //     不应落盘；
 //   - /api/images、/persona 图片量大且无清理策略，只增不减。
 
-const CACHE = 'tztuzhan-v1'
+// 资源更新（新立绘与新版前端构建）时递增版本，激活后清理旧构建缓存。
+const CACHE = 'tztuzhan-v2'
 const PRECACHE = ['/', '/manifest.json', '/icon.svg', '/favicon.ico']
 
 // 需要走 network-first 缓存策略的静态资源（其余一律直连网络不缓存）

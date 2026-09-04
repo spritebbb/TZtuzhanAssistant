@@ -14,7 +14,9 @@ router = APIRouter(prefix="/api", tags=["meta"])
 
 def _tool_status() -> dict:
     return {
-        "search": bool(config.search_enabled and config.search_api_key),
+        # 搜索并不依赖付费 key：开启后可直接走 Bing/DDG，SEARCH_API_KEY
+        # 只是在可用时把博查放到首选。状态灯应表达“能力已开启”，而不是“有 key”。
+        "search": bool(config.search_enabled),
         "weather": bool(config.mood_city),
         "image": bool(config.image_api_key),
         "vision": bool(config.vision_api_key or config.image_api_key),

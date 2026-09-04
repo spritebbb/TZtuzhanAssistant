@@ -39,10 +39,10 @@
 - [x] 多轮工具实测：问天气（真实襄阳数据注入）、搜新闻（联网结果）、画图（生图链路已接通：pipeline→imagegen→/api/images→前端<img>）
 - [x] 架构优化 B 组：会话存储 SQLite（session_store.py，替代 sessions.json 整文件读写）+ 搜索 TTL 缓存 + 删会话清孤儿图片
 - [x] 体验优化 A 组：bot 气泡 Markdown 渲染（先转义防 XSS）、停止生成按钮（AbortController 中断流式）、复制按钮 + 图片点击灯箱放大、移动端抽屉式侧栏（☰ 展开）
-- [ ] 浏览器实测多轮对话 + 工具调用（问天气/搜新闻）
-- [ ] 局域网访问测试（--host 0.0.0.0）
-- [ ] 写 README（启动方式、端口、配置说明）
-- [ ] 公网部署方案调研（内网穿透/服务器）
+- [x] 浏览器实测多轮对话 + 工具调用（天气与联网搜索均通过，刷新后历史保留）
+- [x] 局域网访问测试（`--host 0.0.0.0`，局域网健康检查通过，远程 API token 校验通过）
+- [x] 写 README（启动方式、端口、配置说明）
+- [x] 公网部署方案调研（Tailscale Serve/Funnel、Cloudflare Tunnel + Access、Caddy 云服务器）
 
 ---
 

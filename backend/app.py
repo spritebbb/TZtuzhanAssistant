@@ -16,6 +16,7 @@ from .api import (
     chat,
     config_api,
     confirm,
+    diary,
     greeting,
     health,
     images,
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
+    app.include_router(diary.router)
     app.include_router(agent.router)
     app.include_router(vision.router)
     app.include_router(images.router)

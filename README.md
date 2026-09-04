@@ -190,6 +190,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1
 
 - 默认只监听本机回环地址（`127.0.0.1`），**局域网设备无法访问**，这是安全默认。
 - 如需局域网访问：手动用 `--host 0.0.0.0` 启动后端，并阅读 `.env.example` 中 `AGENT_REMOTE_TOKEN` / `AGENT_ALLOWED_HOSTS` 的说明配置鉴权 token。未配置 token 时，受控端点（写操作、MCP、Agent 桥、插件管理）对非本机来源一律拒绝。
+- 跨设备私用、公网临时演示、固定域名和云服务器的选型与安全清单见 [远程访问与公网部署方案](docs/DEPLOYMENT-OPTIONS.md)。
 
 ## 常见问题
 
@@ -357,8 +358,10 @@ persona-菟菚.md               # 人格源文件
 | `PERSONA_FILE` | | 人格文件路径（默认 `persona-菟菚.md`） |
 | `SEARCH_API_KEY` | | 搜索密钥（博查优先，留空自动回退 bing/ddg） |
 | `IMAGE_API_KEY` | | 文生图密钥（SiliconFlow，留空关闭生图） |
+| `STICKER_*` | | 自制表情包开关、概率、最小消息间隔与收藏上限 |
 | `VISION_API_KEY` | | 识图密钥（留空复用 IMAGE key） |
 | `MOOD_CITY` | | 心情城市（如"北京"） |
+| `TZTUZHAN_DATA_DIR` | | 数据目录（默认项目根 `data/`；可用于测试或多实例隔离） |
 | `MEMORY_EMBED_MODEL` | | 记忆 embedding 模型（部署包默认 bge-small-zh-v1.5，可换 bge-m3） |
 | `HF_ENDPOINT` | | HuggingFace 镜像（默认 hf-mirror.com，国内友好） |
 | `AGENT_REMOTE_TOKEN` | | 受控端点鉴权 token（非回环来源必填） |

@@ -120,6 +120,15 @@ CREATE TABLE IF NOT EXISTS diary (
     ts      TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_diary_user_date ON diary(user_id, date);
+CREATE TABLE IF NOT EXISTS research_reports (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    period  TEXT NOT NULL,       -- 覆盖区间，如 2026-08-29~2026-09-04
+    title   TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts      TEXT NOT NULL,
+    UNIQUE(user_id, period)
+);
 -- 结构化事实记忆（五元组：主体-谓词-客体-类型），方向 C
 CREATE TABLE IF NOT EXISTS triples (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,6 +301,18 @@ class UserDB:
                 (target, d["date"], d["content"], d["mood"], d["ts"]),
             )
         self.conn.execute("DELETE FROM diary WHERE user_id = ?", (legacy,))
+
+        # research_reports：period 在同一用户内唯一，目标侧已有则保留目标。
+        legacy_reports = self.conn.execute(
+            "SELECT period, title, content, ts FROM research_reports WHERE user_id = ?", (legacy,)
+        ).fetchall()
+        for report in legacy_reports:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO research_reports (user_id, period, title, content, ts) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (target, report["period"], report["title"], report["content"], report["ts"]),
+            )
+        self.conn.execute("DELETE FROM research_reports WHERE user_id = ?", (legacy,))
 
         # 其余「纯 append」表：直接把 user_id 改挂 target（无唯一约束冲突风险）
         for table in (
@@ -935,7 +956,7 @@ class UserDB:
             for table in (
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
-                "user_profile", "user_terms", "user_style_map", "diary", "triples",
+                "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
@@ -1029,7 +1050,7 @@ def delete_important_date(date_id: int, user_id: str | None = None) -> bool:
 
 
 def save_sticker(user_id: str, file: str, url: str, desc: str, emotion: str = "") -> int:
-    """收藏一张用户发的表情包；同 URL 已存在则累计 count，返回记录 id。"""
+    """收藏一张表情包；同 URL 已存在则累计 count，返回记录 id。"""
     with db._lock:
         db.conn.execute("PRAGMA busy_timeout = 5000")
         try:
@@ -1067,6 +1088,15 @@ def get_stickers(user_id: str, limit: int = 50) -> list[dict]:
             (user_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def mark_sticker_used(sticker_id: int) -> None:
+    """记录一次贴纸复用，让常用收藏自然排到前面。"""
+    if not sticker_id:
+        return
+    with db._lock:
+        db.conn.execute("UPDATE stickers SET count = count + 1 WHERE id = ?", (sticker_id,))
+        db.conn.commit()
 
 
 def get_sticker_by_desc(user_id: str, keyword: str, limit: int = 30) -> list[dict]:
@@ -1171,3 +1201,72 @@ def kv_del(user_id: str, key: str) -> bool:
         )
         db.conn.commit()
         return cur.rowcount > 0
+
+
+# ---- diary / research_reports（C2：私人日记与阶段研究报告）----
+
+
+def save_diary(user_id: str, day: str, content: str, mood: str = "") -> int | None:
+    """幂等写入某天日记；已存在时不覆盖，返回现有/新增 id。"""
+    content = content.strip()
+    if not content:
+        return None
+    with db._lock:
+        db.conn.execute(
+            "INSERT OR IGNORE INTO diary (user_id, date, content, mood, ts) VALUES (?, ?, ?, ?, ?)",
+            (user_id, day, content[:1200], mood.strip()[:24], datetime.now().isoformat(timespec="seconds")),
+        )
+        row = db.conn.execute(
+            "SELECT id FROM diary WHERE user_id = ? AND date = ?", (user_id, day)
+        ).fetchone()
+        db.conn.commit()
+        return int(row["id"]) if row else None
+
+
+def get_diary(user_id: str, day: str) -> dict | None:
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT id, date, content, mood, ts FROM diary WHERE user_id = ? AND date = ?",
+            (user_id, day),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_diaries(user_id: str, limit: int = 60) -> list[dict]:
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, date, content, mood, ts FROM diary WHERE user_id = ? "
+            "ORDER BY date DESC LIMIT ?",
+            (user_id, max(1, min(365, int(limit)))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_research_report(user_id: str, period: str, title: str, content: str) -> int | None:
+    content = content.strip()
+    if not content:
+        return None
+    with db._lock:
+        db.conn.execute(
+            "INSERT OR IGNORE INTO research_reports (user_id, period, title, content, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                user_id, period[:32], title.strip()[:80] or "观察人类：阶段记录",
+                content[:2400], datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        row = db.conn.execute(
+            "SELECT id FROM research_reports WHERE user_id = ? AND period = ?", (user_id, period[:32])
+        ).fetchone()
+        db.conn.commit()
+        return int(row["id"]) if row else None
+
+
+def list_research_reports(user_id: str, limit: int = 24) -> list[dict]:
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, period, title, content, ts FROM research_reports WHERE user_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (user_id, max(1, min(100, int(limit)))),
+        ).fetchall()
+    return [dict(row) for row in rows]

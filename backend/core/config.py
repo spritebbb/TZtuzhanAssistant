@@ -67,7 +67,9 @@ class Config:
         p = Path(persona)
         self.persona_file: Path = p if p.is_absolute() else (PROJECT_ROOT / p)
 
-        self.data_dir: Path = PROJECT_ROOT / "data"
+        data_dir = os.getenv("TZTUZHAN_DATA_DIR", "").strip()
+        data_path = Path(data_dir) if data_dir else (PROJECT_ROOT / "data")
+        self.data_dir: Path = data_path if data_path.is_absolute() else (PROJECT_ROOT / data_path)
         self.search_enabled: bool = os.getenv("SEARCH_ENABLED", "1") != "0"
         self.search_engine: str = os.getenv("SEARCH_ENGINE", "bing").lower()
         self.search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()
@@ -99,6 +101,23 @@ class Config:
 
         # 心情系统：天气城市（留空则按时间段兜底基线，不查天气）
         self.mood_city: str = os.getenv("MOOD_CITY", "").strip()
+
+        # 主动消息：问候与 initiative 共用每日额度；全部运行时读取，热重载即生效。
+        self.proactive_greeting_idle_hours: int = max(1, _env_int("PROACTIVE_GREETING_IDLE_HOURS", 8))
+        self.proactive_idle_hours: int = max(1, _env_int("PROACTIVE_IDLE_HOURS", 6))
+        self.proactive_daily_max: int = max(1, _env_int("PROACTIVE_DAILY_MAX", 1))
+        self.proactive_global_cooldown_sec: int = max(30, _env_int("PROACTIVE_GLOBAL_COOLDOWN_SEC", 900))
+        self.proactive_check_interval_sec: int = max(30, _env_int("PROACTIVE_CHECK_INTERVAL_SEC", 300))
+        self.proactive_failure_cooldown_sec: int = max(30, _env_int("PROACTIVE_FAILURE_COOLDOWN_SEC", 900))
+        self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
+        self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
+        self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 70)))
+
+        # 自制表情包：仅在有明确情绪场景时低频附带，优先复用收藏。
+        self.sticker_enabled: bool = os.getenv("STICKER_ENABLED", "1") != "0"
+        self.sticker_chance_percent: int = max(0, min(100, _env_int("STICKER_CHANCE_PERCENT", 10)))
+        self.sticker_min_message_gap: int = max(2, _env_int("STICKER_MIN_MESSAGE_GAP", 10))
+        self.sticker_collection_max: int = max(4, _env_int("STICKER_COLLECTION_MAX", 24))
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()

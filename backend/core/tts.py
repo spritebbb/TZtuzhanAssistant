@@ -17,6 +17,7 @@ from .log import logger
 
 _TTS_DIR: Path = config.data_dir / "tts_cache"
 DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"  # 晓晓（女声，适合菟菚）
+MAX_TEXT_CHARS = 5_000
 _CACHE_MAX = 200  # 缓存文件上限（超出由维护任务清理最旧）
 
 
@@ -34,8 +35,8 @@ async def synth_async(text: str, voice: str = DEFAULT_VOICE) -> Path | None:
     text = (text or "").strip()
     if not text:
         return None
-    if len(text) > 500:
-        text = text[:500]
+    if len(text) > MAX_TEXT_CHARS:
+        text = text[:MAX_TEXT_CHARS]
     path = _path_for(text, voice)
     if path.exists() and path.stat().st_size > 0:
         return path

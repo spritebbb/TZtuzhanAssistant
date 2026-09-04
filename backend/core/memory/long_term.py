@@ -144,15 +144,16 @@ async def _with_expansion(
 
     # ② Chroma 向量语义召回（主路，质量优先）
     vec_docs: list[str] = []
-    try:
-        from . import vector_store as vec
+    if config.memory_v2:
+        try:
+            from . import vector_store as vec
 
-        hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, kind)
-        for h in hits:
-            if h.text and h.text not in vec_docs:
-                vec_docs.append(h.text)
-    except Exception:
-        logger.warning("[记忆] 向量检索失败，仅用 TF-IDF")
+            hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, kind)
+            for h in hits:
+                if h.text and h.text not in vec_docs:
+                    vec_docs.append(h.text)
+        except Exception:
+            logger.warning("[记忆] 向量检索失败，仅用 TF-IDF")
 
     # ③ Mem0 管理记忆召回（事实/画像层面交叉补充）
     try:
@@ -183,15 +184,16 @@ async def recall(user_id: str, query: str, *, mock: bool = False) -> list[str]:
         return await _with_expansion(user_id, query, kind="lm", mock=mock)
     # 非疑似回忆：先 TF-IDF 快查，再补向量
     base = [h["content"] for h in db.search_long_memory(user_id, query, LONG_TERM_TOP_K)]
-    try:
-        from . import vector_store as vec
+    if config.memory_v2:
+        try:
+            from . import vector_store as vec
 
-        hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "lm")
-        for h in hits:
-            if h.text and h.text not in base:
-                base.append(h.text)
-    except Exception:
-        pass
+            hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "lm")
+            for h in hits:
+                if h.text and h.text not in base:
+                    base.append(h.text)
+        except Exception:
+            pass
     return base[:LONG_TERM_TOP_K]
 
 
@@ -200,13 +202,14 @@ async def recall_facts(user_id: str, query: str, *, mock: bool = False) -> list[
     if looks_like_recall(query):
         return await _with_expansion(user_id, query, kind="facts", mock=mock)
     base = [h["content"] for h in db.search_facts(user_id, query, LONG_TERM_TOP_K)]
-    try:
-        from . import vector_store as vec
+    if config.memory_v2:
+        try:
+            from . import vector_store as vec
 
-        hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "facts")
-        for h in hits:
-            if h.text and h.text not in base:
-                base.append(h.text)
-    except Exception:
-        pass
+            hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "facts")
+            for h in hits:
+                if h.text and h.text not in base:
+                    base.append(h.text)
+        except Exception:
+            pass
     return base[:LONG_TERM_TOP_K]

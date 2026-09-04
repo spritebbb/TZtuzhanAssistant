@@ -20,9 +20,8 @@ import threading
 _write_lock = threading.Lock()
 
 # 所有可用开关及其默认值。
-# 注意：只保留「有消费方」的开关。terms/style/emotion_sticker 对应功能
-# （口头禅/表达风格/表情包）已删除，其开关与 stickers/user_terms 表一样是
-# 残留，已移除；set_flag 只接受这里的 key，故不再能写入失效开关。
+# 注意：只保留「有消费方」的动态开关。贴纸现由 STICKER_ENABLED 等环境
+# 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
     "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
 }

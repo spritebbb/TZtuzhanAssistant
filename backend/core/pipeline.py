@@ -494,7 +494,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -508,6 +508,9 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
 
     progress_cb：可选的异步回调 async (event: dict) -> None，工具循环阶段进展
     （thinking/tool/tool_done）实时推送，供前端在工具执行期间展示进度而非空窗。
+
+    explain_cb：可选的异步回调 async (snapshot: dict) -> None，返回这一轮实际
+    注入的状态、行为帧、记忆与工具快照；不包含 system prompt 或模型思考链。
     """
     async with _user_lock(user_id):
         # 插件消息钩子（v2）：用户消息入口改写（异常已在 context 层过滤）
@@ -520,10 +523,11 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
         return await _process_locked(
             user_id, text, mock=mock, merged_msg=merged_msg,
             stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
+            explain_cb=explain_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
     user = db.ensure_user(user_id)
     first_chat = not user["first_chat_done"]
     # 取存档前的最后一条消息时间戳：跨场判定必须基于「本轮之前」的消息，
@@ -541,6 +545,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 故整体丢到后台（_perceive_and_settle）执行，让主流程立刻去生成回复，
     # 消除「每条消息首字前死等感知 LLM」的串行瓶颈。后台会在回复生成期间落账，
     # 且因同用户消息经 _user_lock 串行，好感度最迟在回复生成完成后更新。
+    # C1 的显式交互（让她去休息 / 哄她）必须同步落账，因为它们会直接改变
+    # 这一轮回复的行为帧；其余开放语义感知仍保留后台执行，避免增加首字延迟。
+    try:
+        from .state import handle_state_interaction
+
+        handle_state_interaction(user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 显式状态交互处理失败")
     try:
         _spawn_memory_task(_perceive_and_settle(user_id, text, mock=mock))
     except Exception:
@@ -725,18 +737,34 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 生图失败（不影响回复）")
 
+    # 捕获“这条回复真正看到的状态”，同时交给 persona 和解释快照，避免 UI
+    # 事后读取当前状态而与当轮 prompt 不一致。
+    reply_state = None
+    reply_frame = None
+    try:
+        from .behavior import build_behavior_frame
+        from .state import load_state
+
+        reply_state = load_state(user_id)
+        reply_frame = build_behavior_frame(reply_state)
+    except Exception:
+        logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
+    stage = reply_state.stage if reply_state is not None else affection.stage_of(user["affection"])
+
     system = build_system_prompt(
-        stage=affection.stage_of(user["affection"]),
+        stage=stage,
         address=pref,
         lover_confirm=bool(user["lover_confirm"]),
         first_chat=first_chat,
         affection=user["affection"],
         user_id=user_id,
+        behavior_text=reply_frame.compose() if reply_frame is not None else None,
     )
     messages = [{"role": "system", "content": system}]
 
     # 4.0.2) 新会话开场：距离上一场聊完较久（跨场）且有记录的上次话题时，
     # 让菟菚像记得似的自然接上，而不是每次都像重新认识。只在真正开场时提一次。
+    triples = []
     try:
         if _long_gap(prev_ts):
             from .topic_memory import build_continuation
@@ -931,7 +959,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         )
 
     # 过早表白/求婚（初识/熟悉阶段）：硬气拒绝 + 扣好感度
-    stage = affection.stage_of(user["affection"])
+    stage = reply_state.stage if reply_state is not None else affection.stage_of(user["affection"])
 
     # 好感度阶段过渡感知：跨阶段（初识→熟悉→亲密→恋人）时，注入一条
     # "心里隐约感觉到关系在变化"的提示，让升级体验自然（而非生硬切换）。
@@ -1175,6 +1203,49 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             reply = reply2
     except Exception:
         pass
+
+    # 5.10) 自制表情包：只在明显情绪场景下低频触发，优先复用收藏。
+    # 用户明确要求画图时已有 drawn_image_path，不再叠第二张图片。
+    sticker_path: str | None = None
+    if not mock and image_cb is not None and drawn_image_path is None:
+        try:
+            from .stickers import maybe_attach_sticker
+
+            mood_value, _ = db.get_mood(user_id)
+            sticker_path = await maybe_attach_sticker(
+                user_id,
+                text,
+                reply,
+                stage=stage,
+                mood=mood_value,
+                image_cb=image_cb,
+            )
+        except Exception:
+            logger.exception("[pipeline] 表情包附带失败（不影响回复）")
+
+    # 5.11) 可解释性快照：只公开可验证的状态/行为/记忆来源，不公开隐藏思考。
+    if explain_cb is not None and reply_state is not None and reply_frame is not None:
+        try:
+            from .explainability import build_reply_explanation
+
+            memory_rows: list[tuple[str, object]] = []
+            memory_rows.extend(("相关对话", value) for value in remembered[:2])
+            memory_rows.extend(("长期事实", value) for value in facts[:2])
+            memory_rows.extend(
+                ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
+                for item in triples[:2]
+                if len(item) >= 4
+            )
+            snapshot = build_reply_explanation(
+                reply_state,
+                reply_frame,
+                memory_rows=memory_rows,
+                search_used=bool(search_hits),
+                media=("generated_image" if drawn_image_path else "sticker" if sticker_path else "none"),
+            )
+            await explain_cb(snapshot)
+        except Exception:
+            logger.exception("[pipeline] 回复解释快照失败（不影响回复）")
 
     # 6) 存档（user 消息已在 1.0 存档，这里只补 assistant 回复）
     db.add_message(user_id, "assistant", reply)

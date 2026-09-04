@@ -1,4 +1,6 @@
 openai>=1.40.0
+# core/llm.py 直接使用 httpx；不能只依赖 openai 的传递依赖（openai 3.x 已改用 httpx2）。
+httpx>=0.27,<1
 python-dotenv>=1.0.0
 loguru>=0.7.0
 fastapi>=0.110.0

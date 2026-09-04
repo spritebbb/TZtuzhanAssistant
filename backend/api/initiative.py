@@ -6,7 +6,11 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from ..api.chat import _user_id
-from ..core.initiative import dequeue_proactive, poll_for, sse_event_stream
+from ..core.initiative import (
+    dequeue_proactive_message,
+    poll_message_for,
+    sse_event_stream,
+)
 
 router = APIRouter(prefix="/api", tags=["initiative"])
 
@@ -23,20 +27,25 @@ async def api_initiative(session_id: str = ""):
     否则返回 None，前端据此决定是否展示。
     """
     if not session_id:
-        return {"ok": True, "initiative": None}
+        return {"ok": True, "initiative": None, "message": None}
     uid = _user_id(session_id)
     # 优先取后台已生成的待投递消息
-    text = dequeue_proactive(uid)
-    if text is None:
-        text = await poll_for(uid)
-    return {"ok": True, "initiative": text}
+    message = dequeue_proactive_message(uid)
+    if message is None:
+        message = await poll_message_for(uid)
+    # initiative 保留纯文本兼容旧版桌面端；新版使用 message 获取可选图片。
+    return {
+        "ok": True,
+        "initiative": message["text"] if message else None,
+        "message": message,
+    }
 
 
 @router.get("/initiative/stream")
 async def api_initiative_stream(session_id: str = ""):
     """SSE 长连接：订阅菟菚的主动消息，后台生成时秒级推送（替代 30s 轮询）。
 
-    事件：`event: initiative`，data 为 {"text": "..."}。
+    事件：`event: initiative`，data 为 {"text": "...", "image": "..." | null}。
     心跳：`:` 开头的注释帧，前端忽略即可（保活用）。
     """
     if not session_id:

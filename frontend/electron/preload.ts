@@ -10,8 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 上报「当前会话 id」给主进程，让它独立轮询主动消息（关窗也能弹通知）
   setActiveSession: (sessionId: string | null) => ipcRenderer.invoke('set-active-session', sessionId),
   // 订阅主进程转发的主动消息（主进程轮询到后推送过来，用于追加气泡）
-  onInitiativeMessage: (cb: (text: string) => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, text: string) => cb(text)
+  onInitiativeMessage: (cb: (message: { text: string; image?: string | null }) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, message: { text: string; image?: string | null }) => cb(message)
     ipcRenderer.on('initiative-message', listener)
     return () => ipcRenderer.removeListener('initiative-message', listener)
   },

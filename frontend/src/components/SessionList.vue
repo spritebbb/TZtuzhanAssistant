@@ -125,17 +125,23 @@ defineExpose({ load })
   <aside class="sidebar" :class="{ open }">
     <!-- 品牌头 -->
     <div class="brand">
-      <svg viewBox="0 0 40 40" class="brand-logo" width="28" height="28">
-        <path d="M8 32 Q 14 22, 22 24 T 30 12" fill="none" stroke="var(--primary)" stroke-width="2.2" stroke-linecap="round"/>
-        <path d="M14 22 Q 20 14, 18 6" fill="none" stroke="var(--primary-light)" stroke-width="1.8" stroke-linecap="round"/>
-        <circle cx="19" cy="4" r="3.2" fill="var(--accent-light)"/>
-        <circle cx="19" cy="4" r="1.8" fill="var(--accent)"/>
-        <circle cx="30" cy="11" r="2.6" fill="var(--accent-light)"/>
-        <circle cx="30" cy="11" r="1.5" fill="var(--accent)"/>
-      </svg>
-      <span class="brand-name">菟菚</span>
+      <div class="brand-mark">
+        <svg viewBox="0 0 40 40" class="brand-logo" width="28" height="28">
+          <path d="M8 32 Q 14 22, 22 24 T 30 12" fill="none" stroke="var(--primary)" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M14 22 Q 20 14, 18 6" fill="none" stroke="var(--primary-light)" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="19" cy="4" r="3.2" fill="var(--accent-light)"/>
+          <circle cx="19" cy="4" r="1.8" fill="var(--accent)"/>
+          <circle cx="30" cy="11" r="2.6" fill="var(--accent-light)"/>
+          <circle cx="30" cy="11" r="1.5" fill="var(--accent)"/>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <span class="brand-name">菟菚</span>
+        <span class="brand-caption">BOTANICAL COMPANION</span>
+      </div>
       <span class="brand-sub">归档</span>
     </div>
+    <div class="sidebar-sprig" aria-hidden="true"><span></span><i></i><span></span></div>
 
     <!-- 归档搜索 -->
     <div class="search-box">
@@ -238,40 +244,120 @@ defineExpose({ load })
 .sidebar {
   width: 260px;
   flex-shrink: 0;
-  background: var(--bg-sidebar);
+  /* 由主题变量驱动，避免日间模式沿用夜间靛紫顶部。 */
+  background: linear-gradient(180deg, var(--bg-lg-sidebar), var(--bg-sidebar));
   backdrop-filter: blur(20px) saturate(1.1);
   -webkit-backdrop-filter: blur(20px) saturate(1.1);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--edge-subtle);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.025), 16px 0 36px rgba(8, 7, 15, 0.06);
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 5;
+  overflow: hidden;
+}
+.sidebar::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 260px;
+  height: 210px;
+  top: -130px;
+  left: -52px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201, 173, 229, 0.19), rgba(232, 143, 169, 0.07) 40%, transparent 70%);
+  filter: blur(12px);
+}
+.sidebar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.48;
+  background:
+    linear-gradient(90deg, transparent 0 86%, rgba(255, 255, 255, 0.045) 86.4%, transparent 87%),
+    radial-gradient(ellipse at 95% 12%, rgba(255, 211, 231, 0.16) 0 1px, transparent 1.8px);
+  background-size: 100% 100%, 14px 22px;
 }
 .brand {
-  padding: 16px 16px 10px;
+  padding: 17px 16px 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
+  border-bottom: 1px solid var(--edge-subtle);
+  background: linear-gradient(110deg, rgba(255, 255, 255, 0.035), transparent 72%);
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--edge-highlight);
+  border-radius: 13px 13px 13px 5px;
+  background: linear-gradient(145deg, var(--primary-soft), rgba(255, 255, 255, 0.025));
+  box-shadow: inset 0 1px 0 var(--surface-shine), 0 6px 18px rgba(7, 6, 14, 0.12);
 }
 .brand-logo {
   flex-shrink: 0;
-  filter: drop-shadow(0 2px 4px rgba(164, 190, 114, 0.3));
+  filter: drop-shadow(0 2px 7px rgba(232, 143, 169, 0.35));
+}
+.brand-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
 }
 .brand-name {
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--text);
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+}
+.brand-caption {
+  color: var(--text-faint);
+  font-size: 0.49rem;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
 }
 .brand-sub {
   font-size: 0.65rem;
   color: var(--text-faint);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: rgba(232, 143, 169, 0.1);
+  border: 1px solid rgba(232, 143, 169, 0.22);
+  color: var(--accent-light);
   border-radius: var(--radius-full);
   padding: 2px 8px;
   margin-left: 2px;
 }
+.sidebar-sprig {
+  height: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 17px 3px;
+  color: var(--primary-light);
+  opacity: 0.55;
+}
+.sidebar-sprig::before,
+.sidebar-sprig::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, currentColor);
+}
+.sidebar-sprig::after { transform: scaleX(-1); }
+.sidebar-sprig span,
+.sidebar-sprig i {
+  width: 4px;
+  height: 4px;
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sidebar-sprig i { width: 6px; height: 6px; background: var(--accent-light); }
 
 /* 搜索框 */
 .search-box {
@@ -283,7 +369,8 @@ defineExpose({ load })
 .search-input {
   flex: 1;
   background: var(--bg-input);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 0 1px var(--edge-subtle), inset 0 1px 0 rgba(255, 255, 255, 0.025);
   border-radius: var(--radius-full);
   padding: 7px 12px;
   color: var(--text);
@@ -291,7 +378,7 @@ defineExpose({ load })
   outline: none;
   transition: border-color 0.2s;
 }
-.search-input:focus { border-color: var(--primary); box-shadow: var(--glow); }
+.search-input:focus { border-color: var(--edge-active); box-shadow: var(--glow), inset 0 1px 0 var(--surface-shine); }
 .search-input::placeholder { color: var(--text-faint); }
 .search-btn {
   display: flex;
@@ -299,14 +386,14 @@ defineExpose({ load })
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--edge-subtle);
   border-radius: var(--radius-full);
   background: var(--bg-card);
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.15s;
 }
-.search-btn:hover { border-color: var(--primary); color: var(--primary-text); }
+.search-btn:hover { border-color: var(--edge-active); color: var(--primary-text); }
 .search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .search-note { font-size: 0.72rem; color: var(--text-faint); padding: 4px 14px; }
 
@@ -352,7 +439,7 @@ defineExpose({ load })
   background: var(--primary-soft);
   color: var(--primary-text);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px var(--border-light);
+  box-shadow: inset 0 1px 0 var(--surface-shine), inset 0 0 0 1px var(--edge-highlight);
 }
 .sitem.empty { cursor: default; color: var(--text-faint); }
 .sitem .t {
@@ -382,7 +469,9 @@ defineExpose({ load })
   padding: 12px 14px;
   margin: 6px 10px 2px;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--edge-highlight);
+  background: linear-gradient(135deg, rgba(232, 143, 169, 0.11), rgba(169, 154, 197, 0.11));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 .moodemoji { font-size: 1.5rem; line-height: 1; }
 .moodnum {
@@ -417,7 +506,7 @@ defineExpose({ load })
   padding: 10px 14px;
   font-size: 0.7rem;
   color: var(--text-faint);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--edge-subtle);
 }
 .settings-link {
   display: inline-flex;
@@ -515,6 +604,20 @@ defineExpose({ load })
   margin-top: 4px;
   box-shadow: var(--shadow-sm);
 }
+
+/* 日间侧栏保留纸张般的温度，而不是直接把夜间的紫粉光换白。 */
+.theme-light .sidebar::before {
+  background: radial-gradient(circle, rgba(230, 191, 113, 0.19), rgba(139, 168, 99, 0.10) 42%, transparent 71%);
+}
+.theme-light .sidebar::after {
+  background:
+    linear-gradient(90deg, transparent 0 86%, rgba(102, 126, 76, 0.075) 86.4%, transparent 87%),
+    radial-gradient(ellipse at 95% 12%, rgba(184, 146, 85, 0.20) 0 1px, transparent 1.8px);
+  background-size: 100% 100%, 14px 22px;
+}
+.theme-light .brand { background: linear-gradient(110deg, rgba(255, 255, 255, 0.55), transparent 72%); }
+.theme-light .brand-mark { background: linear-gradient(145deg, rgba(243, 231, 195, 0.72), rgba(255, 255, 255, 0.48)); }
+.theme-light .brand-sub { background: rgba(183, 126, 139, 0.10); border-color: rgba(183, 126, 139, 0.22); color: #a56f71; }
 
 @media (max-width: 768px) {
   .sidebar {

@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
+import re
 from typing import Any
 
 from .log import logger
@@ -60,6 +62,10 @@ class AgentState:
     emotion_memory: list[dict] = field(default_factory=list)  # 最近情绪冲击残留
     emotion_archive: list[dict] = field(default_factory=list)  # 长期情绪档案
     event_memory: list[dict] = field(default_factory=list)  # 事件级长期记忆（带原文，可点名引用）
+    resting: bool = False     # 是否正在用户建议的休息时段内
+    rest_until: str | None = None
+    tension: int = 0          # 关系张力 0-100；冲突后不会随普通心情漂移瞬间消失
+    repair_hint: str = ""     # 最近一次修复方式，供行为层自然反馈
     last_update: str | None = None  # 上次更新时间 ISO
 
     # ---- 派生（不落库，消费方用）----
@@ -90,6 +96,179 @@ class AgentState:
 # ---- 情绪冲击的残留记忆（短时）：让她「还在闹别扭 / 还开心着」----
 _EMOTION_MEMORY_MAX = 6          # 最多记最近 6 次情绪冲击
 _EMOTION_MEMORY_HALF_LIFE_H = 3  # 半衰期 3 小时：越久远的冲击影响越淡
+
+# ---- 可交互精力 / 关系修复（C1）----
+_REST_KEY = "state:rest"
+_TENSION_KEY = "state:relationship_tension"
+_REST_DEFAULT_MINUTES = 90
+_REST_RECOVERY_TARGET = 92
+_REST_BONUS_FADE_HOURS = 6
+
+
+def _load_json_state(user_id: str, key: str) -> dict:
+    try:
+        from .userdb import kv_get
+
+        raw = kv_get(user_id, key)
+        data = json.loads(raw) if raw else {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_json_state(user_id: str, key: str, value: dict) -> None:
+    try:
+        from .userdb import kv_set
+
+        kv_set(user_id, key, json.dumps(value, ensure_ascii=False))
+    except Exception:
+        logger.exception("[state] 交互状态写入失败: {}", key)
+
+
+def _rest_snapshot(user_id: str, base_energy: int, now: datetime) -> tuple[int, bool, str | None]:
+    """把持久化休息进度覆盖到自然精力上；休满后收益在 6 小时内缓慢退场。"""
+    data = _load_json_state(user_id, _REST_KEY)
+    if not data:
+        return base_energy, False, None
+    try:
+        started = datetime.fromisoformat(str(data["started_at"]))
+        ends = datetime.fromisoformat(str(data["ends_at"]))
+        start_energy = max(0, min(100, int(data.get("start_energy", base_energy))))
+        target = max(start_energy, min(100, int(data.get("target", _REST_RECOVERY_TARGET))))
+    except Exception:
+        return base_energy, False, None
+
+    duration = max(1.0, (ends - started).total_seconds())
+    if now < ends:
+        progress = max(0.0, min(1.0, (now - started).total_seconds() / duration))
+        recovered = round(start_energy + (target - start_energy) * progress)
+        return max(base_energy, recovered), True, ends.isoformat(timespec="seconds")
+
+    hours_after = max(0.0, (now - ends).total_seconds() / 3600)
+    if hours_after < _REST_BONUS_FADE_HOURS:
+        retained = round(target - (target - base_energy) * (hours_after / _REST_BONUS_FADE_HOURS))
+        return max(base_energy, retained), False, ends.isoformat(timespec="seconds")
+
+    try:
+        from .userdb import kv_del
+
+        kv_del(user_id, _REST_KEY)
+    except Exception:
+        pass
+    return base_energy, False, None
+
+
+def begin_rest(user_id: str, *, minutes: int = _REST_DEFAULT_MINUTES, now: datetime | None = None) -> dict:
+    """开始一次真实的休息计时；重复劝休息不会把计时无限向后续。"""
+    now = now or datetime.now()
+    existing = _load_json_state(user_id, _REST_KEY)
+    try:
+        if existing and now < datetime.fromisoformat(str(existing["ends_at"])):
+            return existing
+    except Exception:
+        pass
+    try:
+        from .userdb import db
+
+        _, mood_updated = db.get_mood(user_id)
+    except Exception:
+        mood_updated = None
+    start_energy = _derive_base_energy(user_id, mood_updated, now=now)
+    data = {
+        "started_at": now.isoformat(timespec="seconds"),
+        "ends_at": (now + timedelta(minutes=max(15, min(240, minutes)))).isoformat(timespec="seconds"),
+        "start_energy": start_energy,
+        "target": max(start_energy, _REST_RECOVERY_TARGET),
+    }
+    _save_json_state(user_id, _REST_KEY, data)
+    return data
+
+
+def is_rest_request(text: str) -> bool:
+    """只识别用户让菟菚休息，不把“我去睡了”误当成让她睡。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return False
+    first_person = re.search(r"我.{0,4}(?:睡|休息|歇)", compact)
+    addresses_her = "你" in compact or "菟菚" in compact
+    if first_person and not addresses_her:
+        return False
+    return bool(re.search(
+        r"(?:你|菟菚).{0,6}(?:去|快|先|好好|也该|可以)?(?:睡|休息|歇)|"
+        r"(?:去|快|赶紧|先|好好)(?:睡|休息|歇)(?:会儿|一会儿|一下)?吧?|"
+        r"(?:睡|休息|歇)(?:会儿|一会儿|一下)吧",
+        compact,
+    ))
+
+
+def _load_tension(user_id: str) -> dict:
+    data = _load_json_state(user_id, _TENSION_KEY)
+    try:
+        data["level"] = max(0, min(100, int(data.get("level", 0))))
+    except Exception:
+        data["level"] = 0
+    return data
+
+
+def _repair_attempt(text: str) -> tuple[str, int]:
+    """识别修复方式。承担责任比一句软话更有效，且不依赖 LLM 是否可用。"""
+    compact = re.sub(r"\s+", "", text or "")
+    apology = bool(re.search(r"对不起|抱歉|我错了|原谅我", compact))
+    accountable = bool(re.search(r"是我的错|我不该|我会改|不会再|下次我会", compact))
+    listening = bool(re.search(r"哪里让你不舒服|你可以告诉我|我听你说|我会听", compact))
+    gentle = bool(re.search(r"别生气|消消气|哄哄你|哄你|抱抱你|给你抱抱|请你吃", compact))
+    if apology and accountable:
+        return "认真道歉并承担责任", 58
+    if apology:
+        return "真诚道歉", 36
+    if accountable:
+        return "承担责任", 28
+    if listening:
+        return "耐心倾听", 22
+    if gentle:
+        return "温柔安抚", 14
+    return "", 0
+
+
+def repair_tension(user_id: str, text: str) -> dict:
+    """按用户的修复方式降低关系张力；普通闲聊不会自动清零。"""
+    data = _load_tension(user_id)
+    level = int(data.get("level", 0))
+    kind, amount = _repair_attempt(text)
+    if amount <= 0:
+        if data.get("last_repair"):
+            data["last_repair"] = ""
+            _save_json_state(user_id, _TENSION_KEY, data)
+        return data
+    if level <= 0:
+        return data
+    new_level = max(0, level - amount)
+    data.update({
+        "level": new_level,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "last_repair": kind,
+    })
+    _save_json_state(user_id, _TENSION_KEY, data)
+    try:
+        from .userdb import db
+
+        mood, _ = db.get_mood(user_id)
+        db.set_mood(user_id, min(100, mood + max(3, amount // 6)))
+    except Exception:
+        logger.exception("[state] 修复关系时更新心情失败")
+    return data
+
+
+def handle_state_interaction(user_id: str, text: str) -> dict:
+    """同步处理会影响当轮行为帧的显式交互意图。"""
+    result = {"rest_started": False, "repair": "", "tension": 0}
+    if is_rest_request(text):
+        begin_rest(user_id)
+        result["rest_started"] = True
+    repaired = repair_tension(user_id, text)
+    result["repair"] = str(repaired.get("last_repair", ""))
+    result["tension"] = int(repaired.get("level", 0) or 0)
+    return result
 
 
 def _memory_key(user_id: str) -> str:
@@ -153,9 +332,18 @@ def load_state(user_id: str) -> AgentState:
     emotion, updated = db.get_mood(user_id)
 
     # 精力：从「上次聊天到现在」的时长推疲惫度（越久越没聊 → 越累/越闷）
-    energy = _derive_energy(user_id, updated)
+    energy, resting, rest_until = _derive_energy_details(user_id, updated)
 
     memory = _decay_emotion_memory(_load_emotion_memory(user_id), datetime.now())
+    tension_state = _load_tension(user_id)
+    tension = int(tension_state.get("level", 0) or 0)
+    # 普通 mood 漂移仍可运行，但有未修复冲突时，外显心情不会自动瞬间恢复。
+    if tension >= 70:
+        emotion = min(emotion, 24)
+    elif tension >= 40:
+        emotion = min(emotion, 34)
+    elif tension > 0:
+        emotion = min(emotion, 44)
 
     return AgentState(
         emotion=emotion,
@@ -165,11 +353,25 @@ def load_state(user_id: str) -> AgentState:
         emotion_memory=memory,
         emotion_archive=recall_emotion_archive(user_id),
         event_memory=recall_event_memory(user_id),
+        resting=resting,
+        rest_until=rest_until,
+        tension=tension,
+        repair_hint=str(tension_state.get("last_repair", "")),
         last_update=updated,
     )
 
 
 def _derive_energy(user_id: str, mood_updated: str | None) -> int:
+    return _derive_energy_details(user_id, mood_updated)[0]
+
+
+def _derive_energy_details(user_id: str, mood_updated: str | None) -> tuple[int, bool, str | None]:
+    now = datetime.now()
+    base = _derive_base_energy(user_id, mood_updated, now=now)
+    return _rest_snapshot(user_id, base, now)
+
+
+def _derive_base_energy(user_id: str, mood_updated: str | None, *, now: datetime | None = None) -> int:
     """精力：完整昼夜节律 + 互动衰减 + 天气联动，三者叠加出「当下精力」。
 
     1. 昼夜节律（circadian）：按一天 24 小时的正弦曲线给出自然精力基线——
@@ -178,7 +380,7 @@ def _derive_energy(user_id: str, mood_updated: str | None) -> int:
     2. 互动衰减：距上次聊天越久，精力略降（闷着/倦怠），但影响比节律小。
     3. 天气联动：阴雨/霾/雷等压抑天气让精力基线略降，晴朗天气略升。
     """
-    now = datetime.now()
+    now = now or datetime.now()
     # ---- 1) 昼夜节律：双峰曲线（午前爬升 + 午后低谷 + 傍晚高峰 + 深夜回落）----
     # 用「小时 → 精力」分段折线近似真实节律，避免单正弦曲线太平滑、缺午后低谷。
     # 折线：0点50 / 6点45 / 8点70 / 11点82 / 14点72 / 15点70 / 19点85 / 22点62
@@ -316,6 +518,22 @@ def apply_impulse(
             )
         except Exception:
             logger.exception("[state] 事件级记忆写入失败")
+
+        # 冲突形成独立的关系张力。它不会跟随 mood 的自然漂移自动清零，必须由
+        # 后续道歉、承担责任、倾听或安抚逐步修复。
+        negative_words = ("冒犯", "冷落", "伤害", "失望", "轻视", "侮辱", "过早表白")
+        if (emotion_delta + affection_delta) < 0 or any(w in emotional_hit for w in negative_words):
+            tension = _load_tension(user_id)
+            old_level = int(tension.get("level", 0) or 0)
+            added = max(12, round(max(0.1, float(emotional_weight)) * 55))
+            tension.update({
+                "level": min(100, old_level + added),
+                "reason": emotional_hit,
+                "started_at": tension.get("started_at") or datetime.now().isoformat(timespec="seconds"),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "last_repair": "",
+            })
+            _save_json_state(user_id, _TENSION_KEY, tension)
 
     return load_state(user_id)
 
