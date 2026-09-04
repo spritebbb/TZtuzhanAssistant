@@ -7,6 +7,7 @@
 - facts         LLM 提炼的长期事实（喜好/约定等，带去重）
 - user_meta     事实提炼游标等元数据
 - affection_log 好感度变动流水
+- mood_log      心情绝对值流水（养成仪表盘趋势）
 """
 import re
 import sqlite3
@@ -47,6 +48,13 @@ CREATE TABLE IF NOT EXISTS affection_log (
     user_id TEXT NOT NULL,
     delta   INTEGER NOT NULL,
     reason  TEXT NOT NULL,
+    ts      TEXT NOT NULL,
+    value   INTEGER
+);
+CREATE TABLE IF NOT EXISTS mood_log (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    value   INTEGER NOT NULL,
     ts      TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS facts (
@@ -219,6 +227,8 @@ CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_dates_user ON important_dates(user_id);
 CREATE INDEX IF NOT EXISTS idx_promises_user ON promises(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_affection_log_user_ts ON affection_log(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_mood_log_user_ts ON mood_log(user_id, ts);
 CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id);
 CREATE INDEX IF NOT EXISTS idx_profile_user ON user_profile(user_id);
 CREATE INDEX IF NOT EXISTS idx_terms_user ON user_terms(user_id);
@@ -264,6 +274,11 @@ class UserDB:
             self.conn.execute("ALTER TABLE users ADD COLUMN mood_updated_at TEXT")
         except sqlite3.OperationalError:
             pass
+        # C5 养成仪表盘：旧 affection_log 补绝对值列，便于准确画历史曲线。
+        try:
+            self.conn.execute("ALTER TABLE affection_log ADD COLUMN value INTEGER")
+        except sqlite3.OperationalError:
+            pass
         # 旧库迁移：user_meta 补 last_profile_msg_id 列
         try:
             self.conn.execute("ALTER TABLE user_meta ADD COLUMN last_profile_msg_id INTEGER NOT NULL DEFAULT 0")
@@ -284,7 +299,34 @@ class UserDB:
         # contextvar 默认值对齐。此处把旧的 session_current 数据合并进 assistant-main，
         # 避免菟菚「失忆」（好感度/心情/记忆/待办全部保留）。幂等：无旧数据时无副作用。
         self._migrate_legacy_user_identity()
+        self._backfill_dashboard_history()
         self.conn.commit()
+
+    def _backfill_dashboard_history(self) -> None:
+        """为升级前数据补齐可画曲线的绝对值，并给现有用户留一枚心情锚点。"""
+        affection_by_user: dict[str, int] = {}
+        rows = self.conn.execute(
+            "SELECT id, user_id, delta, value FROM affection_log ORDER BY user_id, ts, id"
+        ).fetchall()
+        for row in rows:
+            current = affection_by_user.get(row["user_id"], 0)
+            if row["value"] is None:
+                current = max(0, min(100, current + int(row["delta"])))
+                self.conn.execute(
+                    "UPDATE affection_log SET value = ? WHERE id = ?", (current, row["id"])
+                )
+            else:
+                current = max(0, min(100, int(row["value"])))
+            affection_by_user[row["user_id"]] = current
+
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT INTO mood_log (user_id, value, ts) "
+            "SELECT u.user_id, COALESCE(u.mood_value, 60), "
+            "COALESCE(u.mood_updated_at, ?) FROM users u "
+            "WHERE NOT EXISTS (SELECT 1 FROM mood_log m WHERE m.user_id = u.user_id)",
+            (now,),
+        )
 
     def _migrate_legacy_user_identity(self, legacy: str = "session_current",
                                       target: str = "assistant-main") -> None:
@@ -375,7 +417,8 @@ class UserDB:
         # 其余「纯 append」表：直接把 user_id 改挂 target（无唯一约束冲突风险）
         for table in (
             "messages", "long_memory", "facts", "affection_log", "important_dates",
-            "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
+            "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
+            "promises", "usage_log", "kb_documents", "kb_chunks",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -384,8 +427,15 @@ class UserDB:
     # ---- users ----
     @_locked
     def ensure_user(self, user_id: str):
+        now = datetime.now().isoformat(timespec="seconds")
         self.conn.execute(
             "INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,)
+        )
+        self.conn.execute(
+            "INSERT INTO mood_log (user_id, value, ts) "
+            "SELECT ?, 60, ? WHERE NOT EXISTS "
+            "(SELECT 1 FROM mood_log WHERE user_id = ?)",
+            (user_id, now, user_id),
         )
         self.conn.commit()
         return self.get_user(user_id)
@@ -399,13 +449,20 @@ class UserDB:
 
     @_locked
     def update_affection(self, user_id: str, delta: int, reason: str) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,)
+        )
         self.conn.execute(
             "UPDATE users SET affection = MAX(0, MIN(100, affection + ?)) WHERE user_id = ?",
             (delta, user_id),
         )
+        value = int(self.conn.execute(
+            "SELECT affection FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()[0])
         self.conn.execute(
-            "INSERT INTO affection_log (user_id, delta, reason, ts) VALUES (?, ?, ?, ?)",
-            (user_id, delta, reason, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO affection_log (user_id, delta, reason, ts, value) VALUES (?, ?, ?, ?, ?)",
+            (user_id, delta, reason, now, value),
         )
         self.conn.commit()
 
@@ -502,9 +559,17 @@ class UserDB:
     def set_mood(self, user_id: str, mood: int) -> None:
         """写入心情值（0-100）并更新时间戳。"""
         mood = max(0, min(100, round(mood)))
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,)
+        )
         self.conn.execute(
             "UPDATE users SET mood_value = ?, mood_updated_at = ? WHERE user_id = ?",
-            (mood, datetime.now().isoformat(timespec="seconds"), user_id),
+            (mood, now, user_id),
+        )
+        self.conn.execute(
+            "INSERT INTO mood_log (user_id, value, ts) VALUES (?, ?, ?)",
+            (user_id, mood, now),
         )
         self.conn.commit()
 
@@ -533,8 +598,8 @@ class UserDB:
             "UPDATE users SET affection = ? WHERE user_id = ?", (value, user_id)
         )
         self.conn.execute(
-            "INSERT INTO affection_log (user_id, delta, reason, ts) VALUES (?, ?, ?, ?)",
-            (user_id, value - cur, "手动设置", datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO affection_log (user_id, delta, reason, ts, value) VALUES (?, ?, ?, ?, ?)",
+            (user_id, value - cur, "手动设置", datetime.now().isoformat(timespec="seconds"), value),
         )
         self.conn.commit()
         u = self.get_user(user_id)
@@ -1015,7 +1080,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks", "unlocks",
+                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()

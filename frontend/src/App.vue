@@ -9,6 +9,7 @@ import DiaryPanel from './components/DiaryPanel.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
+import DashboardPanel from './components/DashboardPanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
@@ -18,6 +19,7 @@ const diaryOpen = ref(false)
 const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
 const usageOpen = ref(false)
+const dashboardOpen = ref(false)
 const sidebarOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
@@ -134,6 +136,7 @@ function onKeydown(e: KeyboardEvent) {
     diaryOpen.value = false
     memoryOpen.value = false
     usageOpen.value = false
+    dashboardOpen.value = false
     knowledgeOpen.value = false
     sidebarOpen.value = false
   }
@@ -193,6 +196,11 @@ onUnmounted(() => {
           陪伴中
         </div>
         <div class="header-right">
+          <button class="icon-btn" title="成长总览" @click="dashboardOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m4 8 6-5 6 8 5-5"/>
+            </svg>
+          </button>
           <button class="icon-btn" title="偷看菟菚的日记" @click="diaryOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -270,6 +278,7 @@ onUnmounted(() => {
     <KnowledgePanel :show="knowledgeOpen" @close="knowledgeOpen = false" />
     <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
     <UsagePanel :show="usageOpen" @close="usageOpen = false" />
+    <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
