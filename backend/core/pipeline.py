@@ -884,6 +884,34 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 记忆纠偏处理失败")
 
+    # 4.5) 边界场景（D6）：深夜的两条分寸——emo 守护（全员）+ 健康边界（熟人以上）
+    try:
+        hour = datetime.now().hour
+        if hour >= 23 or hour < 5:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "现在是深夜。如果对方流露出低落、消极、自我否定或在倾诉心事："
+                        "收起你的毒舌和地狱笑话，认真陪着，先接住情绪再说别的——"
+                        "你的毒舌是对朋友的优待，不是在对方难过时捅刀。"
+                    ),
+                }
+            )
+            if stage != "初识":
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "现在很晚了，你在意他的身体——催他去睡：可以念叨、可以别扭地关心"
+                            "（「这么晚还不睡，是想让我陪你熬秃吗」），回复比平时更简短慵懒些。"
+                            "但他坚持不睡，你也不硬撵，陪着就是。"
+                        ),
+                    }
+                )
+    except Exception:
+        logger.exception("[pipeline] 深夜边界注入失败")
+
     # 4.1) 记忆相关：压缩摘要 + 记忆原文 + 长期事实，合并成一个「记得的过去」块，
     # 减少堆砌：把三条独立 system 消息合成一段，LLM 更容易当背景吸收而不是逐条服从。
     memory_lines: list[str] = []
