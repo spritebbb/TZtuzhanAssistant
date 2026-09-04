@@ -223,15 +223,19 @@ def test_sse_stream() -> int:
         db.ensure_user(uid)
         # 入队应立即推给订阅者
         q = initiative.subscribe(uid)
-        await initiative.enqueue_proactive(uid, "菟菚想你了")
-        text = await asyncio.wait_for(q.get(), timeout=2)
-        assert text == "菟菚想你了", "订阅应立即收到入队消息"
+        await initiative.enqueue_proactive(uid, "菟菚想你了", image="/api/images/selfie.png")
+        message = await asyncio.wait_for(q.get(), timeout=2)
+        assert message == {
+            "text": "菟菚想你了",
+            "image": "/api/images/selfie.png",
+        }, "订阅应立即收到完整入队消息"
         initiative.unsubscribe(uid, q)
         # SSE 首帧应取走队列消息
         await initiative.enqueue_proactive(uid, "第二条主动消息")
         gen = initiative.sse_event_stream(uid)
         first = await gen.__anext__()
         assert "第二条主动消息" in first, "首帧应包含队列消息"
+        assert '"image": null' in first, "SSE 应保持统一的文字+图片消息结构"
         await gen.aclose()
         return True
 

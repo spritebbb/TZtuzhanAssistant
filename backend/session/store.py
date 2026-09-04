@@ -55,8 +55,12 @@ def _init() -> None:
             "CREATE TABLE IF NOT EXISTS messages ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "session_id TEXT NOT NULL, role TEXT NOT NULL,"
-            "content TEXT NOT NULL DEFAULT '', image TEXT, ts REAL NOT NULL)"
+            "content TEXT NOT NULL DEFAULT '', image TEXT, explanation_json TEXT, ts REAL NOT NULL)"
         )
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN explanation_json TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
         )
@@ -89,11 +93,21 @@ def _get_messages_sync(session_id: str) -> list[dict] | None:
         if exists is None:
             return None
         rows = conn.execute(
-            "SELECT role, content, image, ts FROM messages"
+            "SELECT role, content, image, explanation_json, ts FROM messages"
             " WHERE session_id=? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
-        return [{"role": r["role"], "content": r["content"], "image": r["image"], "ts": r["ts"]} for r in rows]
+        result = []
+        for r in rows:
+            try:
+                explanation = json.loads(r["explanation_json"]) if r["explanation_json"] else None
+            except (json.JSONDecodeError, TypeError):
+                explanation = None
+            result.append({
+                "role": r["role"], "content": r["content"], "image": r["image"],
+                "explanation": explanation, "ts": r["ts"],
+            })
+        return result
     finally:
         conn.close()
 
@@ -118,8 +132,12 @@ def _append_sync(session_id: str, messages: list[dict]) -> bool:
             return False
         for m in messages:
             conn.execute(
-                "INSERT INTO messages (session_id, role, content, image, ts) VALUES (?,?,?,?,?)",
-                (session_id, m.get("role", ""), m.get("content", ""), m.get("image"), m.get("ts", time.time())),
+                "INSERT INTO messages (session_id, role, content, image, explanation_json, ts) VALUES (?,?,?,?,?,?)",
+                (
+                    session_id, m.get("role", ""), m.get("content", ""), m.get("image"),
+                    json.dumps(m["explanation"], ensure_ascii=False) if m.get("explanation") else None,
+                    m.get("ts", time.time()),
+                ),
             )
         # 标题：取第一条用户消息前 20 字
         if row["title"] == "新会话":
@@ -148,16 +166,22 @@ def _archive_current_sync() -> dict | None:
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT role, content, image, ts FROM messages"
+            "SELECT role, content, image, explanation_json, ts FROM messages"
             " WHERE session_id=? ORDER BY id ASC",
             (CURRENT_SESSION_ID,),
         ).fetchall()
         if not rows:
             return None
-        msgs = [
-            {"role": r["role"], "content": r["content"], "image": r["image"], "ts": r["ts"]}
-            for r in rows
-        ]
+        msgs = []
+        for r in rows:
+            try:
+                explanation = json.loads(r["explanation_json"]) if r["explanation_json"] else None
+            except (json.JSONDecodeError, TypeError):
+                explanation = None
+            msgs.append({
+                "role": r["role"], "content": r["content"], "image": r["image"],
+                "explanation": explanation, "ts": r["ts"],
+            })
         # 归档标题：取第一条用户消息前 20 字
         title = "归档"
         for m in msgs:
@@ -326,8 +350,8 @@ async def append_messages(session_id: str, messages: list[dict]) -> bool:
         return await asyncio.to_thread(_append_sync, session_id, messages)
 
 
-def _append_proactive_sync(session_id: str, text: str) -> bool:
-    """追加一条 bot 主动消息（幂等：最后一条内容相同则跳过，防重启/重连重复）。"""
+def _append_proactive_sync(session_id: str, text: str, image: str | None = None) -> bool:
+    """追加一条 bot 主动消息（content+image 幂等，支持主动发图）。"""
     conn = _connect()
     try:
         row = conn.execute("SELECT title FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -336,14 +360,14 @@ def _append_proactive_sync(session_id: str, text: str) -> bool:
         # 幂等去重：主动消息可能因「SSE 首帧推送 + 队列残留」重复到达，
         # 若当前会话最后一条 bot 消息内容相同，则跳过本次落库，避免出现两条相同气泡。
         last = conn.execute(
-            "SELECT content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1",
+            "SELECT content, image FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1",
             (session_id,),
         ).fetchone()
-        if last and last["content"] == text:
+        if last and last["content"] == text and (last["image"] or None) == (image or None):
             return False
         conn.execute(
             "INSERT INTO messages (session_id, role, content, image, ts) VALUES (?,?,?,?,?)",
-            (session_id, "bot", text, None, time.time()),
+            (session_id, "bot", text, image, time.time()),
         )
         conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (time.time(), session_id))
         conn.commit()
@@ -352,10 +376,10 @@ def _append_proactive_sync(session_id: str, text: str) -> bool:
         conn.close()
 
 
-async def append_proactive_message(session_id: str, text: str) -> bool:
+async def append_proactive_message(session_id: str, text: str, image: str | None = None) -> bool:
     """幂等追加一条 bot 主动消息（走 async 锁，不阻塞事件循环）。"""
     async with _lock:
-        return await asyncio.to_thread(_append_proactive_sync, session_id, text)
+        return await asyncio.to_thread(_append_proactive_sync, session_id, text, image)
 
 
 def _clear_current_sync() -> int:

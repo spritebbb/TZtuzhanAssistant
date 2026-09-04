@@ -20,7 +20,7 @@ from .persona import build_system_prompt
 from .userdb import db, kv_del, kv_get, kv_set
 
 _GREET_KEY = "web_last_seen"  # kv 键名
-_GREET_HOURS = 8  # 隔多久算"久别"
+_GREET_HOURS = 8  # 兼容/文档默认值；运行时使用 config.proactive_greeting_idle_hours
 _GREET_PENDING_KEY = "web_greet_pending"  # 问候生成中占位（并发去重）
 # 并发防护：读-判-写需要原子，避免两个并发请求都生成问候
 _greet_lock = threading.Lock()
@@ -68,7 +68,7 @@ def _set_last_seen(user_id: str, ts: float | None = None) -> None:
     kv_set(user_id, _GREET_KEY, str(ts or time.time()))
 
 
-async def _greeting_text(user_id: str) -> str:
+async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str:
     """用 LLM 生成一句菟菚风格的问候。"""
     from . import affection
 
@@ -99,6 +99,23 @@ async def _greeting_text(user_id: str) -> str:
         else "晚上"
     )
     time_desc = f"{now.month}月{now.day}日 {period}"
+    narrative_hint = ""
+    if gap_hours is not None and gap_hours >= config.proactive_greeting_idle_hours:
+        try:
+            from .offline_narrative import collect_offline_context
+
+            narrative = collect_offline_context(user_id, gap_hours, now=now)
+            # 梦境只在亲密/恋人采用；关系未到时降为研究碎片，避免借梦越级。
+            if narrative.mode == "dream" and affection.stage_of(affection_val) in {"初识", "熟悉"}:
+                narrative = type(narrative)(
+                    mode="research",
+                    gap_hours=narrative.gap_hours,
+                    recent_lines=narrative.recent_lines,
+                    triple_lines=narrative.triple_lines,
+                )
+            narrative_hint = "\n\n" + narrative.prompt_hint(affection.stage_of(affection_val))
+        except Exception as e:
+            logger.warning(f"[问候] 离线叙事素材整理失败: {e}")
     messages = [
         {"role": "system", "content": sys_prompt},
         {
@@ -108,6 +125,7 @@ async def _greeting_text(user_id: str) -> str:
                 "你们隔了一阵没聊，主动打个招呼吧。自然一点，就像朋友隔阵再见那样。"
                 "一句话就够，别太长，别解释，别加括号动作。"
                 f"{'如果记得对方的名字（' + address + '）就用上。' if address else ''}"
+                f"{narrative_hint}"
             ),
         },
     ]
@@ -132,12 +150,20 @@ async def greeting_for(
     if reset_in_progress():
         return None
     epoch = reset_epoch()
+    # 页面挂载后问候与用户首条消息会并发：记录生成前的会话长度，LLM 返回后
+    # 再校验。期间只要有人开始聊天，就丢弃这句过时问候，避免插到正常回复后面。
+    from ..session.store import message_count
+
+    baseline_message_count = await message_count(session_id)
     now = time.time()
+    gap_hours: float | None = None
+    claim_token: str | None = None
     with _greet_lock:
         last_ts = _last_seen_ts(user_id)
         if not force and last_ts is not None:
             gap = now - last_ts
-            if gap < _GREET_HOURS * 3600:
+            gap_hours = max(0.0, gap / 3600)
+            if gap < config.proactive_greeting_idle_hours * 3600:
                 _set_last_seen(user_id, now)
                 return None  # 间隔短，不问候
         # 先占位标记「问候已生成中」：即使 _greeting_text 在锁外 await，
@@ -146,17 +172,41 @@ async def greeting_for(
             return None
         kv_set(user_id, _GREET_PENDING_KEY, str(now))
         _set_last_seen(user_id, now)
+        from .proactive_policy import try_claim_active
+
+        claim_token = try_claim_active(user_id, "greeting", now=now)
+        if not claim_token:
+            kv_del(user_id, _GREET_PENDING_KEY)
+            return None
 
     try:
         # 生成问候并持久化到会话
-        text = await _greeting_text(user_id)
+        text = await _greeting_text(user_id, gap_hours=gap_hours)
+    except Exception as e:
+        logger.warning(f"[问候] 生成异常: {e}")
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        return None
     finally:
         # 无论成功失败都释放占位，避免一次失败后永久卡住问候
         kv_del(user_id, _GREET_PENDING_KEY)
     if not text:
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        return None
+    if await message_count(session_id) != baseline_message_count:
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        logger.info("[问候] 生成期间会话已活跃，丢弃过时问候")
         return None
     from .reset import ResetSuperseded, epoch_is_current, user_write_guard
     if not epoch_is_current(epoch):
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
         return None
 
     # 持久化到会话存储
@@ -169,9 +219,15 @@ async def greeting_for(
                 [{"role": "bot", "content": text, "ts": now}],
             )
     except ResetSuperseded:
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
         return None
     except Exception as e:
         logger.warning(f"[问候] 持久化失败: {e}")
 
-    logger.info(f"[问候] 隔 {_GREET_HOURS}h+ 生成问候: {text[:40]}...")
+    from .proactive_policy import finish_active_claim
+
+    finish_active_claim(user_id, claim_token, success=True, source="greeting")
+    logger.info(f"[问候] 隔 {config.proactive_greeting_idle_hours}h+ 生成问候: {text[:40]}...")
     return text

@@ -13,7 +13,41 @@ export interface Message {
   role: 'user' | 'bot'
   content: string
   image?: string | null
+  explanation?: MessageExplanation | null
   ts: number
+}
+
+export interface MessageExplanation {
+  version: number
+  state: {
+    affection: number
+    stage: string
+    mood: number
+    mood_label: string
+    energy: number
+    resting?: boolean
+    rest_until?: string | null
+    tension?: number
+  }
+  behavior: Array<{ label: string; text: string }>
+  memories: Array<{ kind: string; text: string }>
+  tools: { search: boolean; media: 'none' | 'generated_image' | 'sticker' | string }
+}
+
+export interface ProactiveMessage {
+  text: string
+  image?: string | null
+}
+
+function normalizeProactiveMessage(value: unknown): ProactiveMessage | null {
+  if (typeof value === 'string' && value.trim()) return { text: value, image: null }
+  if (!value || typeof value !== 'object') return null
+  const item = value as { text?: unknown; image?: unknown }
+  if (typeof item.text !== 'string' || !item.text.trim()) return null
+  return {
+    text: item.text,
+    image: typeof item.image === 'string' && item.image ? item.image : null,
+  }
 }
 
 export interface ArchiveInfo {
@@ -95,16 +129,16 @@ export async function searchArchives(q: string): Promise<ArchiveSearchResult[]> 
 }
 
 // 菟菚主动消息：后端已生成、待投递队列里的一条（取走后即清空）
-export async function getInitiative(sessionId: string): Promise<string | null> {
+export async function getInitiative(sessionId: string): Promise<ProactiveMessage | null> {
   const r = await apiFetch(`/api/initiative?session_id=${encodeURIComponent(sessionId)}`)
   const d = await r.json()
-  return d.initiative ?? null
+  return normalizeProactiveMessage(d.message ?? d.initiative)
 }
 
 // 菟菚主动消息 SSE 长连接：服务端后台生成主动消息时秒级推送（替代 30s 轮询）
 export function openInitiativeStream(
   sessionId: string,
-  onMessage: (text: string) => void,
+  onMessage: (message: ProactiveMessage) => void,
   onError?: () => void,
 ): EventSource {
   const url = getApiUrl(`/api/initiative/stream?session_id=${encodeURIComponent(sessionId)}`, true)
@@ -112,7 +146,8 @@ export function openInitiativeStream(
   es.addEventListener('initiative', (e: MessageEvent) => {
     try {
       const data = JSON.parse(e.data)
-      if (data && data.text) onMessage(data.text)
+      const message = normalizeProactiveMessage(data)
+      if (message) onMessage(message)
     } catch {
       // 解析失败忽略
     }

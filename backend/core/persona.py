@@ -68,6 +68,7 @@ def build_system_prompt(
     first_chat: bool,
     affection: int = 0,
     user_id: str = "",
+    behavior_text: str | None = None,
 ) -> str:
     """组装最终 system prompt = 人格 + 风格参考 + 当前用户状态注入。"""
     persona = load_persona()
@@ -83,7 +84,10 @@ def build_system_prompt(
     # 情绪已含在行为帧里，不再单独注入 mood_line（避免「心情」被说两遍、措辞打架）。
     # 失败静默：不影响主流程（退化为仅靠人格卡与阶段框架）。
     behavior_line = ""
-    if user_id:
+    if behavior_text is not None:
+        if behavior_text:
+            behavior_line = "- 你此刻的状态（自然流露，不要报数值）：" + behavior_text + "\n"
+    elif user_id:
         try:
             from .state import load_state as _load_state
             from .behavior import build_behavior_frame as _frame

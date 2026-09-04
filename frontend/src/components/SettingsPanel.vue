@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { apiFetch } from '../api'
+import { getTtsAutoPlay, setTtsAutoPlay } from '../utils/tts'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -28,6 +29,7 @@ const config = ref<ConfigData>({})
 const saveOk = ref(false)
 const saving = ref(false)
 const saveNote = ref('')
+const ttsAutoPlay = ref(false)
 
 // 响应式表单：打开时用后端当前值初始化；密钥字段留空 = 不修改
 const form = ref<Record<string, string | boolean>>({})
@@ -212,6 +214,7 @@ async function pluginAction(name: string, action: 'enable' | 'disable' | 'reload
 }
 
 async function open() {
+  ttsAutoPlay.value = getTtsAutoPlay()
   try {
     const r = await apiFetch('/api/config')
     const d = await r.json()
@@ -277,6 +280,7 @@ async function save() {
     const d = await r.json()
     if (!r.ok || !d.ok) throw new Error(d.error || '保存失败')
     saveOk.value = true
+    setTtsAutoPlay(ttsAutoPlay.value)
     saveNote.value = '已保存并热重载。记忆/生图相关模型变更建议重启后端后生效。'
     setTimeout(() => saveOk.value = false, 2000)
     // 通知 ToolBar 等组件刷新工具开关状态（联网/天气/生图/识图等可能因配置变化）
@@ -363,6 +367,13 @@ function confirmLabel(c: string): string {
           <div class="srow"><label>API 地址</label><input v-model="form.vision_base_url" type="text" :placeholder="config.vision_base_url || '留空则用 LLM 端点'" /></div>
           <div class="srow"><label>模型</label><input v-model="form.vision_model" type="text" :placeholder="config.vision_model || 'Qwen/Qwen2.5-VL-72B-Instruct'" /></div>
           <div class="srow"><label>API Key</label><input v-model="form.vision_api_key" type="password" :placeholder="config.vision_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
+
+          <div class="sgroup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+            语音
+          </div>
+          <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" /></div>
+          <div class="setting-hint">手动朗读按钮始终显示在菟菚的消息下方；自动朗读只对新回复生效</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -582,6 +593,7 @@ function confirmLabel(c: string): string {
 }
 .srow input:focus, .srow select:focus { border-color: var(--primary); box-shadow: var(--glow); }
 .srow input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+.setting-hint { margin: -4px 0 8px 132px; font-size: 0.72rem; color: var(--text-faint); line-height: 1.5; }
 .s-foot .btn {
   display: inline-flex;
   align-items: center;

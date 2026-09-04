@@ -5,11 +5,13 @@ import ChatView from './components/ChatView.vue'
 import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
+import DiaryPanel from './components/DiaryPanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
+const diaryOpen = ref(false)
 const sidebarOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
@@ -118,6 +120,7 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     settingsOpen.value = false
     agentOpen.value = false
+    diaryOpen.value = false
     sidebarOpen.value = false
   }
 }
@@ -166,10 +169,21 @@ onUnmounted(() => {
           <Portrait :size="40" />
         </div>
         <div class="header-center">
-          <div class="name">菟菚</div>
+          <div class="header-kicker"><span></span>BOTANICAL COMPANION</div>
+          <div class="name"><span>菟菚</span><i>·</i><em>cuscuta chinensis</em></div>
           <div class="sub">细藤缠绕 · 温润坚韧 · 你的拟人助手</div>
         </div>
+        <div class="header-sprig" aria-hidden="true"><span></span><i></i><span></span></div>
+        <div class="presence" title="菟菚正在陪伴你">
+          <span class="presence-dot"></span>
+          陪伴中
+        </div>
         <div class="header-right">
+          <button class="icon-btn" title="偷看菟菚的日记" @click="diaryOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+          </button>
           <button class="icon-btn" title="切换主题（Ctrl+Shift+T）" @click="toggleTheme">
             <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="5"/>
@@ -223,6 +237,7 @@ onUnmounted(() => {
     <!-- 面板 -->
     <SettingsPanel :show="settingsOpen" @close="closeSettings" />
     <AgentPanel :show="agentOpen" @close="agentOpen = false" />
+    <DiaryPanel :show="diaryOpen" @close="diaryOpen = false" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
@@ -252,6 +267,30 @@ onUnmounted(() => {
   height: 100vh;
   overflow: hidden;
   position: relative;
+  isolation: isolate;
+}
+.app-root::before,
+.app-root::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(28px);
+}
+.app-root::before {
+  width: 340px;
+  height: 340px;
+  right: 7%;
+  top: -180px;
+  background: rgba(172, 146, 211, 0.15);
+}
+.app-root::after {
+  width: 270px;
+  height: 270px;
+  left: 16%;
+  bottom: -190px;
+  background: rgba(232, 143, 169, 0.09);
 }
 .main {
   flex: 1;
@@ -270,20 +309,94 @@ onUnmounted(() => {
   background: var(--bg-header);
   backdrop-filter: blur(20px) saturate(1.3);
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--edge-subtle);
+  box-shadow: inset 0 -1px 0 rgba(7, 5, 14, 0.12), 0 8px 24px rgba(9, 7, 17, 0.06);
   flex-shrink: 0;
   z-index: 10;
+  position: relative;
+  overflow: hidden;
 }
-.header-left { flex-shrink: 0; }
+.header::before {
+  content: '';
+  position: absolute;
+  width: 310px;
+  height: 116px;
+  right: 18%;
+  top: -76px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(231, 178, 207, 0.14), rgba(174, 154, 210, 0.08) 45%, transparent 72%);
+  filter: blur(10px);
+  pointer-events: none;
+}
+.header::after {
+  content: '';
+  position: absolute;
+  right: 144px;
+  bottom: 0;
+  width: 145px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--primary-light), var(--accent-light), transparent);
+  opacity: 0.48;
+  pointer-events: none;
+}
+.header-left {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+.header-left::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid var(--edge-highlight);
+  border-radius: 14px 14px 14px 6px;
+  background: var(--primary-soft);
+  z-index: -1;
+  box-shadow: 0 4px 12px rgba(8, 7, 15, 0.10);
+}
 .header-center {
   flex: 1;
   min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+.header-kicker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 1px;
+  color: var(--primary-light);
+  font-size: 0.48rem;
+  letter-spacing: 0.15em;
+  line-height: 1;
+}
+.header-kicker span {
+  width: 12px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.72;
 }
 .header-center .name {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.5px;
+}
+.header-center .name i {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 400;
+  opacity: 0.78;
+}
+.header-center .name em {
+  color: var(--text-faint);
+  font-size: 0.58rem;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  letter-spacing: 0.04em;
 }
 .header-center .sub {
   font-size: 0.73rem;
@@ -293,10 +406,59 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.header-sprig {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 74px;
+  color: var(--primary-light);
+  opacity: 0.52;
+  position: relative;
+  z-index: 1;
+}
+.header-sprig::before,
+.header-sprig::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: currentColor;
+}
+.header-sprig span,
+.header-sprig i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.header-sprig i { width: 6px; height: 6px; background: var(--accent-light); }
+.presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge-subtle);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--primary-text);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  position: relative;
+  z-index: 1;
+}
+.presence-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--ok);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--ok);
+}
 .header-right {
   display: flex;
   align-items: center;
   gap: 4px;
+  position: relative;
+  z-index: 1;
 }
 .icon-btn {
   display: flex;
@@ -314,7 +476,16 @@ onUnmounted(() => {
 .icon-btn:hover {
   background: var(--bg-hover);
   color: var(--primary-text);
+  box-shadow: inset 0 0 0 1px var(--edge-subtle), 0 3px 10px rgba(8, 7, 15, 0.08);
 }
+
+.theme-light .header {
+  background: linear-gradient(105deg, rgba(255, 253, 246, 0.91), rgba(249, 244, 232, 0.78));
+  box-shadow: inset 0 -1px 0 rgba(105, 123, 76, 0.12), 0 8px 24px rgba(104, 90, 51, 0.07);
+}
+.theme-light .header::before { background: radial-gradient(ellipse, rgba(241, 202, 130, 0.20), rgba(162, 187, 119, 0.10) 47%, transparent 72%); }
+.theme-light .header-left::before { background: rgba(255, 253, 246, 0.72); }
+.theme-light .presence { background: rgba(255, 253, 246, 0.62); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.80); }
 .menubtn {
   display: none;
   align-items: center;
@@ -336,8 +507,11 @@ onUnmounted(() => {
 
 @media (max-width: 768px) {
   .menubtn { display: flex; }
-  .header { padding: 10px 14px; }
+  .header { gap: 8px; padding: 10px 14px; }
+  .header-kicker, .header-sprig, .header-center .name em, .header-center .name i { display: none; }
   .header-center .sub { display: none; }
+  .header-right { gap: 0; }
+  .header-right .icon-btn { width: 33px; height: 34px; }
 }
 
 /* 彻底重置按钮：悬停时呈警示色，提示这是危险操作 */
@@ -349,9 +523,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
-  padding: 7px 22px;
-  background: var(--bg-header);
-  border-bottom: 1px solid var(--border);
+  padding: 8px 22px;
+  background: linear-gradient(90deg, rgba(232, 143, 169, 0.06), var(--bg-header) 30%, var(--bg-header));
+  border-bottom: 1px solid var(--edge-subtle);
+  box-shadow: inset 0 -1px 0 rgba(7, 5, 14, 0.1);
   z-index: 9;
 }
 .aff-heart {
@@ -366,12 +541,12 @@ onUnmounted(() => {
   background: var(--bg-hover);
   border-radius: var(--radius-full);
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.16), 0 0 0 1px var(--edge-subtle);
 }
 .aff-fill {
   height: 100%;
   border-radius: var(--radius-full);
-  background: linear-gradient(90deg, var(--accent-light, #f2b8c8), var(--accent, #e07a9a));
+  background: linear-gradient(90deg, var(--accent-light, #ffd6e2), var(--accent, #e89bb1), var(--primary, #a99ac5));
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent, #e07a9a) 55%, transparent);
   transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -393,6 +568,7 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .aff-bar { padding: 6px 14px; }
   .aff-next { display: none; }
+  .presence { display: none; }
 }
 
 /* 重置确认弹窗 */
@@ -409,7 +585,8 @@ onUnmounted(() => {
 .modal {
   width: min(420px, 88vw);
   background: var(--bg-panel, #fff);
-  border: 1px solid var(--border);
+  border: 1px solid var(--edge-highlight);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--surface-shine);
   border-radius: var(--radius-lg, 14px);
   padding: 20px 22px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
@@ -429,7 +606,7 @@ onUnmounted(() => {
   background: transparent;
   color: var(--text-dim);
 }
-.modal-actions .btn:hover { color: var(--text); border-color: var(--primary); }
+.modal-actions .btn:hover { color: var(--text); border-color: var(--edge-active); }
 .modal-actions .btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .modal-actions .btn.danger:hover { filter: brightness(1.08); }
 .modal-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }

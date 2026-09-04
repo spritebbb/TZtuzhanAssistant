@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import type { Message } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
 import { renderMarkdown } from '../utils/markdown'
+import { TTS_STATE_EVENT, playTts, stopTts, type TtsState, type TtsStatus } from '../utils/tts'
+
+// 会话头像使用本地生成的静态资源，避免每条消息都重复请求角色接口。
+const assistantAvatar = `${import.meta.env.BASE_URL}avatars/tuzhan-avatar-v1.png`
+const userAvatar = `${import.meta.env.BASE_URL}avatars/user-avatar-v1.png`
 
 const props = defineProps<{
   message: Message
@@ -11,10 +16,25 @@ const props = defineProps<{
   isMatch?: boolean
   isActiveMatch?: boolean
   toolStatus?: string
+  ttsKey: string
 }>()
 
 // ---- 自包含状态：复制反馈 / 图片灯箱 ----
 const copied = ref(false)
+const ttsStatus = ref<TtsStatus>('idle')
+const whyOpen = ref(false)
+
+function onTtsState(event: Event) {
+  const state = (event as CustomEvent<TtsState>).detail
+  if (!state) return
+  if (state.key === props.ttsKey) ttsStatus.value = state.status
+  else if (state.status === 'loading' || state.status === 'playing') ttsStatus.value = 'idle'
+}
+
+function toggleSpeech() {
+  if (ttsStatus.value === 'loading' || ttsStatus.value === 'playing') stopTts()
+  else void playTts(props.message.content, props.ttsKey)
+}
 
 function formatTime(ts: number): string {
   const d = new Date(ts * 1000)
@@ -49,8 +69,14 @@ function closeLightbox() {
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && lightboxSrc.value) closeLightbox()
 }
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
-if (typeof document !== 'undefined') document.addEventListener('keydown', onKeydown)
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  window.addEventListener(TTS_STATE_EVENT, onTtsState)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener(TTS_STATE_EVENT, onTtsState)
+})
 
 // 气泡 markdown 渲染：始终渲染 message.content 为 HTML（带 XSS 防护）。
 // 搜索高亮由父组件传入的 isMatch/isActiveMatch 驱动边框样式（不在 HTML 内部注入 <mark>，
@@ -63,6 +89,10 @@ const showStreamCursor = () =>
   props.message.role === 'bot' && !props.message.content && props.isStreamingLast
 const canCopy = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
+const canSpeak = () =>
+  props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
+const canExplain = () =>
+  props.message.role === 'bot' && !!props.message.explanation && !props.isStreamingLast
 
 const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.message.image) : '')
 </script>
@@ -76,7 +106,12 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
       { 'match-active': isActiveMatch },
     ]"
   >
-    <div class="avatar">{{ message.role === 'user' ? '你' : '菟' }}</div>
+    <div class="avatar" :class="message.role === 'user' ? 'user-avatar' : 'bot-avatar'">
+      <img
+        :src="message.role === 'user' ? userAvatar : assistantAvatar"
+        :alt="message.role === 'user' ? '你的头像' : '菟菚头像'"
+      />
+    </div>
     <div class="col">
       <div
         class="bubble"
@@ -101,8 +136,27 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
         :alt="message.content ? message.content.slice(0, 40) : '图片'"
         @click="openLightbox(imgSrc, message.content)"
       />
-      <div class="meta" :class="{ pinned: copied }">
+      <div class="meta" :class="{ pinned: copied || whyOpen }">
         <span class="time">{{ formatTime(message.ts) }}</span>
+        <button
+          v-if="canExplain()"
+          class="whybtn"
+          :class="{ active: whyOpen }"
+          :aria-expanded="whyOpen"
+          @click="whyOpen = !whyOpen"
+          title="她为什么这样说"
+        >为什么</button>
+        <button
+          v-if="canSpeak()"
+          class="ttsbtn"
+          :class="{ active: ttsStatus === 'playing', loading: ttsStatus === 'loading', error: ttsStatus === 'error' }"
+          @click="toggleSpeech"
+          :title="ttsStatus === 'playing' ? '停止朗读' : ttsStatus === 'loading' ? '正在生成语音' : ttsStatus === 'error' ? '朗读失败，点击重试' : '朗读'"
+          :aria-label="ttsStatus === 'playing' ? '停止朗读' : '朗读这条消息'"
+        >
+          <svg v-if="ttsStatus === 'playing'" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+        </button>
         <button
           v-if="canCopy()"
           class="copybtn"
@@ -113,6 +167,34 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
         </button>
+      </div>
+      <div v-if="whyOpen && message.explanation" class="why-panel">
+        <div class="why-title">她为什么这样说</div>
+        <div class="state-chips">
+          <span>{{ message.explanation.state.stage }} · 好感 {{ message.explanation.state.affection }}</span>
+          <span>{{ message.explanation.state.mood_label }} {{ message.explanation.state.mood }}</span>
+          <span>精力 {{ message.explanation.state.energy }}</span>
+          <span v-if="message.explanation.state.resting">休息中</span>
+          <span v-if="message.explanation.state.tension">关系张力 {{ message.explanation.state.tension }}</span>
+        </div>
+        <div v-if="message.explanation.behavior.length" class="why-section">
+          <div class="why-label">当时的行为帧</div>
+          <div v-for="item in message.explanation.behavior" :key="item.label" class="why-row">
+            <b>{{ item.label }}</b><span>{{ item.text }}</span>
+          </div>
+        </div>
+        <div v-if="message.explanation.memories.length" class="why-section">
+          <div class="why-label">用到的记忆</div>
+          <div v-for="(item, i) in message.explanation.memories" :key="i" class="why-row">
+            <b>{{ item.kind }}</b><span>{{ item.text }}</span>
+          </div>
+        </div>
+        <div class="why-tools">
+          <span v-if="message.explanation.tools.search">联网搜索</span>
+          <span v-if="message.explanation.tools.media === 'generated_image'">生成图片</span>
+          <span v-if="message.explanation.tools.media === 'sticker'">附带贴纸</span>
+          <span v-if="!message.explanation.tools.search && message.explanation.tools.media === 'none'">未调用额外工具</span>
+        </div>
       </div>
     </div>
 
@@ -135,7 +217,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 .msg {
   display: flex;
   gap: 10px;
-  max-width: 780px;
+  max-width: min(780px, 78%);
   animation: fadeUp 0.28s ease both;
   border-radius: var(--radius-lg);
   transition: background 0.2s ease;
@@ -147,26 +229,41 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
   box-shadow: inset 0 0 0 2px var(--border-strong);
 }
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-full);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.92rem;
-  font-weight: 600;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+.avatar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 24%;
 }
 .msg.user .avatar {
-  background: var(--bg-user);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(124, 154, 85, 0.4);
+  background: #44354e;
+  border: 1px solid rgba(234, 212, 255, 0.46);
+  box-shadow: 0 3px 14px rgba(125, 92, 160, 0.32);
 }
 .msg.bot .avatar {
-  background: var(--bg-card);
-  color: var(--primary-text);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  background: #ece2d4;
+  border: 1px solid rgba(255, 231, 194, 0.78);
+  box-shadow: 0 3px 16px rgba(232, 170, 109, 0.28), 0 0 0 2px rgba(232, 143, 169, 0.08);
 }
 .col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .bubble {
@@ -181,16 +278,17 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 }
 .bubble.bot {
   background: var(--bg-bubble);
-  border: 1px solid var(--border);
+  border: 1px solid var(--edge-subtle);
   border-radius: 20px 20px 20px 8px;
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--surface-shine);
+  backdrop-filter: blur(16px) saturate(1.15);
 }
 .bubble.user {
   background: var(--bg-user);
   color: #fff;
   border-radius: 20px 20px 8px 20px;
-  box-shadow: 0 4px 14px rgba(124, 154, 85, 0.3);
+  border: 1px solid rgba(255, 235, 246, 0.16);
+  box-shadow: 0 5px 18px rgba(143, 91, 136, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .cursor-wrap {
   display: flex;
@@ -254,8 +352,68 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
   border-radius: 4px;
   transition: all 0.15s ease;
 }
+.ttsbtn {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.ttsbtn:hover, .ttsbtn.active { color: var(--primary-text); background: var(--primary-soft); }
+.ttsbtn.loading { color: var(--primary-text); animation: ttsPulse 0.9s ease-in-out infinite; }
+.ttsbtn.error { color: var(--danger); }
+@keyframes ttsPulse { 50% { opacity: 0.42; } }
 .copybtn:hover { color: var(--primary-text); background: var(--primary-soft); }
 .copybtn.ok { color: var(--primary-text); }
+.whybtn {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.69rem;
+  line-height: 1.35;
+}
+.whybtn:hover, .whybtn.active { color: var(--primary-text); background: var(--primary-soft); }
+.why-panel {
+  width: min(520px, 72vw);
+  margin-top: 3px;
+  padding: 12px 13px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--edge-subtle);
+  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  backdrop-filter: blur(16px);
+  animation: fadeUp 0.18s ease both;
+}
+.why-title { color: var(--text); font-weight: 650; margin-bottom: 8px; }
+.state-chips, .why-tools { display: flex; flex-wrap: wrap; gap: 5px; }
+.state-chips span, .why-tools span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-text);
+}
+.why-section { margin-top: 10px; }
+.why-label {
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+}
+.why-row { display: grid; grid-template-columns: 66px 1fr; gap: 7px; margin-top: 4px; }
+.why-row b { color: var(--text); font-weight: 600; }
+.why-row span { min-width: 0; overflow-wrap: anywhere; }
+.why-tools { margin-top: 10px; }
+.why-tools span { background: var(--bg-hover); color: var(--text-dim); }
 .mdimg {
   max-width: 340px;
   border-radius: var(--radius-md);

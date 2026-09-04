@@ -14,6 +14,8 @@ _DATA_DIR = config.data_dir
 _PERSONA_IMG = Path(__file__).resolve().parents[2] / "assets" / "persona.png"
 _PERSONA_CUTOUT = Path(__file__).resolve().parents[2] / "assets" / "persona_cutout.png"
 _PERSONA_FULL = Path(__file__).resolve().parents[2] / "assets" / "hotaru_v1_nohalo.png"
+_PERSONA_STATES = Path(__file__).resolve().parents[2] / "assets" / "persona_states"
+_PERSONA_STATE_NAMES = {"low", "plain", "lazy", "happy", "excited"}
 
 router = APIRouter(tags=["images"])
 
@@ -59,6 +61,19 @@ async def persona_cutout():
 @router.get("/persona/full")
 async def persona_full():
     """菟菚透明全身立绘（抠图，用于主区角色背景）。"""
+    if _PERSONA_FULL.exists():
+        return FileResponse(_PERSONA_FULL, media_type="image/png")
+    return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
+
+
+@router.get("/persona/full/{state}")
+async def persona_full_state(state: str):
+    """按五档心情返回差分立绘；资产缺失时安全回退到基础立绘。"""
+    if state not in _PERSONA_STATE_NAMES:
+        return JSONResponse({"ok": False, "error": "未知立绘状态"}, status_code=404)
+    path = _PERSONA_STATES / f"{state}.png"
+    if path.exists():
+        return FileResponse(path, media_type="image/png")
     if _PERSONA_FULL.exists():
         return FileResponse(_PERSONA_FULL, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)

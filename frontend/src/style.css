@@ -33,118 +33,131 @@
   --cream-100: #faf7ef;
   --cream-dim: #e6dfcc;
 
-  /* —— 暗色主题（默认） —— */
-  --bg: #161c12;
-  --bg-grad-1: rgba(139, 165, 102, 0.08);
-  --bg-grad-2: rgba(217, 168, 96, 0.05);
-  --bg-grad-3: rgba(255, 255, 255, 0.02);
+  /* —— 暗色主题（默认）：月夜温室，保留藤蔓意象但提高角色陪伴感 —— */
+  --bg: #151522;
+  --bg-grad-1: rgba(159, 135, 192, 0.18);
+  --bg-grad-2: rgba(232, 143, 169, 0.12);
+  --bg-grad-3: rgba(255, 255, 255, 0.03);
 
-  --bg-sidebar: #1c2417;
-  --bg-lg-sidebar: rgba(20, 26, 16, 0.92);
-  --bg-header: rgba(24, 31, 20, 0.88);
-  --bg-hover: rgba(139, 165, 102, 0.10);
-  --bg-active: rgba(169, 192, 127, 0.08);
-  --bg-input: rgba(250, 247, 239, 0.05);
-  --bg-panel: #202a1a;
-  --bg-card: #242e1d;
-  --bg-bubble: #28331f;
-  --bg-bubble-user: linear-gradient(135deg, #6f854d, #55683f);
-  --bg-bubble-user-deep: linear-gradient(135deg, #63773f, #4a5c33);
-  --bg-user: linear-gradient(135deg, #6f854d, #55683f);
-  --bg-user-deep: linear-gradient(135deg, #63773f, #4a5c33);
+  --bg-sidebar: #1b1a2a;
+  --bg-lg-sidebar: rgba(24, 23, 37, 0.94);
+  --bg-header: rgba(25, 24, 39, 0.82);
+  --bg-hover: rgba(196, 176, 221, 0.12);
+  --bg-active: rgba(232, 143, 169, 0.10);
+  --bg-input: rgba(255, 252, 255, 0.07);
+  --bg-panel: #242236;
+  --bg-card: #2b2940;
+  --bg-bubble: rgba(42, 40, 61, 0.88);
+  --bg-bubble-user: linear-gradient(135deg, #a4769b, #775c91);
+  --bg-bubble-user-deep: linear-gradient(135deg, #8c6686, #644b7d);
+  --bg-user: linear-gradient(135deg, #a4769b, #775c91);
+  --bg-user-deep: linear-gradient(135deg, #8c6686, #644b7d);
 
-  --border: rgba(139, 165, 102, 0.14);
-  --border-light: rgba(169, 192, 127, 0.26);
-  --border-strong: rgba(217, 168, 96, 0.38);
-  --border-muted: #2b3420;
+  --border: rgba(220, 204, 239, 0.13);
+  --border-light: rgba(225, 202, 237, 0.30);
+  --border-strong: rgba(244, 183, 203, 0.54);
+  --border-muted: rgba(199, 184, 220, 0.16);
+  --edge-subtle: rgba(239, 228, 250, 0.10);
+  --edge-highlight: rgba(255, 242, 250, 0.20);
+  --edge-active: rgba(255, 194, 215, 0.48);
+  --surface-shine: rgba(255, 255, 255, 0.055);
 
-  --text: #e9ecdc;
-  --text-dim: #aab392;
-  --text-faint: #7c875e;
-  --text-invert: #141a10;
+  --text: #f1edf7;
+  --text-dim: #c5bdd3;
+  --text-faint: #9187a5;
+  --text-invert: #191727;
 
-  --primary: #8ba566;
-  --primary-light: #a9c07f;
-  --primary-deep: #6f854d;
-  --primary-soft: rgba(139, 165, 102, 0.12);
-  --primary-text: #b6c98e;
+  --primary: #a99ac5;
+  --primary-light: #d5c4eb;
+  --primary-deep: #82749f;
+  --primary-soft: rgba(196, 176, 221, 0.14);
+  --primary-text: #e0d2f1;
 
-  --accent: #d9a860;
-  --accent-light: #f4e5c4;
-  --accent-deep: #bd8a3c;
+  --accent: #e89bb1;
+  --accent-light: #ffd6e2;
+  --accent-deep: #c87592;
 
   --danger: #e08a6d;
   --danger-soft: rgba(224, 138, 109, 0.12);
-  --ok: #9dc881;
-  --ok-soft: rgba(157, 200, 129, 0.14);
+  --ok: #a7d39c;
+  --ok-soft: rgba(167, 211, 156, 0.14);
 
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 10px 32px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.45);
-  --glow: 0 0 0 3px rgba(139, 165, 102, 0.18);
-  --glow-warm: 0 0 0 3px rgba(217, 168, 96, 0.18);
+  --glow: 0 0 0 3px rgba(196, 176, 221, 0.20);
+  --glow-warm: 0 0 0 3px rgba(232, 143, 169, 0.20);
 
   --radius-sm: 11px;
   --radius-md: 16px;
   --radius-lg: 22px;
   --radius-full: 999px;
 
-  /* 聊天区植物背景（暗色）：深色藤蔓图 + 暗色遮罩 */
-  --chat-bg-image: url('/bg/bg_dark.jpg');
-  --chat-bg-overlay: linear-gradient(rgba(20, 26, 16, 0.72), rgba(20, 26, 16, 0.72));
+  /* 聊天区植物背景（暗色）：月夜温室，中央刻意留出对话阅读区 */
+  --chat-bg-image: url('/bg/bg_moonlit-v1.jpg');
+  --chat-bg-overlay:
+    radial-gradient(ellipse at 50% 45%, rgba(18, 17, 28, 0.22) 0%, rgba(18, 17, 28, 0.52) 76%),
+    linear-gradient(135deg, rgba(20, 16, 33, 0.38), rgba(25, 30, 36, 0.24));
 
   color-scheme: dark;
 }
 
 /* ================= 亮色主题 ================= */
 .theme-light {
-  --bg: #f5f1e7;
-  --bg-grad-1: rgba(139, 165, 102, 0.12);
-  --bg-grad-2: rgba(217, 168, 96, 0.10);
-  --bg-grad-3: rgba(255, 255, 255, 0.5);
+  /* 日间模式：晨光温室。暖白纸张与草本绿，和夜间月光版本保持同一世界观。 */
+  --bg: #f8f3e7;
+  --bg-grad-1: rgba(131, 153, 98, 0.16);
+  --bg-grad-2: rgba(224, 180, 104, 0.16);
+  --bg-grad-3: rgba(255, 252, 244, 0.74);
 
-  --bg-sidebar: #eee8da;
-  --bg-lg-sidebar: rgba(238, 232, 218, 0.95);
-  --bg-header: rgba(250, 247, 239, 0.9);
-  --bg-hover: rgba(111, 133, 77, 0.08);
-  --bg-active: rgba(139, 165, 102, 0.10);
-  --bg-input: rgba(255, 255, 255, 0.6);
-  --bg-panel: #faf7ef;
-  --bg-card: #ffffff;
-  --bg-bubble: #fbf9f2;
-  --bg-bubble-user: linear-gradient(135deg, #8ba566, #6f854d);
-  --bg-bubble-user-deep: linear-gradient(135deg, #7d9a5a, #63773f);
-  --bg-user: linear-gradient(135deg, #8ba566, #6f854d);
-  --bg-user-deep: linear-gradient(135deg, #7d9a5a, #63773f);
+  --bg-sidebar: #eee8d8;
+  --bg-lg-sidebar: rgba(245, 240, 226, 0.88);
+  --bg-header: rgba(255, 252, 244, 0.78);
+  --bg-hover: rgba(98, 125, 76, 0.09);
+  --bg-active: rgba(121, 147, 91, 0.15);
+  --bg-input: rgba(255, 253, 247, 0.72);
+  --bg-panel: rgba(255, 252, 244, 0.90);
+  --bg-card: rgba(255, 253, 247, 0.94);
+  --bg-bubble: rgba(255, 253, 247, 0.91);
+  --bg-bubble-user: linear-gradient(135deg, #829d65, #637d54);
+  --bg-bubble-user-deep: linear-gradient(135deg, #708b57, #546d4b);
+  --bg-user: linear-gradient(135deg, #829d65, #637d54);
+  --bg-user-deep: linear-gradient(135deg, #708b57, #546d4b);
 
-  --border: rgba(111, 133, 77, 0.14);
-  --border-light: rgba(111, 133, 77, 0.28);
-  --border-strong: rgba(217, 168, 96, 0.42);
-  --border-muted: #e2dbc8;
+  --border: rgba(103, 124, 75, 0.18);
+  --border-light: rgba(103, 124, 75, 0.32);
+  --border-strong: rgba(196, 146, 82, 0.50);
+  --border-muted: rgba(154, 143, 111, 0.26);
+  --edge-subtle: rgba(87, 104, 62, 0.16);
+  --edge-highlight: rgba(255, 255, 255, 0.90);
+  --edge-active: rgba(180, 107, 128, 0.48);
+  --surface-shine: rgba(255, 255, 255, 0.66);
 
-  --text: #33402a;
-  --text-dim: #64714b;
-  --text-faint: #98a279;
+  --text: #34412b;
+  --text-dim: #5e6d49;
+  --text-faint: #8c9874;
   --text-invert: #faf7ef;
 
-  --primary: #6f854d;
-  --primary-light: #8ba566;
-  --primary-deep: #55683f;
-  --primary-soft: rgba(111, 133, 77, 0.08);
-  --primary-text: #55683f;
+  --primary: #6e8953;
+  --primary-light: #94aa70;
+  --primary-deep: #526b3f;
+  --primary-soft: rgba(104, 132, 76, 0.11);
+  --primary-text: #526b3f;
 
   --danger: #c96a4c;
   --danger-soft: rgba(201, 106, 76, 0.08);
   --ok: #5f9152;
   --ok-soft: rgba(95, 145, 82, 0.10);
 
-  --shadow-sm: 0 2px 10px rgba(100, 90, 55, 0.08);
-  --shadow-md: 0 12px 36px rgba(100, 90, 55, 0.14);
-  --shadow-lg: 0 24px 64px rgba(100, 90, 55, 0.20);
+  --shadow-sm: 0 2px 10px rgba(86, 79, 49, 0.10);
+  --shadow-md: 0 12px 36px rgba(86, 79, 49, 0.16);
+  --shadow-lg: 0 24px 64px rgba(86, 79, 49, 0.22);
 
-  /* 聊天区植物背景（亮色）：浅色藤蔓图 + 弱遮罩 */
-  --chat-bg-image: url('/bg/bg_light.jpg');
-  --chat-bg-overlay: linear-gradient(rgba(250, 247, 239, 0.85), rgba(250, 247, 239, 0.85));
+  /* 中部压低细节，给会话留出纸张般的阅读区。 */
+  --chat-bg-image: url('/bg/bg_daylit-greenhouse-v1.png');
+  --chat-bg-overlay:
+    radial-gradient(ellipse at 50% 42%, rgba(255, 253, 245, 0.40) 0%, rgba(255, 250, 238, 0.58) 66%, rgba(244, 236, 213, 0.40) 100%),
+    linear-gradient(135deg, rgba(255, 250, 237, 0.34), rgba(236, 243, 223, 0.26));
 
   color-scheme: light;
 }
@@ -160,7 +173,7 @@ body {
     radial-gradient(900px 520px at 80% -8%, var(--bg-grad-1), transparent 60%),
     radial-gradient(700px 460px at -6% 106%, var(--bg-grad-2), transparent 58%);
   color: var(--text);
-  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif;
   user-select: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -168,13 +181,13 @@ body {
 
 #app {
   height: 100vh;
-  /* 皮肤层次：极淡的斜向科技网格 + 顶部高光 */
+  /* 皮肤层次：星屑网格 + 月光高光 */
   background-image:
     repeating-linear-gradient(
       115deg,
       transparent 0px,
       transparent 48px,
-      rgba(169, 192, 127, 0.028) 49px,
+      rgba(222, 203, 239, 0.035) 49px,
       transparent 50px
     ),
     linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 12%);
@@ -183,7 +196,8 @@ body {
 /* ===== 通用玻璃 ===== */
 .glass {
   background: var(--bg-panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--edge-subtle);
+  box-shadow: inset 0 1px 0 var(--surface-shine);
 }
 
 /* ===== 滚动条 ===== */

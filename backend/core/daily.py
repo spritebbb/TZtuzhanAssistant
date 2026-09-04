@@ -34,6 +34,15 @@ FACT_PROMPT = """你是记忆提取员。根据下面的对话，提取两样东
 没有值得记的事实就输出 {"facts": [], "style": "..."}
 """
 
+DIARY_PROMPT = """你是菟菚，在当天聊天结束后写一小段只给自己看的私人日记。
+根据对话，只输出 JSON：{"content":"日记正文","mood":"心情标签"}
+要求：第一人称，90-220 个汉字；写出嘴上克制或毒舌、心里真实在意的轻微反差；最多自然提一件对话中的具体小事；不编造没发生的经历、论文或现实接触；不写系统、模型、提示词；不要把对话逐条总结。"""
+
+RESEARCH_PROMPT = """你是研究员菟菚，课题名《观察人类：以你为样本》。
+根据最近七篇私人日记写一份阶段研究记录，只输出 JSON：
+{"title":"简短标题","content":"正文"}
+正文 180-420 个汉字，包含一个观察、一个仍不确定的假设、一个接下来想留意的小问题。语气聪明、有一点腹黑，但尊重对方；只使用材料中确有依据的内容，不做心理诊断，不编造事实。"""
+
 
 def _parse_json(resp: str) -> dict:
     """解析 LLM 返回的 JSON，容忍常见噪声；截断时尽力补全。"""
@@ -132,10 +141,93 @@ async def run_daily_batch(user_id: str, day: date) -> None:
         db.set_nickname(user_id, clean_address(addr)[:12])
 
     await extract_facts(user_id, day)
+    await write_daily_diary(user_id, day, transcript)
+    await maybe_write_research_report(user_id)
     # 仅 LLM 判定成功才标记当日已完成；失败保留 done_key 空缺，下次可重试补判
     if llm_ok:
         _kv_set(user_id, done_key, "1")
         db.set_batch_date(user_id, day.isoformat())
+
+
+def _fallback_diary(day: date, transcript: str) -> tuple[str, str]:
+    """LLM 暂时不可用时也不让日记断档；只引用最后一句用户原话，拒绝编造。"""
+    last_user = ""
+    for line in reversed(transcript.splitlines()):
+        if line.startswith("user:"):
+            last_user = line.split(":", 1)[1].strip()[:80]
+            break
+    detail = f"他说了「{last_user}」" if last_user else "今天有过一段不长的聊天"
+    return (
+        f"{day.isoformat()}。{detail}。我嘴上大概还是那副不太好哄的样子，"
+        "不过愿意把这件小事记下来，本身就已经很说明问题了。其余的，等明天再观察。",
+        "平静",
+    )
+
+
+async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
+    """生成并幂等保存一篇日记；生成失败则写保守的事实型兜底，保证不断档。"""
+    from .userdb import get_diary, save_diary
+
+    existing = get_diary(user_id, day.isoformat())
+    if existing:
+        return existing
+    content = ""
+    mood = ""
+    try:
+        resp = await chat(
+            [
+                {"role": "system", "content": DIARY_PROMPT},
+                {"role": "user", "content": f"日期：{day.isoformat()}\n当天对话：\n{transcript}"},
+            ],
+            temperature=0.65,
+            max_tokens=520,
+        )
+        data = _parse_json(resp)
+        content = str(data.get("content") or "").strip()
+        mood = str(data.get("mood") or "").strip()
+    except Exception:
+        logger.warning("[日记] {} 的 {} 生成失败，使用事实型兜底", user_id, day.isoformat())
+    if not content:
+        content, mood = _fallback_diary(day, transcript)
+    diary_id = save_diary(user_id, day.isoformat(), content, mood)
+    return {
+        "id": diary_id,
+        "date": day.isoformat(),
+        "content": content[:1200],
+        "mood": mood[:24],
+    }
+
+
+async def maybe_write_research_report(user_id: str) -> dict | None:
+    """每累计七篇新日记产出一份阶段研究记录，失败留到下次继续尝试。"""
+    from .userdb import list_diaries, list_research_reports, save_research_report
+
+    diaries = list_diaries(user_id, limit=365)
+    reports = list_research_reports(user_id, limit=100)
+    if len(diaries) < (len(reports) + 1) * 7:
+        return None
+    batch = list(reversed(diaries[:7]))
+    period = f"{batch[0]['date']}~{batch[-1]['date']}"
+    transcript = "\n\n".join(f"{d['date']}（{d['mood']}）：{d['content']}" for d in batch)
+    try:
+        resp = await chat(
+            [
+                {"role": "system", "content": RESEARCH_PROMPT},
+                {"role": "user", "content": transcript},
+            ],
+            temperature=0.55,
+            max_tokens=800,
+        )
+        data = _parse_json(resp)
+        title = str(data.get("title") or "").strip()
+        content = str(data.get("content") or "").strip()
+        if not content:
+            return None
+        report_id = save_research_report(user_id, period, title, content)
+        return {"id": report_id, "period": period, "title": title, "content": content}
+    except Exception:
+        logger.warning("[研究课题] {} 阶段报告生成失败，保留到下次重试", user_id)
+        return None
 
 
 async def extract_facts(user_id: str, day: date | None = None) -> None:

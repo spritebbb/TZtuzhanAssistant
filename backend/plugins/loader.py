@@ -37,14 +37,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core.config import config
 from ..core.log import logger
 from ..tools.base import FunctionTool, ToolRegistry
 
 # 插件目录：项目根下 plugins/
 PLUGINS_DIR = Path(__file__).resolve().parents[2] / "plugins"
 
-# 禁用状态持久化文件：项目根下 data/plugins.json
-_STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "plugins.json"
+# 禁用状态持久化文件：默认 data/plugins.json；测试/部署可随数据目录隔离。
+_STATE_FILE = config.data_dir / "plugins.json"
 
 
 def plugin_name_ok(name: str) -> bool:

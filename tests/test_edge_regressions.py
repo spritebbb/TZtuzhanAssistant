@@ -15,6 +15,7 @@ pytest.ini 配置 python_functions = suite_*，本文件所有测试函数用 su
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -88,10 +89,35 @@ def suite_archive_search_caps_query_length():
     assert store._SEARCH_LIMIT == 50
 
 
+def suite_meta_search_status_matches_real_fallback(monkeypatch):
+    """没有博查 key 时仍可走 Bing/DDG，能力面板不能错误显示为关闭。"""
+    from backend.api import meta
+
+    monkeypatch.setattr(meta.config, "search_enabled", True)
+    monkeypatch.setattr(meta.config, "search_api_key", "")
+    assert meta._tool_status()["search"] is True
+    monkeypatch.setattr(meta.config, "search_enabled", False)
+    assert meta._tool_status()["search"] is False
+
+
+def suite_persona_state_assets_have_real_alpha():
+    """五档立绘必须是真透明 PNG，防止把棋盘格 RGB 误当成透明资产上线。"""
+    from PIL import Image
+
+    state_dir = Path(__file__).resolve().parents[1] / "assets" / "persona_states"
+    for state in ("low", "plain", "lazy", "happy", "excited"):
+        path = state_dir / f"{state}.png"
+        assert path.is_file(), f"缺少 {state} 立绘"
+        with Image.open(path) as image:
+            assert image.mode == "RGBA", f"{state} 不是 RGBA"
+            alpha_min, alpha_max = image.getchannel("A").getextrema()
+            assert alpha_min == 0 and alpha_max == 255, f"{state} alpha 范围异常"
+
+
 # ---- 3. 主动消息幂等 ----
 
 def suite_proactive_append_is_idempotent(tmp_path, monkeypatch):
-    """最后一条 bot 消息 content 相同则跳过落库，防重复气泡。"""
+    """最后一条 bot 消息 content+image 相同才跳过，避免吞掉不同配图。"""
     from backend.session import store
 
     # 把会话 DB 指到临时目录，避免污染真实数据
@@ -107,8 +133,37 @@ def suite_proactive_append_is_idempotent(tmp_path, monkeypatch):
     conn.close()
 
     text = "菟菚主动说的同一句话"
-    assert store._append_proactive_sync(sid, text) is True, "首次应落库"
-    assert store._append_proactive_sync(sid, text) is False, "同内容再次追加应被幂等跳过"
+    image = "/api/images/selfie.png"
+    assert store._append_proactive_sync(sid, text, image) is True, "首次应落库"
+    assert store._append_proactive_sync(sid, text, image) is False, "同内容同图片应被幂等跳过"
+    assert store._append_proactive_sync(sid, text, "/api/images/doodle.png") is True, (
+        "相同文字但图片不同不能误判为重复"
+    )
+
+
+def suite_message_explanation_round_trips(tmp_path, monkeypatch):
+    """解释快照应随当前会话和归档持久化，旧消息则安全返回 null。"""
+    from backend.session import store
+
+    monkeypatch.setattr(store, "_DB", tmp_path / "explanation.db")
+    store._init()
+    snapshot = {
+        "version": 1,
+        "state": {"affection": 50, "stage": "亲密", "mood": 72, "mood_label": "开心", "energy": 64},
+        "behavior": [{"label": "关系分寸", "text": "可以主动一些"}],
+        "memories": [{"kind": "长期事实", "text": "用户喜欢雨天"}],
+        "tools": {"search": False, "media": "none"},
+    }
+    assert store._append_sync(store.CURRENT_SESSION_ID, [
+        {"role": "user", "content": "你好", "ts": 1},
+        {"role": "bot", "content": "行", "explanation": snapshot, "ts": 2},
+    ])
+    messages = store._get_messages_sync(store.CURRENT_SESSION_ID)
+    assert messages[0]["explanation"] is None
+    assert messages[1]["explanation"] == snapshot
+    archived = store._archive_current_sync()
+    detail = store._get_archive_sync(archived["id"])
+    assert detail["messages"][1]["explanation"] == snapshot
 
 
 # ---- 4. 归档搜索路由顺序 ----

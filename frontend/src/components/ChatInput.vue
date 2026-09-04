@@ -67,7 +67,7 @@ function useShortcut(s: Shortcut) {
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
-      <textarea v-model="input" rows="1" placeholder="和菟菚说点什么…（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="emit('send')"></textarea>
+      <textarea v-model="input" :disabled="busy" rows="1" placeholder="和菟菚说点什么…（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="emit('send')"></textarea>
       <button v-if="streaming" class="btn stop" @click="emit('stop')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
@@ -90,22 +90,26 @@ function useShortcut(s: Shortcut) {
 
 <style scoped>
 .inputbar {
-  padding: 10px 22px 12px;
-  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  padding: 12px 22px 14px;
+  background: linear-gradient(to top, rgba(21, 21, 34, 0.98) 62%, transparent);
   flex-shrink: 0;
   position: relative;
+}
+.theme-light .inputbar {
+  background: linear-gradient(to top, rgba(248, 243, 231, 0.96) 62%, rgba(248, 243, 231, 0.12));
 }
 .input-box {
   display: flex;
   align-items: flex-end;
   gap: 6px;
   background: var(--bg-input);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  padding: 8px 10px;
+  border: 1px solid var(--edge-highlight);
+  border-radius: 20px;
+  padding: 9px 11px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    var(--shadow-md);
+    0 14px 38px rgba(10, 8, 20, 0.26),
+    inset 0 1px 0 var(--surface-shine);
   backdrop-filter: blur(18px) saturate(1.2);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -116,8 +120,8 @@ function useShortcut(s: Shortcut) {
     var(--shadow-md);
 }
 .input-box:focus-within {
-  border-color: var(--primary);
-  box-shadow: var(--glow), var(--shadow-md);
+  border-color: var(--edge-active);
+  box-shadow: var(--glow), var(--shadow-md), inset 0 1px 0 var(--surface-shine);
 }
 .icon-btn {
   display: flex;
@@ -135,6 +139,7 @@ function useShortcut(s: Shortcut) {
 }
 .icon-btn:hover {
   background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--edge-subtle);
   color: var(--primary-text);
 }
 textarea {
@@ -163,12 +168,12 @@ textarea::placeholder { color: var(--text-faint); }
   transition: all 0.18s ease;
 }
 .send {
-  background: var(--bg-user);
+  background: linear-gradient(135deg, #be7f9e, #82649f);
   color: #fff;
   padding: 0 20px;
   height: 38px;
   font-size: 0.92rem;
-  box-shadow: 0 3px 12px rgba(124, 154, 85, 0.35);
+  box-shadow: 0 5px 16px rgba(170, 100, 145, 0.36);
 }
 .send:hover { background: var(--bg-user-deep); transform: translateY(-1px); }
 .send:active { transform: translateY(0); }
