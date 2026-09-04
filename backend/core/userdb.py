@@ -8,6 +8,8 @@
 - user_meta     事实提炼游标等元数据
 - affection_log 好感度变动流水
 - mood_log      心情绝对值流水（养成仪表盘趋势）
+- activities    共同活动进度（D3，首期为共读）
+- activity_notes 共同活动的分段书签/笔记
 """
 import re
 import sqlite3
@@ -205,6 +207,32 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_kb_docs_user ON kb_documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks(user_id, doc_id);
+-- D3 共同活动：通用活动壳，首期落地「共读」。
+CREATE TABLE IF NOT EXISTS activities (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'reading',
+    document_id  INTEGER NOT NULL,
+    title        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'active',  -- active / paused / completed
+    position     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS activity_notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    position    INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    UNIQUE(activity_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_activities_user_status
+    ON activities(user_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_activity_notes_activity
+    ON activity_notes(user_id, activity_id, position);
 -- C4 好感度玩法闭环：解锁时刻（阈值跨越/彩蛋）队列与收集
 CREATE TABLE IF NOT EXISTS unlocks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,7 +446,7 @@ class UserDB:
         for table in (
             "messages", "long_memory", "facts", "affection_log", "important_dates",
             "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
-            "promises", "usage_log", "kb_documents", "kb_chunks",
+            "promises", "usage_log", "kb_documents", "kb_chunks", "activities", "activity_notes",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -1080,7 +1108,8 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks", "unlocks", "mood_log",
+                "tasks", "promises", "usage_log", "activity_notes", "activities",
+                "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()

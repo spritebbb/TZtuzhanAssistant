@@ -10,6 +10,7 @@ import KnowledgePanel from './components/KnowledgePanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
+import ActivityPanel from './components/ActivityPanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
@@ -20,10 +21,13 @@ const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
 const usageOpen = ref(false)
 const dashboardOpen = ref(false)
+const activityOpen = ref(false)
 const sidebarOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
 const chatReloadKey = ref(0)
+const chatDraft = ref('')
+const chatDraftKey = ref(0)
 
 // 生成中状态（由 ChatView 上报）：流式生成中禁用归档，避免拆对话
 const generating = ref(false)
@@ -137,6 +141,7 @@ function onKeydown(e: KeyboardEvent) {
     memoryOpen.value = false
     usageOpen.value = false
     dashboardOpen.value = false
+    activityOpen.value = false
     knowledgeOpen.value = false
     sidebarOpen.value = false
   }
@@ -147,6 +152,17 @@ function closeSettings() { settingsOpen.value = false }
 function onArchived() {
   currentId.value = CURRENT_SESSION_ID
   sessionListKey.value += 1
+}
+
+function discussActivity(draft: string) {
+  activityOpen.value = false
+  chatDraft.value = draft
+  chatDraftKey.value += 1
+}
+
+function openBookshelfFromActivity() {
+  activityOpen.value = false
+  knowledgeOpen.value = true
 }
 
 onMounted(async () => {
@@ -196,6 +212,11 @@ onUnmounted(() => {
           陪伴中
         </div>
         <div class="header-right">
+          <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>
+            </svg>
+          </button>
           <button class="icon-btn" title="成长总览" @click="dashboardOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m4 8 6-5 6 8 5-5"/>
@@ -268,7 +289,7 @@ onUnmounted(() => {
         <span v-if="affection.next" class="aff-next" :title="'距「' + affection.next + '」还需 ' + (affection.next_at - affection.value) + ' 点'">→ {{ affection.next }} {{ affection.next_at - affection.value }}</span>
         <span v-else class="aff-next max">♥ 已至圆满</span>
       </div>
-      <ChatView :session-id="currentId" :reload-key="chatReloadKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
+      <ChatView :session-id="currentId" :reload-key="chatReloadKey" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
 
     <!-- 面板 -->
@@ -279,6 +300,7 @@ onUnmounted(() => {
     <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
     <UsagePanel :show="usageOpen" @close="usageOpen = false" />
     <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
+    <ActivityPanel :show="activityOpen" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">

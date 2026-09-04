@@ -12,7 +12,12 @@ import type { PendingRequest } from './ConfirmPanel.vue'
 import { autoPlayTts, stopTts } from '../utils/tts'
 import { portraitBondFor, portraitMoodFor, type PortraitBond, type PortraitMood } from '../utils/portrait'
 
-const props = defineProps<{ sessionId: string | null; reloadKey?: number }>()
+const props = defineProps<{
+  sessionId: string | null
+  reloadKey?: number
+  externalDraft?: string
+  externalDraftKey?: number
+}>()
 const emit = defineEmits<{
   (e: 'open-settings'): void
   (e: 'archived'): void
@@ -81,6 +86,13 @@ const chatEl = ref<HTMLDivElement | null>(null)
 const currentStream = ref<string>('')
 // 工具循环进度：后端推送「正在思考/调用 XX 工具」，在流式气泡上实时展示（避免空窗）
 const toolStatus = ref('')
+
+// 共同活动只把讨论话题带回输入框，由用户自己确认发送。
+watch(() => props.externalDraftKey, () => {
+  const draft = props.externalDraft?.trim()
+  if (!draft) return
+  input.value = input.value.trim() ? `${input.value.trim()}\n${draft}` : draft
+})
 
 function ttsKey(message: Message, index: number): string {
   return `${message.ts}:${index}`
