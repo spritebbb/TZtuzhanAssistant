@@ -51,6 +51,13 @@ PROMISE_PROMPT = """你是约定记录员。根据对话，找出「双方明确
 - follow_up 填最适合自然跟进的日期（约定当天或次日），判断不了就留空；
 - 没有约定就输出 {"promises": []}。"""
 
+TERMS_PROMPT = """你是语言观察员。根据对话，找出「两人之间反复使用的口头禅、黑话、内部梗」，只输出 JSON：
+{"terms": [{"term": "词或短句（≤10字）", "category": "catchphrase 或 slang", "meaning": "含义（黑话/梗才需要，口头禅留空）"}]}
+规则：
+- 只记双方真实说过、且像是会再用的（口头禅、固定叫法、两人之间才懂的梗）；
+- 一次性的话题词、普通网络流行语、礼貌用语不算；
+- 最多 3 条；没有就输出 {"terms": []}。"""
+
 
 def _parse_json(resp: str) -> dict:
     """解析 LLM 返回的 JSON，容忍常见噪声；截断时尽力补全。"""
@@ -150,6 +157,7 @@ async def run_daily_batch(user_id: str, day: date) -> None:
 
     await extract_facts(user_id, day)
     await extract_promises(user_id, day, transcript)
+    await extract_terms(user_id, day, transcript)
     await write_daily_diary(user_id, day, transcript)
     await maybe_write_research_report(user_id)
     # 仅 LLM 判定成功才标记当日已完成；失败保留 done_key 空缺，下次可重试补判
@@ -270,6 +278,48 @@ async def extract_promises(user_id: str, day: date, transcript: str) -> int:
         if not content:
             continue
         if save_promise(user_id, content, follow_up, source=transcript[:200]) is not None:
+            added += 1
+    return added
+
+
+async def extract_terms(user_id: str, day: date, transcript: str) -> int:
+    """从当天对话提炼「共同语言」（口头禅/黑话/内部梗）进 user_terms（D1）。
+
+    user_terms.add_term 自带去重与次数累加——同一梗被反复提到才长大，
+    这是「演化幅度控制」的第一道闸（一次性话题进不来）。
+    """
+    if not transcript.strip():
+        return 0
+    try:
+        resp = await chat(
+            [
+                {"role": "system", "content": TERMS_PROMPT},
+                {"role": "user", "content": f"对话记录：\n{transcript}"},
+            ],
+            temperature=0.2,
+            max_tokens=240,
+        )
+        data = _parse_json(resp)
+    except Exception:
+        logger.warning("[共同语言] {} 的口头禅提炼失败，次日重试", user_id)
+        return 0
+    items = data.get("terms") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return 0
+    added = 0
+    for item in items:
+        if added >= 3:  # 上限按「有效新增」计，空项不占额度
+            break
+        if not isinstance(item, dict):
+            continue
+        term = str(item.get("term") or "").strip()
+        if not term:
+            continue
+        category = str(item.get("category") or "catchphrase").strip()
+        if category not in ("catchphrase", "slang"):
+            category = "catchphrase"
+        meaning = str(item.get("meaning") or "").strip()
+        if db.add_term(user_id, term, category, meaning):
             added += 1
     return added
 
