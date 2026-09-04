@@ -843,6 +843,27 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             }
         )
 
+    # 4.3) 约定跟进（C6）：到点的约定，聊得合适就自然问起——别像催债
+    try:
+        from .userdb import get_due_promises
+
+        due_promises = get_due_promises(user_id, _date_cls.today())
+    except Exception:
+        logger.exception("[pipeline] 约定查询失败")
+        due_promises = []
+    if due_promises:
+        promise_lines = "；".join(p["content"] for p in due_promises[:3])
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"你一直记着这些约定，现在到了该问问的时候：{promise_lines}。"
+                    "聊天过程中找自然的时机提起（像朋友随口问起，不像催债、不像提醒事项）；"
+                    "如果当下话题完全搭不上，就先不提，别生硬跳转。"
+                ),
+            }
+        )
+
     # 4.1) 记忆相关：压缩摘要 + 记忆原文 + 长期事实，合并成一个「记得的过去」块，
     # 减少堆砌：把三条独立 system 消息合成一段，LLM 更容易当背景吸收而不是逐条服从。
     memory_lines: list[str] = []

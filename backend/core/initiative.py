@@ -266,8 +266,9 @@ async def _tick_once() -> int:
             row = db.conn.execute("SELECT user_id FROM users LIMIT 1").fetchone()
         if row:
             await maybe_suggest_archive(row["user_id"])
+            await maybe_follow_up_promise(row["user_id"])
     except Exception as e:
-        logger.warning("[主动性] 归档建议检查失败: {}", e)
+        logger.warning("[主动性] 归档建议/约定跟进检查失败: {}", e)
 
     users = _eligible_users()
     if not users:
@@ -610,6 +611,88 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
         return None
     _mark_archive_suggested(user_id)
     return text
+
+
+# ---- 约定跟进（C6）：到点的约定，她主动问起 ----
+_PROMISE_FOLLOWUP_KEY = "initiative:promise_followup"  # kv 去重键（每日最多一次）
+_PROMISE_IDLE_MIN = 120  # 距最后一条真实聊天 ≥ 该分钟数才跟进（别打断正聊的人）
+
+
+def _promise_followed_today(user_id: str) -> bool:
+    today = datetime.date.today().isoformat()
+    return kv_get(user_id, f"{_PROMISE_FOLLOWUP_KEY}:{today}") is not None
+
+
+def _mark_promise_followed(user_id: str) -> None:
+    today = datetime.date.today().isoformat()
+    kv_set(user_id, f"{_PROMISE_FOLLOWUP_KEY}:{today}", "1")
+
+
+def _build_promise_followup_prompt(user_id: str, promise: dict) -> list[dict] | None:
+    """拼一条「跟进约定」的菟菚风格消息。"""
+    user = db.get_user(user_id)
+    if not user:
+        return None
+    affection_val = user["affection"] or 0
+    sys_prompt = build_system_prompt(
+        stage=stage_of(affection_val),
+        address=user["nickname_pref"] or "",
+        lover_confirm=bool(user["lover_confirm"]),
+        first_chat=False,
+        affection=affection_val,
+        user_id=user_id,
+    )
+    return [
+        {"role": "system", "content": sys_prompt},
+        {
+            "role": "user",
+            "content": (
+                f"你一直记着一件事：{promise['content']}。"
+                "现在到了该问问的时候了。主动开口自然地提起这件事——"
+                "像朋友随口问起，不像催债、不像提醒事项、别一板一眼；"
+                "一句到两句就够，符合你的性格（干脆、可以带点腹黑毒舌），别加括号动作。"
+            ),
+        },
+    ]
+
+
+async def maybe_follow_up_promise(user_id: str) -> str | None:
+    """到点的约定，菟菚主动问起（每日最多一次，只在用户空闲时）。
+
+    返回投递的消息文本（None = 无需跟进或投递失败）。
+    「在乎」从话术变成行为：她记得你说过的事，并且真的会来问。
+    """
+    last = _last_chat_ts(user_id)
+    if last is not None and time.time() - last < _PROMISE_IDLE_MIN * 60:
+        return None
+    if _promise_followed_today(user_id):
+        return None
+    from .userdb import get_due_promises, mark_promise_done
+
+    due = get_due_promises(user_id, datetime.date.today())
+    if not due:
+        return None
+    text = await _generate_promise_followup(user_id, due[0])
+    if not text:
+        return None
+    if not await enqueue_proactive(user_id, text):
+        return None
+    mark_promise_done(due[0]["id"])
+    _mark_promise_followed(user_id)
+    logger.info("[主动性] 已跟进约定：{}", due[0]["content"][:40])
+    return text
+
+
+async def _generate_promise_followup(user_id: str, promise: dict) -> str | None:
+    msgs = _build_promise_followup_prompt(user_id, promise)
+    if not msgs:
+        return None
+    try:
+        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        return text.strip()[:200] or None
+    except Exception as e:
+        logger.warning("[主动性] 约定跟进生成失败: {}", e)
+        return None
 
 
 # SSE 长连接：服务端推送的「心跳 + 主动消息」事件流。

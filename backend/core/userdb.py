@@ -129,6 +129,17 @@ CREATE TABLE IF NOT EXISTS research_reports (
     ts      TEXT NOT NULL,
     UNIQUE(user_id, period)
 );
+-- 约定/承诺（C6 约定与跟进）：双方明确许下的事 + 该跟进的日子
+CREATE TABLE IF NOT EXISTS promises (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    content    TEXT NOT NULL,               -- 约定内容（一句短话）
+    follow_up  TEXT NOT NULL DEFAULT '',    -- 该跟进的日子 YYYY-MM-DD，空=未明确时间
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending / done / cancelled
+    source     TEXT NOT NULL DEFAULT '',    -- 来源对话片段（溯源）
+    created_at TEXT NOT NULL,
+    done_at    TEXT
+);
 -- 结构化事实记忆（五元组：主体-谓词-客体-类型），方向 C
 CREATE TABLE IF NOT EXISTS triples (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,6 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_long_memory_user ON long_memory(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_dates_user ON important_dates(user_id);
+CREATE INDEX IF NOT EXISTS idx_promises_user ON promises(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id);
 CREATE INDEX IF NOT EXISTS idx_profile_user ON user_profile(user_id);
 CREATE INDEX IF NOT EXISTS idx_terms_user ON user_terms(user_id);
@@ -957,7 +969,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks",
+                "tasks", "promises",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
@@ -1034,6 +1046,76 @@ def get_all_important_dates(user_id: str) -> list[dict]:
             "SELECT * FROM important_dates WHERE user_id = ? ORDER BY date", (user_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---- promises（约定与跟进：双方许下的事，到点菟菚主动问起）----
+
+
+def save_promise(user_id: str, content: str, follow_up: str = "", source: str = "") -> int | None:
+    """保存一条约定。同用户存在相同内容的 pending 约定时不重复插入（返回 None）。"""
+    content = content.strip()[:100]
+    if not content:
+        return None
+    follow_up = follow_up.strip()[:10]
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT id, follow_up FROM promises WHERE user_id = ? AND content = ? AND status = 'pending'",
+            (user_id, content),
+        ).fetchone()
+        if row:
+            # 已存在：补全此前缺失的跟进日期
+            if not row["follow_up"] and follow_up:
+                db.conn.execute(
+                    "UPDATE promises SET follow_up = ? WHERE id = ?", (follow_up, row["id"])
+                )
+                db.conn.commit()
+            return None
+        cur = db.conn.execute(
+            "INSERT INTO promises (user_id, content, follow_up, source, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, content, follow_up, source[:200], datetime.now().isoformat(timespec="seconds")),
+        )
+        db.conn.commit()
+        return int(cur.lastrowid)
+
+
+def get_due_promises(user_id: str, day: date) -> list[dict]:
+    """到点该跟进的约定：pending 且 follow_up 已到期（≤ day）。"""
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM promises WHERE user_id = ? AND status = 'pending' "
+            "AND follow_up != '' AND follow_up <= ? ORDER BY follow_up",
+            (user_id, day.isoformat()),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_open_promises(user_id: str, limit: int = 5) -> list[dict]:
+    """所有未完成的约定（不限日期，供对话内自然提起）。"""
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM promises WHERE user_id = ? AND status = 'pending' "
+            "ORDER BY CASE WHEN follow_up = '' THEN 1 ELSE 0 END, follow_up LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_promise_done(promise_id: int) -> None:
+    with db._lock:
+        db.conn.execute(
+            "UPDATE promises SET status = 'done', done_at = ? WHERE id = ?",
+            (datetime.now().isoformat(timespec="seconds"), promise_id),
+        )
+        db.conn.commit()
+
+
+def cancel_promise(promise_id: int) -> None:
+    with db._lock:
+        db.conn.execute(
+            "UPDATE promises SET status = 'cancelled', done_at = ? WHERE id = ?",
+            (datetime.now().isoformat(timespec="seconds"), promise_id),
+        )
+        db.conn.commit()
 
 
 def delete_important_date(date_id: int, user_id: str | None = None) -> bool:
