@@ -4,7 +4,7 @@
 仅用于用户明确选择「重新开始」时调用。范围：
 - userdb（bot.db）：好感度/昵称/恋人确认、messages、long_memory、facts、triples、
   important_dates、stickers、user_profile、user_terms、user_style_map、diary、research_reports、
-  affection_log、tasks、user_meta、kv_store（含 greeting 的 web_last_seen、
+  affection_log、mood_log、tasks、user_meta、kv_store（含 greeting 的 web_last_seen、
   initiative 的 daily 标记等）→ 全部清空。
 - 向量库（memory v2）：按 user 前缀的语义向量 → 全清。
 - 当前会话（sessions.db 'current'）：气泡清空、标题复位为「新会话」。
@@ -24,7 +24,7 @@ from .userdb import db
 
 # userdb 中需要清空的全部业务表（与 userdb.reset() 降级分支保持一致）
 _TABLES = (
-    "affection_log", "long_memory", "facts", "user_meta", "messages",
+    "affection_log", "mood_log", "long_memory", "facts", "user_meta", "messages",
     "users", "kv_store", "important_dates", "stickers",
     "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
     "tasks", "promises", "usage_log", "kb_documents", "kb_chunks", "unlocks",
