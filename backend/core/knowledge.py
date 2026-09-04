@@ -224,6 +224,19 @@ def delete_document(user_id: str, doc_id: int) -> bool:
     if doc is None:
         return False
     with db._lock:
+        activity_rows = db.conn.execute(
+            "SELECT id FROM activities WHERE user_id = ? AND document_id = ?",
+            (user_id, doc_id),
+        ).fetchall()
+        for activity in activity_rows:
+            db.conn.execute(
+                "DELETE FROM activity_notes WHERE user_id = ? AND activity_id = ?",
+                (user_id, activity["id"]),
+            )
+        db.conn.execute(
+            "DELETE FROM activities WHERE user_id = ? AND document_id = ?",
+            (user_id, doc_id),
+        )
         rows = db.conn.execute(
             "SELECT id FROM kb_chunks WHERE user_id = ? AND doc_id = ?", (user_id, doc_id)
         ).fetchall()

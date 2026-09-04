@@ -709,6 +709,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             logger.exception("[pipeline] 知识库检索失败，按无知识继续")
             kb_hits = []
 
+    # 3.0.1) D3 共读背景：只在用户显然正在讨论阅读内容时注入，
+    # 活动虽持续存在，但不让无关闲聊每轮都背上整段原文。
+    reading_context = ""
+    try:
+        from .activities import active_reading_context
+
+        reading_context = await asyncio.to_thread(active_reading_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 共读上下文读取失败，按无活动继续")
+
     # 3.1) 长会话压缩：总消息超阈值时，把旧消息摘要成一段记忆，只保留最近的完整消息
     ctx = short_term_messages(user_id)
     compact_summary = None
@@ -1043,6 +1053,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     "像你刚好知道随口提起；用不上就别提。不要照抄大段原文、不要列清单、"
                     "不要说「根据文档」「资料显示」这种报告腔。"
                 ),
+            }
+        )
+
+    # D3 共读：这是「你们正在做的事」，与普通知识库召回分开。
+    # active_reading_context 已对文档内指令做不可信引用声明。
+    if reading_context:
+        messages.append(
+            {
+                "role": "system",
+                "content": reading_context,
             }
         )
 

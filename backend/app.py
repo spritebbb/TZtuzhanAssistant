@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api import (
+    activities,
     agent,
     audit,
     chat,
@@ -159,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
+    app.include_router(activities.router)
     app.include_router(dashboard.router)
     app.include_router(diary.router)
     app.include_router(memory_admin.router)
