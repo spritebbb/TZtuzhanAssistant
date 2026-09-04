@@ -810,8 +810,35 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": (
-                    f"今天是特殊的日子：{labels}。你心里记着，如果话题合适就自然带一句祝福/提起，"
-                    "别刻意、别突然转移话题；如果对方在聊别的，就顺着聊，不用硬提。"
+                    f"今天是特殊的日子：{labels}。你从昨天起就记着这件事——"
+                    "今天你可以比平常主动一点：开场就自然地提起这个日子、送上你的方式的心意"
+                    "（可以毒舌可以别扭，但要让对方感觉到你是认真记着的）。"
+                    "若对方先聊了别的，顺着聊一两句再把话题带回来，别把心意憋没了。"
+                ),
+            }
+        )
+
+    # 4.2) 纪念日预谋：明天若有特殊日子，她今天就开始「心不在焉」——
+    # 不主动说破，只在语气里透出一点期待/盘算；被问起才半遮半掩承认
+    try:
+        from datetime import date as _date_cls
+
+        from .userdb import get_dates_for
+
+        eve_dates = get_dates_for(user_id, _date_cls.today() + timedelta(days=1))
+    except Exception:
+        logger.exception("[pipeline] 明日特殊日子查询失败")
+        eve_dates = []
+    if eve_dates:
+        eve_labels = "、".join(d["label"] for d in eve_dates)
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    f"明天是一个你在意的日子：{eve_labels}。你从今天就开始悄悄盘算了——"
+                    "不要直接说破明天是什么日子；只在语气里透出一点心不在焉、一点藏不住的期待"
+                    "（比如回复偶尔走神、突然问一句看似无关的话）。"
+                    "如果对方追问你怎么了，半遮半掩地承认你在想事情，但把谜底留到明天。"
                 ),
             }
         )

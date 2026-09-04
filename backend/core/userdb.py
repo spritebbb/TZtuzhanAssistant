@@ -1007,18 +1007,22 @@ def save_important_date(user_id: str, date_str: str, label: str, kind: str = "ot
 
 
 def get_today_important_dates(user_id: str) -> list[dict]:
-    """查询今天有哪些特殊日子（MM-DD 匹配）。
+    """查询今天有哪些特殊日子（MM-DD 匹配）。见 get_dates_for。"""
+    return get_dates_for(user_id, date.today())
+
+
+def get_dates_for(user_id: str, day: date) -> list[dict]:
+    """查询指定日期有哪些特殊日子（MM-DD 匹配）。
 
     - birthday / anniversary：每年都过（忽略 year，带出生年份也照常触发）
-    - other（一次性纪念日）：只在 year 匹配当年（或未标年份）时触发
+    - other（一次性纪念日）：只在 year 匹配该日年份（或未标年份）时触发
     """
-    today = date.today().strftime("%m-%d")
-    cur_year = date.today().year
+    md = day.strftime("%m-%d")
     with db._lock:
         rows = db.conn.execute(
             "SELECT * FROM important_dates WHERE user_id = ? AND date = ? "
             "AND (kind IN ('birthday', 'anniversary') OR year IS NULL OR year = ?) ORDER BY kind",
-            (user_id, today, cur_year),
+            (user_id, md, day.year),
         ).fetchall()
     return [dict(r) for r in rows]
 
