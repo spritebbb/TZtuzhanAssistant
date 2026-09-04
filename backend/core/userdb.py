@@ -1118,6 +1118,43 @@ def cancel_promise(promise_id: int) -> None:
         db.conn.commit()
 
 
+# ---- facts 删改（C7 记忆纠偏：她记错的事可以真改）----
+
+
+def list_facts(user_id: str, limit: int = 200) -> list[dict]:
+    """列出用户的事实记忆（新→旧），供记忆管理页/纠偏仲裁。"""
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, content, ts FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_fact(user_id: str, fact_id: int) -> bool:
+    """删除一条事实。返回是否真的删到（存在且属于该用户）。"""
+    with db._lock:
+        cur = db.conn.execute(
+            "DELETE FROM facts WHERE id = ? AND user_id = ?", (fact_id, user_id)
+        )
+        db.conn.commit()
+        return cur.rowcount > 0
+
+
+def update_fact(user_id: str, fact_id: int, content: str) -> bool:
+    """改写一条事实的内容。返回是否真的改到。"""
+    content = content.strip()[:100]
+    if not content:
+        return False
+    with db._lock:
+        cur = db.conn.execute(
+            "UPDATE facts SET content = ? WHERE id = ? AND user_id = ?",
+            (content, fact_id, user_id),
+        )
+        db.conn.commit()
+        return cur.rowcount > 0
+
+
 def delete_important_date(date_id: int, user_id: str | None = None) -> bool:
     """删除一条特殊日子记录。若指定 user_id，则只有该用户的日子才被删（跨用户隔离）。"""
     with db._lock:

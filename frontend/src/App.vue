@@ -6,12 +6,14 @@ import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
+import MemoryPanel from './components/MemoryPanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
 const diaryOpen = ref(false)
+const memoryOpen = ref(false)
 const sidebarOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
@@ -126,6 +128,7 @@ function onKeydown(e: KeyboardEvent) {
     settingsOpen.value = false
     agentOpen.value = false
     diaryOpen.value = false
+    memoryOpen.value = false
     sidebarOpen.value = false
   }
 }
@@ -189,6 +192,11 @@ onUnmounted(() => {
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
           </button>
+          <button class="icon-btn" title="她记住的事（可改写/删除）" @click="memoryOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3a7 7 0 0 0-7 7c0 2.4 1.2 4.5 3 5.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3c1.8-1.2 3-3.3 3-5.7a7 7 0 0 0-7-7z"/>
+            </svg>
+          </button>
           <button class="icon-btn" title="切换主题（Ctrl+Shift+T）" @click="toggleTheme">
             <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="5"/>
@@ -243,6 +251,7 @@ onUnmounted(() => {
     <SettingsPanel :show="settingsOpen" @close="closeSettings" />
     <AgentPanel :show="agentOpen" @close="agentOpen = false" />
     <DiaryPanel :show="diaryOpen" @close="diaryOpen = false" />
+    <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
