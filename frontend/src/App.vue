@@ -7,6 +7,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
+import UsagePanel from './components/UsagePanel.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 
@@ -14,6 +15,7 @@ const settingsOpen = ref(false)
 const agentOpen = ref(false)
 const diaryOpen = ref(false)
 const memoryOpen = ref(false)
+const usageOpen = ref(false)
 const sidebarOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
@@ -129,6 +131,7 @@ function onKeydown(e: KeyboardEvent) {
     agentOpen.value = false
     diaryOpen.value = false
     memoryOpen.value = false
+    usageOpen.value = false
     sidebarOpen.value = false
   }
 }
@@ -197,6 +200,11 @@ onUnmounted(() => {
               <path d="M12 3a7 7 0 0 0-7 7c0 2.4 1.2 4.5 3 5.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3c1.8-1.2 3-3.3 3-5.7a7 7 0 0 0-7-7z"/>
             </svg>
           </button>
+          <button class="icon-btn" title="养她的账本（token 用量）" @click="usageOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3v18h18"/><path d="M7 15l4-4 4 3 5-6"/>
+            </svg>
+          </button>
           <button class="icon-btn" title="切换主题（Ctrl+Shift+T）" @click="toggleTheme">
             <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="5"/>
@@ -252,6 +260,7 @@ onUnmounted(() => {
     <AgentPanel :show="agentOpen" @close="agentOpen = false" />
     <DiaryPanel :show="diaryOpen" @close="diaryOpen = false" />
     <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
+    <UsagePanel :show="usageOpen" @close="usageOpen = false" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">

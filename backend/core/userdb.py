@@ -12,7 +12,7 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from .config import config
 
@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS promises (
     created_at TEXT NOT NULL,
     done_at    TEXT
 );
+-- token 用量（D5 成本面板）：每次 LLM 调用一行
+CREATE TABLE IF NOT EXISTS usage_log (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           TEXT NOT NULL,
+    channel           TEXT NOT NULL,         -- reply / chat / perception / tool
+    model             TEXT NOT NULL DEFAULT '',
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    estimated         INTEGER NOT NULL DEFAULT 0,  -- 1=本地估算（端点未返回 usage）
+    ts                TEXT NOT NULL
+);
 -- 结构化事实记忆（五元组：主体-谓词-客体-类型），方向 C
 CREATE TABLE IF NOT EXISTS triples (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +184,7 @@ CREATE INDEX IF NOT EXISTS idx_long_memory_user ON long_memory(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_dates_user ON important_dates(user_id);
 CREATE INDEX IF NOT EXISTS idx_promises_user ON promises(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, ts);
 CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id);
 CREATE INDEX IF NOT EXISTS idx_profile_user ON user_profile(user_id);
 CREATE INDEX IF NOT EXISTS idx_terms_user ON user_terms(user_id);
@@ -969,7 +981,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks", "promises",
+                "tasks", "promises", "usage_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
@@ -1153,6 +1165,51 @@ def update_fact(user_id: str, fact_id: int, content: str) -> bool:
         )
         db.conn.commit()
         return cur.rowcount > 0
+
+
+# ---- usage_log（D5 成本面板：token 用量记录与聚合）----
+
+
+def log_usage(user_id: str, channel: str, model: str,
+              prompt_tokens: int, completion_tokens: int, estimated: bool = False) -> None:
+    """记录一次 LLM 调用的 token 用量（单条插入，调用方已兜底异常）。"""
+    with db._lock:
+        db.conn.execute(
+            "INSERT INTO usage_log (user_id, channel, model, prompt_tokens, completion_tokens, estimated, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, channel, model, prompt_tokens, completion_tokens,
+             1 if estimated else 0, datetime.now().isoformat(timespec="seconds")),
+        )
+        db.conn.commit()
+
+
+def usage_summary(user_id: str, days: int = 7) -> dict:
+    """聚合用量：今天 / 近 N 天总量 + 近 N 天按 channel 分组。"""
+    today = date.today().isoformat()
+    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    with db._lock:
+        def _sum(where: str, args: tuple) -> dict:
+            row = db.conn.execute(
+                f"SELECT COALESCE(SUM(prompt_tokens),0) p, COALESCE(SUM(completion_tokens),0) c, "
+                f"COUNT(*) n, COALESCE(SUM(estimated),0) e FROM usage_log WHERE user_id = ? AND {where}",
+                (user_id, *args),
+            ).fetchone()
+            return {"prompt": row["p"], "completion": row["c"], "calls": row["n"], "estimated": row["e"]}
+
+        by_channel_rows = db.conn.execute(
+            "SELECT channel, COALESCE(SUM(prompt_tokens),0) p, COALESCE(SUM(completion_tokens),0) c, "
+            "COUNT(*) n FROM usage_log WHERE user_id = ? AND ts >= ? GROUP BY channel ORDER BY p + c DESC",
+            (user_id, since),
+        ).fetchall()
+    return {
+        "today": _sum("ts >= ?", (today,)),
+        "period": _sum("ts >= ?", (since,)),
+        "days": days,
+        "by_channel": [
+            {"channel": r["channel"], "prompt": r["p"], "completion": r["c"], "calls": r["n"]}
+            for r in by_channel_rows
+        ],
+    }
 
 
 def delete_important_date(date_id: int, user_id: str | None = None) -> bool:
