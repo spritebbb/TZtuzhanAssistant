@@ -864,6 +864,26 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             }
         )
 
+    # 4.4) 记忆纠偏（C7）：对方在纠正她记住的事——当场承认记错，
+    # 同时后台 LLM 仲裁定位被否定的事实并真删（宁缺勿滥，见 memory_correction）
+    try:
+        from .memory_correction import arbitrate_and_forget, is_correction
+
+        if is_correction(text):
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "对方在纠正你记住的事——看来你确实记错了。大方承认，别嘴硬别辩解；"
+                        "按对方这次说的说法更新你的认知，之后以新说法为准。"
+                    ),
+                }
+            )
+            if not mock:
+                _spawn_memory_task(arbitrate_and_forget(user_id, text))
+    except Exception:
+        logger.exception("[pipeline] 记忆纠偏处理失败")
+
     # 4.1) 记忆相关：压缩摘要 + 记忆原文 + 长期事实，合并成一个「记得的过去」块，
     # 减少堆砌：把三条独立 system 消息合成一段，LLM 更容易当背景吸收而不是逐条服从。
     memory_lines: list[str] = []
