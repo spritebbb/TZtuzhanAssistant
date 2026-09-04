@@ -554,6 +554,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 好感度可能已变：刷新快照，后续 system prompt / 阶段判定用最新值
     user = db.get_user(user_id)
 
+    # 1.0.0) C4 解锁时刻检测：语义感知的好感度最迟上轮已结算（同用户消息串行），
+    # 此刻比较「上次见过的阶段/羁绊」与当前值即得跨越；彩蛋条件同点判定。
+    try:
+        from . import unlock as _unlock_mod
+
+        _unlock_mod.check_and_enqueue(user_id)
+    except Exception:
+        logger.exception("[pipeline] 解锁检测失败（不影响回复）")
+
     # 1.0.1) 拟人核心层：LLM 语义感知 + 状态演化
     # 用一次 LLM 调用读懂这句话对菟菚的情绪/好感影响，驱动多维状态演化。
     # 性能关键：perceive 是真实 LLM 调用（可能 10s+ 首 token），但与回复正文无关，
@@ -1037,6 +1046,34 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             }
         )
 
+    # C4 解锁时刻：她有句心里话了到想说的时候（阈值跨越/彩蛋触发，队列制每轮最多一条）。
+    # 锚点写死、措辞由她现场展开——与 C3 纪念日/C6 约定同一模式。
+    pending_unlock: dict | None = None
+    try:
+        from . import unlock as _unlock_mod
+
+        pending_unlock = _unlock_mod.next_pending(user_id)
+        if pending_unlock is not None:
+            anchor_lines = "\n".join(f"- {a}" for a in pending_unlock["anchors"])
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "你心里有件事一直想对他说，今天你想自然地说出来"
+                        "（这不是任务，是你自己想讲）：\n"
+                        f"这件事是关于：{pending_unlock['title']}\n"
+                        "你心里盘旋的念头：\n"
+                        + anchor_lines
+                        + "\n用你自己的话、顺着眼下的聊天氛围带出来，可以先铺垫几句再说；"
+                        "说完就自然聊下去。不要念清单、不要「我要跟你说件事」式预告、"
+                        "不要提好感度/等级/解锁/系统这类词。"
+                    ),
+                }
+            )
+    except Exception:
+        logger.exception("[pipeline] 解锁注入失败（不影响回复）")
+        pending_unlock = None
+
     # 4.2) 对对方的了解：画像 + 口头禅/黑话 + 场景风格 + 说话风格，合成一条注入。
     # 闲聊时跳过，避免堆砌额外信息（意图路由判定）。
     if not is_chitchat:
@@ -1404,6 +1441,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 表情包附带失败（不影响回复）")
 
+    # 5.10.1) C4 解锁落账：回复已定稿，把「她说出口的话」摘要存进收集页
+    if pending_unlock is not None:
+        try:
+            from . import unlock as _unlock_mod
+
+            _unlock_mod.mark_delivered(user_id, pending_unlock["key"], reply[:300])
+        except Exception:
+            logger.exception("[pipeline] 解锁落账失败（不影响回复）")
+
     # 5.11) 可解释性快照：只公开可验证的状态/行为/记忆来源，不公开隐藏思考。
     if explain_cb is not None and reply_state is not None and reply_frame is not None:
         try:
@@ -1416,6 +1462,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 ("知识库", f"《{h['filename']}》相关段落" if h.get("filename") else "相关段落")
                 for h in kb_hits[:2]
             )
+            if pending_unlock is not None:
+                memory_rows.append(("解锁时刻", f"她说出了心里话：{pending_unlock['title']}"))
             memory_rows.extend(
                 ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
                 for item in triples[:2]

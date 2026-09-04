@@ -136,6 +136,10 @@ class Config:
         self.kb_max_file_mb: int = max(1, _env_int("KB_MAX_FILE_MB", 20))
         self.kb_max_documents: int = max(1, _env_int("KB_MAX_DOCUMENTS", 50))
 
+        # C4 好感度玩法闭环：解锁时刻
+        # 连续陪伴多少天触发「连续陪伴」彩蛋
+        self.unlock_streak_days: int = max(2, _env_int("UNLOCK_STREAK_DAYS", 7))
+
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
         self.vision_api_key: str = os.getenv("VISION_API_KEY", "").strip()

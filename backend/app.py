@@ -29,6 +29,7 @@ from .api import (
     plugins as plugins_api,
     remote,
     sessions,
+    unlocks,
     tts,
     usage,
     user_reset,
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_admin.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)
+    app.include_router(unlocks.router)
     app.include_router(usage.router)
     app.include_router(agent.router)
     app.include_router(vision.router)

@@ -197,6 +197,20 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_kb_docs_user ON kb_documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks(user_id, doc_id);
+-- C4 好感度玩法闭环：解锁时刻（阈值跨越/彩蛋）队列与收集
+CREATE TABLE IF NOT EXISTS unlocks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    key          TEXT NOT NULL,     -- UNLOCK_DEFS.key（如 stage_lover / easter_streak7）
+    kind         TEXT NOT NULL,     -- stage / bond / easter
+    title        TEXT NOT NULL,
+    anchors      TEXT NOT NULL,     -- JSON 数组：内容锚点（注入 LLM 的要点）
+    enqueued_at  TEXT NOT NULL,
+    delivered_at TEXT,              -- NULL = 待说出口（pending）
+    content      TEXT,              -- 说出口那轮她说的话（摘要）
+    UNIQUE (user_id, key)           -- 同 key 一生只解锁一次
+);
+CREATE INDEX IF NOT EXISTS idx_unlocks_user ON unlocks(user_id, delivered_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -1001,7 +1015,7 @@ class UserDB:
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
-                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks",
+                "tasks", "promises", "usage_log", "kb_documents", "kb_chunks", "unlocks",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
