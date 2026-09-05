@@ -639,13 +639,20 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     """次级源按优先级出牌；同一轮至多发一条，先到先得。
 
     优先级：约定跟进（她记着你的事）> 未完成心事（Narrative Planner 择优）
-    > 归档建议（工具性提醒）。通用闲聊式主动仍走 _eligible_users 兜底，
+    > 归档建议（工具性提醒）> 惊喜编排（低频、只基于真实共同产物）。
+    通用闲聊式主动仍走 _eligible_users 兜底，
     与次级源共享同一份每日额度——额度用尽后自然全部静默。
     """
+    def _maybe_surprise(uid: str) -> str | None:
+        from .surprise import maybe_orchestrate_surprise
+
+        return maybe_orchestrate_surprise(uid)
+
     for proposer in (
         maybe_follow_up_promise,
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
+        _maybe_surprise,
     ):
         text = await proposer(user_id)
         if text:

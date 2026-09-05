@@ -118,6 +118,14 @@ class Config:
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 70)))
 
+        # M5 惊喜编排：隔一阵子基于真实共同产物（共同故事/书摘/目标回顾）低频送惊喜。
+        # 只基于真实经历、低频、可关闭；出牌经统一仲裁器，消耗共享每日额度。
+        self.proactive_surprise_enabled: bool = os.getenv("PROACTIVE_SURPRISE_ENABLED", "1") != "0"
+        self.proactive_surprise_min_gap_days: int = max(1, _env_int("PROACTIVE_SURPRISE_MIN_GAP_DAYS", 14))
+        self.proactive_surprise_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_SURPRISE_CHANCE_PERCENT", 35)))
+        self.proactive_surprise_idle_minutes: int = max(15, _env_int("PROACTIVE_SURPRISE_IDLE_MINUTES", 240))
+        self.proactive_surprise_material_days: int = max(7, _env_int("PROACTIVE_SURPRISE_MATERIAL_DAYS", 60))
+
         # 自制表情包：仅在有明确情绪场景时低频附带，优先复用收藏。
         self.sticker_enabled: bool = os.getenv("STICKER_ENABLED", "1") != "0"
         self.sticker_chance_percent: int = max(0, min(100, _env_int("STICKER_CHANCE_PERCENT", 10)))
