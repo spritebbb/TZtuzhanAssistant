@@ -11,6 +11,7 @@ import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
+import CornerPanel from './components/CornerPanel.vue'
 import PersonaSwitcher from './components/PersonaSwitcher.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
@@ -21,6 +22,7 @@ const agentOpen = ref(false)
 const diaryOpen = ref(false)
 const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
+const cornerOpen = ref(false)
 const usageOpen = ref(false)
 const dashboardOpen = ref(false)
 const activityOpen = ref(false)
@@ -151,6 +153,7 @@ function onKeydown(e: KeyboardEvent) {
     usageOpen.value = false
     dashboardOpen.value = false
     activityOpen.value = false
+    cornerOpen.value = false
     knowledgeOpen.value = false
     sidebarOpen.value = false
     personaOpen.value = false
@@ -267,6 +270,11 @@ onUnmounted(() => {
               <path d="M12 3a7 7 0 0 0-7 7c0 2.4 1.2 4.5 3 5.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3c1.8-1.2 3-3.3 3-5.7a7 7 0 0 0-7-7z"/>
             </svg>
           </button>
+          <button class="icon-btn" title="我们的角落（一起留下的东西）" @click="cornerOpen = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>
+            </svg>
+          </button>
           <button class="icon-btn" :title="activePersona.name + '的用量账本（token 用量）'" @click="usageOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 3v18h18"/><path d="M7 15l4-4 4 3 5-6"/>
@@ -333,6 +341,7 @@ onUnmounted(() => {
     <DiaryPanel :show="diaryOpen" :persona-name="activePersona.name" @close="diaryOpen = false" />
     <KnowledgePanel :show="knowledgeOpen" :persona-name="activePersona.name" @close="knowledgeOpen = false" />
     <MemoryPanel :show="memoryOpen" :persona-name="activePersona.name" @close="memoryOpen = false" />
+    <CornerPanel :show="cornerOpen" :persona-name="activePersona.name" @close="cornerOpen = false" />
     <UsagePanel :show="usageOpen" :persona-name="activePersona.name" @close="usageOpen = false" />
     <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
     <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
