@@ -22,6 +22,7 @@ EVENT_TYPES: dict[str, str] = {
     "promise_completed": "一条约定到了跟进点并被标记完成（来源：promises）",
     "important_date": "一个特殊日子到来了（来源：important_dates）",
     "memory_corrected": "用户改写或确认了一条记忆（来源：facts）",
+    "focus_finished": "一段专注陪伴完成（来源：activities）",
 }
 
 _MAX_PAYLOAD_EVENTS = 2

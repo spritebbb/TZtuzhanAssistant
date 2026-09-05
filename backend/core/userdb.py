@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -225,10 +225,13 @@ CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      TEXT NOT NULL,
     kind         TEXT NOT NULL DEFAULT 'reading',
-    document_id  INTEGER NOT NULL,
+    document_id  INTEGER NOT NULL,   -- focus 类型用 0 作哨兵（无文档）
     title        TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'active',  -- active / paused / completed
+    status       TEXT NOT NULL DEFAULT 'active',  -- active / paused / completed / cancelled
     position     INTEGER NOT NULL DEFAULT 0,
+    planned_minutes INTEGER,          -- M3.2 focus：计划时长（25/50）
+    remaining_seconds INTEGER,        -- M3.2 focus：暂停时结算的剩余秒数
+    ends_at      TEXT,                -- M3.2 focus：进行中时的预计结束时刻
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     completed_at TEXT
@@ -427,6 +430,17 @@ class UserDB:
         for column, definition in fact_columns:
             try:
                 self.conn.execute(f"ALTER TABLE facts ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+        # M3.2 专注陪伴：activities 复用为 focus 类型的计时字段（旧库迁移）。
+        # 幂等：列已存在时 ALTER 报 duplicate column，按惯例静默跳过。
+        for statement in (
+            "ALTER TABLE activities ADD COLUMN planned_minutes INTEGER",
+            "ALTER TABLE activities ADD COLUMN remaining_seconds INTEGER",
+            "ALTER TABLE activities ADD COLUMN ends_at TEXT",
+        ):
+            try:
+                self.conn.execute(statement)
             except sqlite3.OperationalError:
                 pass
         # 用户身份统一迁移：历史版本聊天链路用 f"session_{session_id}"（单一会话

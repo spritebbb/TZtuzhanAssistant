@@ -12,6 +12,7 @@ import {
   type ViewpointRole,
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
+import { useFocusMode } from '../utils/focusMode'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{
@@ -19,6 +20,15 @@ const emit = defineEmits<{
   (e: 'open-bookshelf'): void
   (e: 'discuss', draft: string): void
 }>()
+
+// M3.2 专注陪伴：状态由全局单例维护，面板关闭后计时与安静模式仍在
+const focusMode = useFocusMode()
+const focusCountdown = computed(() => {
+  const total = focusMode.remainingSec.value
+  const mm = String(Math.floor(total / 60)).padStart(2, '0')
+  const ss = String(total % 60).padStart(2, '0')
+  return `${mm}:${ss}`
+})
 
 const activities = ref<ReadingActivity[]>([])
 const documents = ref<KnowledgeDocument[]>([])
@@ -258,6 +268,30 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
         </template>
 
         <template v-else>
+          <section class="shelf-section focus-section">
+            <div class="section-title"><span>QUIET TIME</span><h3>专注陪伴</h3></div>
+            <div v-if="focusMode.current.value" class="focus-card">
+              <div class="focus-clock">
+                <strong>{{ focusCountdown }}</strong>
+                <span>{{ focusMode.current.value.title }} · {{ focusMode.paused.value ? '已暂停' : '安静陪伴中' }}</span>
+              </div>
+              <p class="focus-hint">这段时间她会安静一些，不主动打扰你</p>
+              <div class="focus-actions">
+                <button v-if="focusMode.active.value" :disabled="focusMode.busy.value" @click="focusMode.pauseSession()">暂停</button>
+                <button v-else :disabled="focusMode.busy.value" @click="focusMode.resumeSession()">继续</button>
+                <button :disabled="focusMode.busy.value" @click="focusMode.completeSession()">结束</button>
+                <button class="plain" :disabled="focusMode.busy.value" @click="focusMode.cancelSession()">中断</button>
+              </div>
+            </div>
+            <div v-else class="focus-card">
+              <p class="focus-hint">定一段安静的时间，她陪你各做各的事，结束了她叫你</p>
+              <div class="focus-actions">
+                <button :disabled="focusMode.busy.value" @click="focusMode.startSession(25)">25 分钟</button>
+                <button :disabled="focusMode.busy.value" @click="focusMode.startSession(50)">50 分钟</button>
+              </div>
+            </div>
+          </section>
+
           <section v-if="unfinished.length" class="shelf-section">
             <div class="section-title"><span>BOOKMARKS</span><h3>接着上次读</h3></div>
             <div class="activity-list">
@@ -297,6 +331,15 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 </template>
 
 <style scoped>
+.focus-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--bg-card) 82%, transparent); }
+.focus-clock { display: flex; align-items: baseline; gap: 12px; }
+.focus-clock strong { font-size: 30px; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.focus-clock span { color: var(--text-muted); font-size: 12px; }
+.focus-hint { margin: 8px 0 12px; color: var(--text-muted); font-size: 12px; }
+.focus-actions { display: flex; gap: 10px; }
+.focus-actions button { padding: 7px 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-card); cursor: pointer; }
+.focus-actions button:disabled { opacity: .5; cursor: default; }
+.focus-actions .plain { border-color: transparent; color: var(--text-muted); background: transparent; }
 .activity-mask { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgba(8,10,16,.64); backdrop-filter: blur(6px); }
 .activity-panel { width: min(720px, 97vw); height: 100%; padding: 26px 28px; overflow: hidden; display: flex; flex-direction: column; color: var(--text); background: radial-gradient(circle at 82% 3%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 34%), linear-gradient(155deg, var(--bg-card), var(--bg-main)); border-left: 1px solid var(--border); box-shadow: -24px 0 65px rgba(0,0,0,.3); }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-shrink: 0; }

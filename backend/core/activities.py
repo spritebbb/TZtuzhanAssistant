@@ -33,6 +33,37 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _parse_ts(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def pause_all_active_locked(user_id: str, now: str) -> None:
+    """暂停该用户所有进行中的活动（同时只活跃一场）。
+
+    focus 类型的行带计时：暂停前必须把 ends_at 结算成 remaining_seconds，
+    否则恢复时会按旧 ends_at 少算剩余时间。调用方需持有 db._lock。
+    """
+    rows = db.conn.execute(
+        "SELECT id, kind, ends_at FROM activities WHERE user_id = ? AND status = 'active'",
+        (user_id,),
+    ).fetchall()
+    for row in rows:
+        if row["kind"] == "focus" and row["ends_at"]:
+            remaining = max(
+                0, int((_parse_ts(row["ends_at"]) - _parse_ts(now)).total_seconds())
+            )
+            db.conn.execute(
+                "UPDATE activities SET status = 'paused', remaining_seconds = ?, "
+                "ends_at = NULL, updated_at = ? WHERE id = ?",
+                (remaining, now, row["id"]),
+            )
+        else:
+            db.conn.execute(
+                "UPDATE activities SET status = 'paused', updated_at = ? WHERE id = ?",
+                (now, row["id"]),
+            )
+
+
 def _viewpoints_locked(user_id: str, activity_id: int) -> list[dict]:
     rows = db.conn.execute(
         "SELECT role, position, content, ts FROM activity_viewpoints "
@@ -129,11 +160,7 @@ def start_reading(user_id: str, document_id: int) -> dict:
             "ORDER BY id DESC LIMIT 1",
             (user_id, document_id),
         ).fetchone()
-        db.conn.execute(
-            "UPDATE activities SET status = 'paused', updated_at = ? "
-            "WHERE user_id = ? AND status = 'active'",
-            (now, user_id),
-        )
+        pause_all_active_locked(user_id, now)
         if existing:
             activity_id = int(existing["id"])
             db.conn.execute(
@@ -167,11 +194,7 @@ def resume_activity(user_id: str, activity_id: int) -> dict:
             raise ActivityError("共读记录不存在")
         if row["status"] == "completed":
             raise ActivityError("已完成的共读请从书架重新开始")
-        db.conn.execute(
-            "UPDATE activities SET status = 'paused', updated_at = ? "
-            "WHERE user_id = ? AND status = 'active'",
-            (now, user_id),
-        )
+        pause_all_active_locked(user_id, now)
         db.conn.execute(
             "UPDATE activities SET status = 'active', updated_at = ? "
             "WHERE user_id = ? AND id = ?",

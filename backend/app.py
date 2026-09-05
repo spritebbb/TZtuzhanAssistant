@@ -20,6 +20,7 @@ from .api import (
     confirm,
     dashboard,
     diary,
+    focus,
     greeting,
     health,
     images,
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts.router)
     app.include_router(dashboard.router)
     app.include_router(diary.router)
+    app.include_router(focus.router)
     app.include_router(memory_admin.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)

@@ -139,6 +139,8 @@ class Config:
         # C4 好感度玩法闭环：解锁时刻
         # 连续陪伴多少天触发「连续陪伴」彩蛋
         self.unlock_streak_days: int = max(2, _env_int("UNLOCK_STREAK_DAYS", 7))
+        # M3.2 专注陪伴：25/50 分钟安静模式（feature flag，0 关闭）
+        self.focus_enabled: bool = os.getenv("FOCUS_ENABLED", "1") != "0"
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
