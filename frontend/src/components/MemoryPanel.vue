@@ -14,6 +14,12 @@ import {
   type HerProfileSection,
   type UserTerm,
 } from '../api/memory'
+import {
+  exportRelationshipUrl,
+  previewRestore,
+  restoreRelationship,
+  type BundlePreview,
+} from '../api/relationship'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -25,9 +31,16 @@ const editingId = ref<number | null>(null)
 const editingText = ref('')
 const busyId = ref<number | null>(null)
 const profileSections = ref<HerProfileSection[]>([])
-const showProfile = ref(false)
 const userStyle = ref('')
 const userTerms = ref<UserTerm[]>([])
+const activeTab = ref<'facts' | 'profile' | 'backup'>('facts')
+const restoreBusy = ref(false)
+const restoreNotice = ref('')
+const restoreErrors = ref<string[]>([])
+const restorePreview = ref<BundlePreview | null>(null)
+const restoreBundle = ref<unknown>(null)
+const restoreFileName = ref('')
+const restoreTarget = ref('')
 
 async function load() {
   loading.value = true
@@ -80,8 +93,59 @@ async function removeTerm(term: UserTerm) {
 }
 
 function toggleProfile() {
-  showProfile.value = !showProfile.value
-  if (showProfile.value) void loadProfile()
+  activeTab.value = 'profile'
+  void loadProfile()
+}
+
+async function onRestoreFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  restoreNotice.value = ''
+  restoreErrors.value = []
+  restorePreview.value = null
+  if (!file) return
+  restoreFileName.value = file.name
+  try {
+    restoreBundle.value = JSON.parse(await file.text())
+  } catch {
+    restoreErrors.value = ['文件不是有效的备份 JSON']
+    restoreBundle.value = null
+    return
+  }
+  await runPreview()
+}
+
+async function runPreview() {
+  if (!restoreBundle.value || !restoreTarget.value.trim()) return
+  restoreBusy.value = true
+  try {
+    const preview = await previewRestore(restoreBundle.value, restoreTarget.value.trim())
+    restorePreview.value = preview
+    restoreErrors.value = preview.ok ? [] : preview.errors
+  } catch (reason) {
+    restorePreview.value = null
+    restoreErrors.value = [reason instanceof Error ? reason.message : '预览失败']
+  } finally {
+    restoreBusy.value = false
+  }
+}
+
+async function runRestore() {
+  if (!restoreBundle.value || !restorePreview.value?.ok) return
+  if (!window.confirm(
+    `确定把备份里的 ${restorePreview.value.total} 条记录恢复到「${restorePreview.value.target_user_id}」？`
+    + '只能恢复到空命名空间，恢复后会覆盖该命名空间的同名状态。',
+  )) return
+  restoreBusy.value = true
+  try {
+    const result = await restoreRelationship(restoreBundle.value, restoreTarget.value.trim())
+    restoreNotice.value = `恢复完成：共写入 ${result.total} 条记录`
+    restorePreview.value = null
+  } catch (reason) {
+    restoreErrors.value = [reason instanceof Error ? reason.message : '恢复失败']
+  } finally {
+    restoreBusy.value = false
+  }
 }
 
 function startEdit(fact: FactItem) {
@@ -172,10 +236,42 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle() } 
       </header>
       <p class="hint">她记错的可以改、可以删——改动立刻生效，下次聊天她就按新的记。</p>
       <div class="tab-row">
-        <button :class="{ on: !showProfile }" @click="showProfile = false">她记住的</button>
-        <button :class="{ on: showProfile }" @click="toggleProfile">了解{{ props.personaName || '她' }}</button>
+        <button :class="{ on: activeTab === 'facts' }" @click="activeTab = 'facts'">她记住的</button>
+        <button :class="{ on: activeTab === 'profile' }" @click="toggleProfile">了解{{ props.personaName || '她' }}</button>
+        <button :class="{ on: activeTab === 'backup' }" @click="activeTab = 'backup'">带走 / 恢复</button>
       </div>
-      <div v-if="showProfile" class="entries">
+      <div v-if="activeTab === 'backup'" class="entries">
+        <p class="hint small">把这段关系打包带走，或把备份恢复到一个空的人格里；恢复前会先看到预览，确认才会写入</p>
+        <article class="profile-card">
+          <small>导出</small>
+          <p>导出{{ props.personaName || '她' }}记住的一切：记忆、约定、共同活动、产物与事件（不含成本账本）。</p>
+          <a class="reset-btn export-link" :href="exportRelationshipUrl()" download>导出备份（JSON）</a>
+        </article>
+        <article class="profile-card">
+          <small>恢复</small>
+          <p>选择备份文件，恢复到一个<b>空的</b>人格命名空间（例如新装好的环境里的人格 id）。</p>
+          <input type="file" accept="application/json,.json" @change="onRestoreFile">
+          <label class="restore-target">
+            <span>目标人格 id</span>
+            <input v-model="restoreTarget" placeholder="例如 assistant-main-bak" @change="runPreview">
+          </label>
+          <template v-if="restorePreview">
+            <p class="restore-summary">
+              将写入 {{ restorePreview.total }} 条记录（另含 {{ restorePreview.kv_exported }} 项状态）
+              <template v-if="restorePreview.source_user_id">，来自「{{ restorePreview.source_user_id }}」</template>
+            </p>
+          </template>
+          <p v-for="message in restoreErrors" :key="message" class="restore-error">{{ message }}</p>
+          <p v-if="restoreNotice" class="restore-notice">{{ restoreNotice }}</p>
+          <button
+            v-if="restorePreview?.ok"
+            class="reset-btn"
+            :disabled="restoreBusy"
+            @click="runRestore"
+          >确认恢复</button>
+        </article>
+      </div>
+      <div v-else-if="activeTab === 'profile'" class="entries">
         <p class="hint small">这些是{{ props.personaName || '她' }}稳定的一面，慢慢相处你会越来越熟</p>
         <article v-for="section in profileSections" :key="section.key" class="profile-card">
           <small>{{ section.label }}</small>
@@ -294,4 +390,11 @@ textarea { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 8px
 .term-del:hover { color: #e0705a; border-color: #e0705a; }
 .reset-btn { margin-top: 10px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: transparent; font-size: 12px; cursor: pointer; }
 .reset-btn:hover { color: var(--accent); border-color: var(--accent); }
+.export-link { display: inline-block; text-decoration: none; }
+.backup input[type="file"], .entries input[type="file"] { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+.restore-target { display: grid; gap: 4px; margin-top: 10px; color: var(--text-muted); font-size: 11px; }
+.restore-target input { box-sizing: border-box; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; outline: none; color: var(--text); background: var(--bg-main); font: inherit; font-size: 12px; }
+.restore-summary { margin: 8px 0 0; color: var(--text); font-size: 12px; }
+.restore-error { margin: 6px 0 0; color: #df7d86; font-size: 11px; line-height: 1.5; }
+.restore-notice { margin: 6px 0 0; color: var(--accent); font-size: 11px; }
 </style>
