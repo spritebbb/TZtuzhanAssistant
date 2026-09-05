@@ -6,7 +6,6 @@ Sprint 3 共读 2.0：双方观点按角色分开保存；读完生成 reading_f
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timedelta
 
@@ -318,22 +317,25 @@ def _upsert_book_summary_locked(
 def _record_reading_finished_locked(
     user_id: str, activity_id: int, detail: dict, now: str
 ) -> None:
-    """幂等写入 reading_finished 事件；同一活动只保留一条 active 事件。"""
-    payload = json.dumps(
-        {
+    """幂等写入 reading_finished 事件（统一走关系事件服务，不提交，随外层事务）。"""
+    from .relationship_events import record
+
+    record(
+        user_id,
+        "reading_finished",
+        "activity",
+        activity_id,
+        subject=user_id,
+        obj=detail["filename"],
+        payload={
             "filename": detail["filename"],
             "title": detail["title"],
             "total": detail["total"],
             "note_count": detail["note_count"],
         },
-        ensure_ascii=False,
-    )
-    db.conn.execute(
-        "INSERT OR IGNORE INTO relationship_events "
-        "(user_id, event_type, source_type, source_id, subject, object, payload_json, "
-        "confidence, privacy, occurred_at, created_at) "
-        "VALUES (?, 'reading_finished', 'activity', ?, ?, ?, ?, ?, 'normal', ?, ?)",
-        (user_id, activity_id, user_id, detail["filename"], payload, 1.0, now, now),
+        confidence=1.0,
+        occurred_at=now,
+        commit=False,
     )
 
 
@@ -363,6 +365,8 @@ def forget_activity_data(user_id: str, activity_id: int) -> None:
 
     只做数据操作不提交事务，供更大的删除事务（如删文档级联）合并提交。
     """
+    from .relationship_events import invalidate_for_source
+
     db.conn.execute(
         "DELETE FROM activity_viewpoints WHERE user_id = ? AND activity_id = ?",
         (user_id, activity_id),
@@ -372,12 +376,7 @@ def forget_activity_data(user_id: str, activity_id: int) -> None:
         "AND source_type = 'activity' AND source_id = ?",
         (user_id, activity_id),
     )
-    db.conn.execute(
-        "UPDATE relationship_events SET status = 'forgotten' "
-        "WHERE user_id = ? AND event_type = 'reading_finished' "
-        "AND source_type = 'activity' AND source_id = ? AND status = 'active'",
-        (user_id, activity_id),
-    )
+    invalidate_for_source(user_id, "activity", activity_id, commit=False)
 
 
 def _finished_reading_context_locked(user_id: str) -> str:

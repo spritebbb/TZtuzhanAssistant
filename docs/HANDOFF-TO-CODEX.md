@@ -1,7 +1,7 @@
 # 菟菚桌面助手 —— Codex 接手交接报告（2026-09-04 更新）
 
 > 本报告为 Codex 接手的**最新**状态。上一版（D5 交接）已过时——此后经历了 D2 RAG 知识库、C4 好感度玩法闭环、历史文档归档。
-> 截至本文：原功能路线图 **23/24 完成**，仅剩 D8 移动端推送。长期进化技术路线的 **M0 已完成**；**M1 记忆溯源最小闭环已完成（Sprint 1 4/4）**；**M3 共读 2.0 已完成（Sprint 3：双方观点分角色、reading_finished 事件 + 共同书摘 artifact、相关语境回访）**，其中 `relationship_events` 最小表已前置落地。当前基线为后端聚合 **45/45 全绿**、前端 Vitest **24/24**、浏览器关键路径 **5/5**。
+> 截至本文：原功能路线图 **23/24 完成**，仅剩 D8 移动端推送。长期进化技术路线的 **M0 已完成**；**M1 记忆溯源最小闭环已完成（Sprint 1 4/4）**；**M2 关系事件内核首批 4 类事件已完成（Sprint 2，统一服务 + 幂等/过期/纠正/级联 + 聊天内自然回忆 + 解释快照来源）**；**M3 共读 2.0 已完成（Sprint 3）**。当前基线为后端聚合 **46/46 全绿**、前端 Vitest **24/24**、浏览器关键路径 **5/5**。
 
 ---
 
@@ -118,7 +118,7 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 
 1. **先跑全量测试确认基线**：`.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q` → 当前基线应 **45/45 全绿**；前端执行 `npm test` 与 `npm run test:e2e`。
 2. 读 `docs/EVOLUTION-ROADMAP.md`（逐项验收标准）+ `persona-菟菚.md`（人格约束，改动别破坏人设）
-3. **进入 Sprint 2 关系事件内核**：`relationship_events` 表与 `reading_finished` 事件已由 Sprint 3 前置落地（见 `backend/core/activities.py` 的 `_record_reading_finished_locked` 与 `forget_activity_data`），补齐 `promise_completed` / `important_date` / `memory_corrected` 三类事件、`pending_thoughts` 与 Narrative Planner，复用 M1 的来源、状态和级联清理原则；M1 的扩展隐私语义、导出恢复与自然遗忘留在后续增量完成。
+3. **Sprint 0–3 已全部完成**（2026-09-05）。下一轮在 M4「冲突与修复」与 M5「自主生活」之间重新拍板（见 `docs/TECH-PLAN.md` 第 9 节）；M2 剩余增量是 `pending_thoughts` 与 Narrative Planner（`relationship_events` 服务已就位，见 `backend/core/relationship_events.py`）。M1 的扩展隐私语义、导出恢复与自然遗忘也留在后续增量。
 4. **D8 不要直接开做**：它仍卡公网部署、HTTPS、推送凭据与通知策略，需先与用户对齐资源和方案。
 
 ---
