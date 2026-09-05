@@ -272,6 +272,14 @@
 
 ## 迭代记录
 
+### 主动统一仲裁器（已完成，2026-09-06，ZCode 执行；短名单债务 #2）
+
+- 债务内容：归档建议、约定跟进、心事表达三个次级主动源各自维护去重键、绕过原子占位与每日额度——同一轮 `_tick_once` 里可能连发多条，并发时也无占位保护（历史上 poll_for 无锁曾导致重复生成的真实事故）。
+- 统一闸门：`initiative._arbited_proactive`——勿扰空闲 → 专注安静模式 → 源内去重 → `try_claim_active` 原子占位（与问候/通用主动共享每日额度与失败冷却）→ 生成 → `enqueue_proactive` 统一投递；交付/失败回调负责源内落账（约定完成、心事 expressed/attempt、归档建议去重键）。
+- 一轮单发：`_arbitrate_secondary` 按优先级出牌（约定跟进 > 未完成心事 > 归档建议），同一轮至多一条；与通用主动共享额度，额度用尽后全源自然静默。
+- 语义变化（有意为之，原则 3）：次级源现在消耗每日主动额度，不再绕过；专注收尾复盘仍按 M3.2 拍板不占额度、不经闸门。
+- 验证：新增 `tests/test_proactive_arbiter.py`（跨源共享额度/一轮单发/失败冷却不落账/专注静默）；既有 `test_promise_followup`、`test_m5_thoughts`、`test_proactive_policy`、`test_focus` 契约全部保持。
+
 ### M3.4 · 共同创作首切片：轮流续写（已完成，2026-09-06，ZCode 执行）
 
 - 持久化与生命周期：schema v8 新增 `activity_writings` / `writing_turns`，复用 `activities(kind='writing')` 通用壳；未给壳加列（技术复议清单的拆分信号未触发，handler 化继续挂起）。故事可开始、暂停、恢复、收笔、放下，与共读/专注/目标同壳互斥，重启后可继续。
