@@ -142,8 +142,10 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
     # 注入当前状态帧，让主动消息也符合她此刻的心情
     try:
         from .behavior import build_behavior_frame
+        from .seasons import current_season
 
-        frame = build_behavior_frame(load_state(user_id))
+        _state = load_state(user_id)
+        frame = build_behavior_frame(_state, season_line=current_season(user_id, _state)["line"])
         sys_prompt += "\n\n## 此刻状态\n" + frame.compose()
     except Exception:
         pass
