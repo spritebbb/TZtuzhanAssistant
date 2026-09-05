@@ -25,19 +25,49 @@ def _proxy() -> str | None:
     return os.getenv("https_proxy") or os.getenv("http_proxy")
 
 
-def _path_for(text: str, voice: str) -> Path:
-    digest = hashlib.sha1(f"{voice}:{text}".encode("utf-8")).hexdigest()[:16]
+# M6 情绪声线：心情 → 语速/音高的克制映射（可控范围内，不夸张）。
+# (mood 下界, rate, pitch)；从上往下取第一个命中的档。
+_PROSODY_TIERS: tuple[tuple[int, str, str], ...] = (
+    (85, "+8%", "+15Hz"),   # 雀跃：略快、略高
+    (65, "+4%", "+8Hz"),    # 开心：轻快一点
+    (35, "-3%", "-5Hz"),    # 平淡/慵懒：稍微松弛
+    (0, "-8%", "-12Hz"),    # 低落：慢一点、低一点
+)
+
+
+def prosody_for_mood(mood: int | None) -> tuple[str, str]:
+    """心情值（0-100）→ (rate, pitch)。None 或越界一律用中性档。"""
+    try:
+        value = int(mood)
+    except (TypeError, ValueError):
+        return ("+0%", "+0Hz")
+    if value < 0 or value > 100:
+        return ("+0%", "+0Hz")
+    for floor, rate, pitch in _PROSODY_TIERS:
+        if value >= floor:
+            return (rate, pitch)
+    return ("+0%", "+0Hz")
+
+
+def _path_for(text: str, voice: str, rate: str, pitch: str) -> Path:
+    digest = hashlib.sha1(f"{voice}:{rate}:{pitch}:{text}".encode("utf-8")).hexdigest()[:16]
     return _TTS_DIR / f"{digest}.mp3"
 
 
-async def synth_async(text: str, voice: str = DEFAULT_VOICE) -> Path | None:
-    """合成语音，命中缓存直接返回。text 过长时截断（TTS 有长度限制）。"""
+async def synth_async(
+    text: str, voice: str = DEFAULT_VOICE, mood: int | None = None
+) -> Path | None:
+    """合成语音，命中缓存直接返回。text 过长时截断（TTS 有长度限制）。
+
+    mood 非空时按情绪声线微调语速与音高（缓存键包含韵律参数）。
+    """
     text = (text or "").strip()
     if not text:
         return None
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
-    path = _path_for(text, voice)
+    rate, pitch = prosody_for_mood(mood)
+    path = _path_for(text, voice, rate, pitch)
     if path.exists() and path.stat().st_size > 0:
         return path
     try:
@@ -48,6 +78,9 @@ async def synth_async(text: str, voice: str = DEFAULT_VOICE) -> Path | None:
         p = _proxy()
         if p:
             kwargs["proxy"] = p
+        if (rate, pitch) != ("+0%", "+0Hz"):
+            kwargs["rate"] = rate
+            kwargs["pitch"] = pitch
         c = edge_tts.Communicate(text, voice=voice, **kwargs)
         await c.save(str(path))
         if path.exists() and path.stat().st_size > 0:
@@ -59,12 +92,12 @@ async def synth_async(text: str, voice: str = DEFAULT_VOICE) -> Path | None:
         return None
 
 
-def synth(text: str, voice: str = DEFAULT_VOICE) -> Path | None:
+def synth(text: str, voice: str = DEFAULT_VOICE, mood: int | None = None) -> Path | None:
     """同步包装（放到线程池调用）。"""
     try:
         loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(synth_async(text, voice))
+            return loop.run_until_complete(synth_async(text, voice, mood))
         finally:
             loop.close()
     except Exception as e:

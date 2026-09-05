@@ -415,6 +415,33 @@ def _finished_reading_context_locked(user_id: str) -> str:
     )
 
 
+def list_artifacts(user_id: str, limit: int = 50) -> list[dict]:
+    """共同空间：全部有效 artifact（M6）。每件都能追溯到真实来源。"""
+    limit = max(1, min(100, int(limit)))
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, artifact_type, source_type, source_id, title, content, "
+            "version, created_at, updated_at FROM artifacts "
+            "WHERE user_id = ? AND status = 'active' "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "artifact_type": row["artifact_type"],
+            "source_type": row["source_type"],
+            "source_id": int(row["source_id"]),
+            "title": row["title"],
+            "content": row["content"],
+            "version": int(row["version"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 def active_reading_context(user_id: str, query: str) -> str:
     """仅在当前话题显然与阅读有关时返回共读背景，避免每轮堆 prompt。"""
     if not query or not _READING_CUE_RE.search(query):

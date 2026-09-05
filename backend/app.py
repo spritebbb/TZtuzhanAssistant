@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from .api import (
     activities,
     agent,
+    artifacts,
     audit,
     chat,
     config_api,
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(confirm.router)
     app.include_router(activities.router)
+    app.include_router(artifacts.router)
     app.include_router(dashboard.router)
     app.include_router(diary.router)
     app.include_router(memory_admin.router)

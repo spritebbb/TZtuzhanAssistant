@@ -272,6 +272,14 @@
 
 ## 迭代记录
 
+### M6.1+M6.2 · 我们的角落与情绪声线（已完成，2026-09-05，GLM 执行）
+
+- 共同空间（低成本 CSS/2D 原型）：新增 `GET /api/artifacts` 与 CornerPanel「我们的角落」面板（主工具栏入口、Escape 关闭）——只陈列真实 artifact（首批：共读共同书摘，含版本徽章），空态如实说明"还空着"，不凭空生成共同历史；删源文档物件随源消失。
+- 情绪声线：`prosody_for_mood` 把心情（0-100）确定性映射到 edge-tts 语速/音高（四档，幅度控制在 ±8% / ±15Hz 内），`/api/tts` 缺省自动读取当前人格此刻的心情；韵律参数进缓存键避免串音，非法输入降级中性。
+- 无障碍：全局 `prefers-reduced-motion` 适配（关闭动画/过渡/平滑滚动），M6 退出标准 4 达成。
+- 验证：新增 `tests/test_m6_space.py`（artifact 空间可追溯/随删清理/韵律映射/缓存键）与 CornerPanel 组件测试 3 例；后端聚合 **50/50**、前端 Vitest **28/28**、`vue-tsc` + 生产构建通过。
+- 待用户拍板（路线第 10 节）：桌面宠物形态与常驻策略、STT 方案（Whisper/云端/插件）——两项按路线不阻塞本地建设，拍板后立项。
+
 ### M5.1 · 未完成心事与 Narrative Planner（已完成，2026-09-05，GLM 执行）
 
 - 新增 `pending_thoughts` 表（schema v5，升级前自动快照）与 `backend/core/pending_thoughts.py` 服务：心事只携带叙事素材，带 source_type/source_id、earliest_at、expires_at（7 天）、优先级与最多 2 次尝试；同一来源一生只挂一次。
