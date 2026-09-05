@@ -24,8 +24,10 @@ from pathlib import Path
 
 from ..core.config import config
 from ..core.persona_profiles import active_id, session_storage_id
+from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
 _DB: Path = config.data_dir / "sessions.db"
+_SCHEMA_VERSION = 1
 
 # 单一会话的固定 id：全局唯一，不再新建
 CURRENT_SESSION_ID = "current"
@@ -56,6 +58,7 @@ def _ensure_session(conn: sqlite3.Connection, session_id: str) -> None:
 
 def _init() -> None:
     config.data_dir.mkdir(parents=True, exist_ok=True)
+    create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
     conn = _connect()
     try:
         conn.execute(
@@ -96,6 +99,7 @@ def _init() -> None:
             "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at) VALUES (?,?,?,?)",
             (CURRENT_SESSION_ID, "新会话", now, now),
         )
+        mark_schema_current(conn, _SCHEMA_VERSION)
         conn.commit()
     finally:
         conn.close()

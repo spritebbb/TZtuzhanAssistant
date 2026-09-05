@@ -18,6 +18,9 @@ import time
 from datetime import date, datetime, timedelta
 
 from .config import config
+from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
+
+_SCHEMA_VERSION = 1
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -283,7 +286,9 @@ class UserDB:
         # 模块也直接写同一连接，统一加锁避免并发写竞态
         self._lock = threading.RLock()
         config.data_dir.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(config.data_dir / "bot.db", check_same_thread=False)
+        path = config.data_dir / "bot.db"
+        create_pre_upgrade_backup(path, config.data_dir / "backups", _SCHEMA_VERSION)
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA busy_timeout = 5000")
@@ -336,6 +341,7 @@ class UserDB:
         # 避免菟菚「失忆」（好感度/心情/记忆/待办全部保留）。幂等：无旧数据时无副作用。
         self._migrate_legacy_user_identity()
         self._backfill_dashboard_history()
+        mark_schema_current(self.conn, _SCHEMA_VERSION)
         self.conn.commit()
 
     def _backfill_dashboard_history(self) -> None:
@@ -1112,6 +1118,7 @@ class UserDB:
         self.conn.execute("PRAGMA synchronous = NORMAL")
         if deleted:
             self.conn.executescript(_SCHEMA)
+            mark_schema_current(self.conn, _SCHEMA_VERSION)
         else:
             # 文件删除失败（被占用）时退化的清空路径：覆盖全部业务表
             for table in (

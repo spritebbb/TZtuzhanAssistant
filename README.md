@@ -138,7 +138,7 @@ voice: zh-CN-XiaoyiNeural
 
 - **启动**：双击 `Start-Tuzhan.bat`（后端已在运行时会直接复用并打开页面）
 - **停止**：双击 `Stop-Tuzhan.bat`，或关闭任务栏上名为 `Tuzhan-backend` 的最小化窗口
-- **数据备份**：聊天记录、记忆、图片都存在包内 `data/` 目录，删除/更新包前请先备份整个目录
+- **数据备份**：聊天记录、记忆、图片都存在包内 `data/` 目录；schema 升级前程序会把 3 个 SQLite 库快照到 `data/backups/schema-*` 并做完整性校验，日常仍建议在删除/更新包前备份整个目录
 - 立绘、人格、技能、插件都已内置，无需额外配置
 
 > 脚本找不到 Python？重装 Python 并勾选 PATH 后**重开**启动脚本即可。

@@ -20,9 +20,11 @@ from ..core.config import config
 from ..core.log import logger
 from ..core.persona import build_system_prompt
 from ..core.llm import chat, chat_native
+from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 from ..tools.service import run_tool_round
 
 _DB: Path = config.data_dir / "agent_tasks.db"
+_SCHEMA_VERSION = 1
 
 # 单次执行的最大工具轮数（一个任务内 LLM 可自主调用工具的上限）
 MAX_TOOL_ROUNDS = 8
@@ -67,6 +69,7 @@ def _connect() -> sqlite3.Connection:
 
 def _init() -> None:
     config.data_dir.mkdir(parents=True, exist_ok=True)
+    create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
     conn = _connect()
     try:
         conn.execute(
@@ -83,6 +86,7 @@ def _init() -> None:
             conn.execute("ALTER TABLE agent_tasks ADD COLUMN step_confirmations TEXT NOT NULL DEFAULT '{}'")
             conn.commit()
             logger.info("[Agent] 已迁移 agent_tasks 表：补充 step_confirmations 列")
+        mark_schema_current(conn, _SCHEMA_VERSION)
         conn.commit()
     finally:
         conn.close()
