@@ -112,6 +112,9 @@ async def reset_everything() -> dict:
     """执行彻底失忆重置，返回逐步骤状态；任何失败都明确返回 ``ok=False``。"""
     global _resetting, _reset_epoch
 
+    from .persona_profiles import active_user_id
+
+    uid = active_user_id()
     async with _reset_lock:
         _resetting = True
         _reset_epoch += 1
@@ -133,11 +136,15 @@ async def reset_everything() -> dict:
 
             # userdb 全部业务表用单事务清理，避免中途失败留下半张库。
             try:
+                # 知识库原文在数据库外；先按当前人格删除文件和 kb 向量。
+                from .knowledge import clear_user_documents
+
+                await asyncio.to_thread(clear_user_documents, uid)
                 with db._lock:
                     db.conn.execute("BEGIN IMMEDIATE")
                     try:
                         for table in _TABLES:
-                            db.conn.execute(f"DELETE FROM {table}")
+                            db.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (uid,))
                         db.conn.commit()
                     except Exception:
                         db.conn.rollback()
@@ -151,7 +158,7 @@ async def reset_everything() -> dict:
             try:
                 from .memory import vector_store as _vec
 
-                stats["vector"] = await asyncio.to_thread(_vec.clear)
+                stats["vector"] = await asyncio.to_thread(_vec.clear_user, uid)
                 logger.info("[重置] 向量库已清空：{}", stats["vector"])
             except Exception as exc:
                 stats["failures"].append(f"向量库清空失败：{exc}")
@@ -169,7 +176,7 @@ async def reset_everything() -> dict:
             try:
                 from ..agent import session as agent_session
 
-                stats["agent_tasks"] = agent_session.clear_all_tasks()
+                stats["agent_tasks"] = agent_session.clear_user_tasks(uid)
             except Exception as exc:
                 stats["failures"].append(f"Agent 任务清空失败：{exc}")
                 logger.warning("[重置] Agent 任务清空失败：{}", exc)

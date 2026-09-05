@@ -80,11 +80,16 @@ def _parse_triples(text: str) -> list[list[str]]:
     return valid[:32]
 
 
-async def extract_triples(text: str, *, mock: bool = False) -> list[list[str]]:
+async def extract_triples(
+    text: str,
+    *,
+    mock: bool = False,
+    persona_name: str = "菟菚",
+) -> list[list[str]]:
     """从文本中提取结构化五元组（走更强 fact_extractor，向下兼容 5 字段返回）。"""
     from .fact_extractor import extract_triples as _extract
 
-    triples = await _extract(text, mock=mock)
+    triples = await _extract(text, mock=mock, persona_name=persona_name)
     # 兼容：转成 5 字段 [sub, st, pred, obj, ot]
     out = []
     for t in triples:

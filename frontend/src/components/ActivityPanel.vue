@@ -11,7 +11,7 @@ import {
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'open-bookshelf'): void
@@ -170,7 +170,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
 
             <div class="primary-actions">
-              <button class="talk" :disabled="busy" @click="discuss">去和菟菚聊这一段</button>
+              <button class="talk" :disabled="busy" @click="discuss">去和{{ props.personaName || '助手' }}聊这一段</button>
               <button class="finish" :disabled="busy" @click="finish">这本读完了</button>
             </div>
           </template>
@@ -194,8 +194,8 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           </section>
 
           <section class="shelf-section">
-            <div class="section-title"><span>START A BOOK</span><h3>从她的书架选一份</h3></div>
-            <p v-if="!documents.length" class="empty small">书架还空着，先给她一份想一起读的文档</p>
+            <div class="section-title"><span>START A BOOK</span><h3>从{{ props.personaName || '助手' }}的书架选一份</h3></div>
+            <p v-if="!documents.length" class="empty small">书架还空着，先给{{ props.personaName || '助手' }}一份想一起读的文档</p>
             <div v-else class="document-grid">
               <button v-for="doc in documents" :key="doc.id" :disabled="busy" @click="begin(doc.id)">
                 <span>{{ doc.format }}</span>
@@ -203,7 +203,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
                 <small>{{ doc.chunk_count }} 段</small>
               </button>
             </div>
-            <button v-if="!documents.length" class="open-bookshelf" @click="emit('open-bookshelf')">打开她的书架</button>
+            <button v-if="!documents.length" class="open-bookshelf" @click="emit('open-bookshelf')">打开{{ props.personaName || '助手' }}的书架</button>
           </section>
 
           <section v-if="completed.length" class="shelf-section history">

@@ -15,6 +15,12 @@ TOPIC_IDLE_MINUTES = 30
 # 提炼需要的最少消息条数
 TOPIC_MIN_MESSAGES = 4
 
+# topic 分区的 id 空间隔离：migration 会把 important_dates 表的行 id（自增小整数）
+# 也写进同一 topic 分区；话题记忆若直接用消息表 id（同为自增小整数），
+# 两套 id 会在「user|topic|N」键上撞车、向量互相覆盖（upsert 同 id 覆写）。
+# 这里给话题向量加一个足够大的偏移基座，保证与 important_dates id 永不重叠。
+_TOPIC_VEC_ID_BASE = 1_000_000_000
+
 
 def _strip_parens(text: str) -> str:
     import re
@@ -54,8 +60,11 @@ async def extract_topic(user_id: str, *, mock: bool = False) -> str | None:
         if len(rows) < TOPIC_MIN_MESSAGES:
             return None
         max_id = rows[-1]["id"]
+        from ..persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         transcript = "\n".join(
-            f"{'对方' if r['role'] == 'user' else '菟菚'}：{r['content'][:100]}"
+            f"{'对方' if r['role'] == 'user' else persona_name}：{r['content'][:100]}"
             for r in rows[-TOPIC_MIN_MESSAGES:]
         )
         if mock:
@@ -85,15 +94,17 @@ async def extract_topic(user_id: str, *, mock: bool = False) -> str | None:
         _kv_set(user_id, "last_topic", topic)
         _kv_set(user_id, "last_topic_ts", datetime.now().isoformat(timespec="seconds"))
         _kv_set(user_id, "last_topic_msg_id", str(max_id))
-        # 写入 Chroma（topic kind）
+        # 写入 Chroma（topic kind）；id 加偏移基座与 important_dates 的 id 空间隔离
         try:
             import asyncio
             from . import vector_store as vec
             from .engine import _spawn
 
-            _spawn(asyncio.to_thread(vec.add, user_id, "topic", max_id, topic))
+            _spawn(asyncio.to_thread(
+                vec.add, user_id, "topic", _TOPIC_VEC_ID_BASE + max_id, topic
+            ))
         except Exception:
-            pass
+            logger.warning("[话题记忆] 话题向量写入失败（不影响对话）")
         return topic
     except Exception:
         logger.exception("[话题记忆] 提炼失败（不影响对话）")

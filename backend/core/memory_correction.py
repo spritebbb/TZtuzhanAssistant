@@ -46,9 +46,15 @@ async def arbitrate_and_forget(user_id: str, text: str, recent_context: str = ""
         return []
     numbered = "\n".join(f"{f['id']}. {f['content']}" for f in facts)
     try:
+        from .persona_profiles import persona_name_for_user_id
+
+        arbiter_prompt = ARBITER_PROMPT.replace("菟菚", persona_name_for_user_id(user_id))
+    except Exception:
+        arbiter_prompt = ARBITER_PROMPT
+    try:
         resp = await chat(
             [
-                {"role": "system", "content": ARBITER_PROMPT},
+                {"role": "system", "content": arbiter_prompt},
                 {
                     "role": "user",
                     "content": (

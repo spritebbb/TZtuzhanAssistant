@@ -82,9 +82,12 @@ async def _perceive_and_settle(user_id: str, text: str, *, mock: bool = False) -
     """
     try:
         from .perception import perceive
+        from .persona_profiles import persona_name_for_user_id
         from .state import apply_impulse
 
-        perc = await perceive(text, mock=mock)
+        persona_name = persona_name_for_user_id(user_id)
+
+        perc = await perceive(text, mock=mock, persona_name=persona_name)
 
         # 语义成功 = 拿到结果且未降级
         semantic_ok = perc is not None and not perc.get("degraded", False)
@@ -106,13 +109,13 @@ async def _perceive_and_settle(user_id: str, text: str, *, mock: bool = False) -
         if not semantic_ok:
             affection.apply_abuse_penalty(user_id, text)
             if affection.check_care(text):
-                affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, "关心菟菚")
+                affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, f"关心{persona_name}")
             if affection.check_apology(text):
                 affection.try_daily_bonus(user_id, "apology", affection.APOLOGY_BONUS, "真诚道歉")
             if affection.check_sharing(text):
                 affection.try_daily_bonus(user_id, "sharing", affection.SHARING_BONUS, "分享心事/秘密")
             if affection.check_compliment(text):
-                affection.try_daily_bonus(user_id, "compliment", affection.COMPLIMENT_BONUS, "夸菟菚")
+                affection.try_daily_bonus(user_id, "compliment", affection.COMPLIMENT_BONUS, f"夸{persona_name}")
     except Exception:
         logger.exception("[pipeline] 后台拟人状态感知失败（不影响回复）")
 
@@ -132,12 +135,15 @@ async def _vectorize_memory_async(
 
     try:
         from .vector_store import index as vec_index
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
 
         # 两条并行索引（不串行等待）；embedding 走线程池，不阻塞事件循环
         await _asyncio.wait_for(
             _asyncio.gather(
                 _asyncio.to_thread(vec_index, user_id, lm1_id, f"用户说：{text}", "lm"),
-                _asyncio.to_thread(vec_index, user_id, lm2_id, f"菟菚说：{reply}", "lm"),
+                _asyncio.to_thread(vec_index, user_id, lm2_id, f"{persona_name}说：{reply}", "lm"),
             ),
             timeout=_MEMORY_INDEX_TIMEOUT,
         )
@@ -220,16 +226,19 @@ async def _extract_triples_lazy(user_id: str) -> None:
     try:
         from .triple_memory import extract_triples, save_triples
         from .userdb import db as _db
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
 
         # 提取最近 30 条消息（去重交给 save_triples）
         rows = _db.recent_messages(user_id, 30)
         text = "\n".join(
-            f"{'用户' if r['role'] == 'user' else '菟菚'}：{r['content']}"
+            f"{'用户' if r['role'] == 'user' else persona_name}：{r['content']}"
             for r in rows
         )
         if len(text) < 10:
             return
-        triples = await extract_triples(text)
+        triples = await extract_triples(text, persona_name=persona_name)
         if triples:
             save_triples(user_id, triples, source_msg=text[:200])
     except Exception:
@@ -407,13 +416,16 @@ def _extract_reply(text: str) -> str:
     return text.strip()
 
 
-_PAREN_RE = re.compile(r"（[^）]*）|\([^)]*\)", re.S)
+# 只匹配「整行都是括号旁白」的行（行内仅含圆括号/空白），正文内的合法括号保留。
+# 避免误删正文中正常出现的（），例如「我昨天去了（公园）」不应变成「我昨天去了」。
+_PARA_LINE_RE = re.compile(r"^\s*(?:（[^）]*）|\([^)]*\))\s*$", re.M)
 
 
 def strip_actions(text: str) -> str:
-    """移除模型输出里的任何括号旁白（动作/语气/屏幕提示），只留台词。
+    """移除模型输出里的括号旁白（动作/语气/屏幕提示），只留台词。
 
     覆盖全角（）/半角()/六角〔〕；全角方头【】作为残留思考标记也一并清理。
+    圆括号旁白只删「独立成行」的（整行仅括号），正文中的合法（）保留。
     裸「思考：/回复：」只认行首，正文中间的措辞不受影响。
     """
     # ① 有显式回复标记（括号或行首「回复：」）：丢弃思考，保留最后一段回复
@@ -435,7 +447,8 @@ def strip_actions(text: str) -> str:
     text = re.sub(r"(?m)^[ \t]*(?:【思考】|〔思考〕|思考[：:])[^\n]*\n?", "", text)
     text = re.sub(r"【[^】]*】", "", text)     # 全角方头（思考/标注残留）
     text = re.sub(r"〔[^〕]*〕", "", text)     # 六角旁白/思考残留
-    text = _PAREN_RE.sub("", text)             # 圆括号旁白
+    # 圆括号旁白：只删独立成行的，正文内的合法括号保留
+    text = _PARA_LINE_RE.sub("", text)
     return text.strip()
 
 
@@ -543,6 +556,9 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
 
 
 async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
+    from .persona_profiles import persona_name_for_user_id
+
+    persona_name = persona_name_for_user_id(user_id)
     user = db.ensure_user(user_id)
     first_chat = not user["first_chat_done"]
     # 取存档前的最后一条消息时间戳：跨场判定必须基于「本轮之前」的消息，
@@ -592,7 +608,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     try:
         # 用称呼交流
         if affection.check_nickname_used(text, user["nickname_pref"]):
-            affection.try_daily_bonus(user_id, "nickname", affection.NICKNAME_BONUS, "用菟菚的称呼交流")
+            affection.try_daily_bonus(user_id, "nickname", affection.NICKNAME_BONUS, f"用{persona_name}的称呼交流")
         # 引用过去记忆（用户提到上次/之前/记得…，说明在引用共同经历；语义不覆盖）
         from .memory import looks_like_recall
 
@@ -860,7 +876,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 "content": (
                     f"今天是特殊的日子：{labels}。你从昨天起就记着这件事——"
                     "今天你可以比平常主动一点：开场就自然地提起这个日子、送上你的方式的心意"
-                    "（可以毒舌可以别扭，但要让对方感觉到你是认真记着的）。"
+                    "（按你的人格卡自然表达，但要让对方感觉到你是认真记着的）。"
                     "若对方先聊了别的，顺着聊一两句再把话题带回来，别把心意憋没了。"
                 ),
             }
@@ -941,8 +957,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     "role": "system",
                     "content": (
                         "现在是深夜。如果对方流露出低落、消极、自我否定或在倾诉心事："
-                        "收起你的毒舌和地狱笑话，认真陪着，先接住情绪再说别的——"
-                        "你的毒舌是对朋友的优待，不是在对方难过时捅刀。"
+                        "暂时收起可能伤人的玩笑，认真陪着，先接住情绪再说别的。"
                     ),
                 }
             )
@@ -1015,13 +1030,17 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         )
     # 结构化事实三元组：疑似回忆时做 RAG 检索（纯 TF-IDF，无额外 LLM 成本）
     try:
+        import asyncio as _asyncio
+
         from .triple_memory import format_triples as _fmt_triples, query_triples
 
-        triples = query_triples(user_id, text)
+        # query_triples 内部含 Chroma 同步检索（vec.search）：放线程池，
+        # 避免慢查询阻塞事件循环放大并发延迟
+        triples = await _asyncio.to_thread(query_triples, user_id, text)
         if triples:
             memory_lines.append(_fmt_triples(triples))
     except Exception:
-        pass
+        logger.debug("[pipeline] 三元组检索失败（不影响回复）")
     if memory_lines:
         messages.append(
             {
@@ -1182,7 +1201,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 "content": (
                     f"用户刚才想让你用「{bad_address}」这种称呼，这让你很不舒服。"
                     "请硬气地拒绝：不软、不解释太多，明确说这个称呼不行，"
-                    "可以带一点腹黑的调侃，但立场坚定；然后让他换个正常的称呼。"
+                    "语气遵循你的人格卡，但立场坚定；然后让他换个正常的称呼。"
                 ),
             }
         )
@@ -1230,7 +1249,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 5) 先思考再说话：让模型输出【思考】+【回复】，只把【回复】发给对方
     # 流式模式下（stream_cb 非空）不能用两段式：思考会随流推给用户。改用"直接说"提示。
     _think_common = (
-        "回应用户时保持你的风格：口语、干脆利落、带点腹黑毒舌，像在聊天软件随手回消息。\n"
+        "回应用户时严格遵循当前人格卡的说话风格，并保持自然的聊天口吻。\n"
         "条数你自己判断：接得住就一句，需要稍微铺开就两句，正常人有时也一口气说一小段——"
         "但**别为了凑数、别为了显得热情就硬写成好几条**，更别把一句话重复说两三遍。\n"
         "特别注意，这几件事**不要做**：\n"
@@ -1503,7 +1522,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 6) 存档（user 消息已在 1.0 存档，这里只补 assistant 回复）
     db.add_message(user_id, "assistant", reply)
     lm1_id = db.add_long_memory(user_id, f"用户说：{text}")
-    lm2_id = db.add_long_memory(user_id, f"菟菚说：{reply}")
+    lm2_id = db.add_long_memory(user_id, f"{persona_name}说：{reply}")
     db.set_first_chat_done(user_id)
 
     # 6.1) 容量上限：超过 _LM_MAX_ROWS 时清理最旧 SQLite 记录（本地毫秒级）。

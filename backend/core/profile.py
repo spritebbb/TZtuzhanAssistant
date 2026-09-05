@@ -78,9 +78,15 @@ def profile_prompt_text(user_id: str, max_items: int = 15) -> str:
 
 def profile_text(user_id: str) -> str:
     """构建人类可读的画像文本（/画像 命令用）。"""
+    try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
+    except Exception:
+        persona_name = "助手"
     rows = db.get_profile(user_id)
     if not rows:
-        return "（菟菚还没记下关于你的画像，多聊聊她就更懂你了）"
+        return f"（{persona_name}还没记下关于你的画像，多聊聊就会更懂你）"
     groups: dict[str, list[str]] = {}
     for r in rows:
         groups.setdefault(r["category"], []).append(r["content"])
@@ -91,7 +97,7 @@ def profile_text(user_id: str) -> str:
             continue
         label = _CATEGORY_LABELS.get(cat, cat)
         lines.append(f"· {label}：" + "；".join(items))
-    return "菟菚心里的你：\n" + "\n".join(lines)
+    return f"{persona_name}心里的你：\n" + "\n".join(lines)
 
 
 async def extract_profile(user_id: str, day=None, *, rows=None, done=0) -> bool:

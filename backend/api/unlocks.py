@@ -5,12 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..core import unlock
+from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/unlocks", tags=["unlocks"])
 
-_UID = "assistant-main"
-
-
 @router.get("")
 async def api_unlocks_list():
-    return {"ok": True, "slots": unlock.list_slots(_UID)}
+    return {"ok": True, "slots": unlock.list_slots(active_user_id())}

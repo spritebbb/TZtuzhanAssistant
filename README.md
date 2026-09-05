@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=for-the-badge&logo=windows" alt="Windows 10/11" />
   <img src="https://img.shields.io/badge/Python-3.11--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11 to 3.13" />
   <img src="https://img.shields.io/badge/FastAPI-%2B%20Vue%203-009688?style=for-the-badge&logo=fastapi" alt="FastAPI and Vue 3" />
@@ -26,24 +26,24 @@
 
 ---
 
-## 📦 v2.1.0 已发布
+## 📦 v2.5.0 已发布
 
 | 推荐下载 | 适合谁 | 下载 |
 |---|---|---|
-| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-v2.1.0.zip) |
-| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-Full-v2.1.0-Large.zip) |
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-v2.5.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-Full-v2.5.0-Large.zip) |
 
 > 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0"><strong>查看完整 Release 说明 →</strong></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0"><strong>查看完整 Release 说明 →</strong></a>
 </p>
 
 ## ✨ 核心能力
 
 | | |
 |---|---|
-| 🎭 **拟人人格**<br />人格写在 `persona-菟菚.md`，支持自然、连续的交流风格。 | 🧠 **长期记忆**<br />SQLite + 本地向量检索，保存画像、事实、话题与重要日期。 |
+| 🎭 **人格热切换**<br />直接加载 `.md` 人格卡；每套人格的会话、记忆、知识库和界面设置相互隔离。 | 🧠 **长期记忆**<br />SQLite + 本地向量检索，保存画像、事实、话题与重要日期。 |
 | 🧰 **工具与 Agent**<br />插件热加载、MCP 接入、工具循环与逐步确认，关键动作可控。 | 💬 **实时流式对话**<br />SSE 打字机输出、工具进度、图片生成与随时停止。 |
 | 💖 **关系与心情**<br />好感度、昵称、关怀回应与天气驱动心情，形成持续互动。 | 🛡️ **本机优先安全**<br />默认仅回环监听；LAN 请求受 token、Host 白名单与 SSRF 防护约束。 |
 
@@ -60,7 +60,7 @@
 
 ## 🧩 功能一览
 
-- 🎭 **拟人人格**：毒舌腹黑、地狱笑话，人格写在 `persona-菟菚.md`
+- 🎭 **人格热切换**：点击顶部人格名称打开人格替换助手，加载与原卡相同格式的 `.md` 文件；旧卡保存在 `data/personas/`
 - 🧠 **长期记忆**：SQLite 存储用户画像、关系事实（五元组）、话题延续、重要日子；本地 BGE 向量语义检索
 - 💖 **好感度系统**：昵称、关心、分享、道歉、夸奖等互动实时增减，语义感知 + 关键词兜底双通道
 - ⛅ **心情系统**：绑定城市天气，心情随当日天气波动
@@ -70,10 +70,24 @@
 - 🧰 **插件化工具链**：工具全部以 `plugins/*.py` 插件形式加载，支持热加载（无需重启）、每步确认机制、外部 MCP 服务器接入
 - 🤖 **外部 Agent 桥**：`codex_run` / `dsh_run` 可派发独立任务给本机 Codex CLI / DSH（非交互 exec 模式，每步确认）
 - 💬 **流式输出**：SSE 打字机效果 + 工具执行进度实时推送，Markdown 渲染，可随时停止
-- 📂 **多会话 + 归档**：SQLite 存储，共享同一人格记忆，支持归档与关键词搜索
+- 📂 **独立会话 + 归档**：每套人格拥有独立的当前会话、归档、关系状态、长期记忆与知识库
 - 🕐 **主动性引擎**：久未聊且关系够近时主动开口，支持桌面通知
 - 👋 **久别问候**：长时间未见再次打开时主动问候
 - 🖼️ **静态立绘**：桌面窗口显示菟菚人设图
+
+人格名称默认从 Markdown 的第一个标题读取。卡片也可选用以下 front matter，让主题与音色首次加载时自动建立；之后可在 UI 中修改并随人格保存：
+
+```md
+---
+name: Luna
+subtitle: 月夜里的陪伴者
+theme: light
+voice: zh-CN-XiaoyiNeural
+---
+
+# Luna
+这里开始写人格正文……
+```
 
 ---
 
@@ -83,8 +97,8 @@
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v2.1.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-v2.1.0.zip) |
-| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v2.1.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.1.0/TZtuzhanAssistant-Deploy-Full-v2.1.0-Large.zip) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v2.5.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-v2.5.0.zip) |
+| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v2.5.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-Full-v2.5.0-Large.zip) |
 | **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe（约 80 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
 
@@ -107,7 +121,7 @@
 
 ### 步骤
 
-1. **下载**：到 [v2.1.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.1.0) 下载部署包：
+1. **下载**：到 [v2.5.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0) 下载部署包：
    - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
    - `TZtuzhanAssistant-Deploy-Full-vX.X.X-Large.zip` — 大杯版 / Large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
@@ -316,6 +330,9 @@ persona-菟菚.md               # 人格源文件
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/health/shutdown` | 优雅关停后端 |
 | GET | `/api/meta` | 工具状态 + 心情 |
+| GET / POST | `/api/personas` / `/api/personas/import` | 人格列表 / 加载 Markdown 人格卡 |
+| POST | `/api/personas/{id}/activate` | 热切换人格与独立数据空间 |
+| PATCH | `/api/personas/{id}` | 保存人格名称、主题和 TTS 音色 |
 | GET | `/api/sessions/{session_id}` | 会话消息 |
 | POST | `/api/sessions/archive` | 归档会话 |
 | GET | `/api/sessions/archives` | 归档列表 |

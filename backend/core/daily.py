@@ -112,6 +112,9 @@ def _repair_truncated_json(text: str) -> dict | None:
 async def run_daily_batch(user_id: str, day: date) -> None:
     """昨日好感度判定 + 事实提炼。执行完成才推进 last_batch_date（失败可重试）。"""
     from .userdb import kv_get as _kv_get, kv_set as _kv_set
+    from .persona_profiles import persona_name_for_user_id
+
+    persona_name = persona_name_for_user_id(user_id)
 
     # 幂等防重跑：同一天只执行一次（schedule 按 key 去重，这里再兜一道）
     done_key = f"daily_batch:{day.isoformat()}"
@@ -128,7 +131,7 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     try:
         resp = await chat(
             [
-                {"role": "system", "content": JUDGE_PROMPT},
+                {"role": "system", "content": JUDGE_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"昨天的对话：\n{transcript}"},
             ]
         )
@@ -140,11 +143,11 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     if data.get("hobby"):
         db.update_affection(user_id, affection.HOBBY_BONUS, "用户聊自己的爱好")
     if data.get("respect"):
-        db.update_affection(user_id, affection.RESPECT_BONUS, "尊重菟菚的喜好")
+        db.update_affection(user_id, affection.RESPECT_BONUS, f"尊重{persona_name}的喜好")
     if data.get("dismiss"):
         db.update_affection(user_id, affection.DISMISS_PENALTY, "轻视/不重视")
     if data.get("care"):
-        db.update_affection(user_id, affection.CARE_BONUS, "关心菟菚")
+        db.update_affection(user_id, affection.CARE_BONUS, f"关心{persona_name}")
     if data.get("deep_chat"):
         db.update_affection(user_id, affection.DEEP_CHAT_BONUS, "深度/走心对话")
 
@@ -191,9 +194,12 @@ async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
     content = ""
     mood = ""
     try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": DIARY_PROMPT},
+                {"role": "system", "content": DIARY_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"日期：{day.isoformat()}\n当天对话：\n{transcript}"},
             ],
             temperature=0.65,
@@ -227,9 +233,12 @@ async def maybe_write_research_report(user_id: str) -> dict | None:
     period = f"{batch[0]['date']}~{batch[-1]['date']}"
     transcript = "\n\n".join(f"{d['date']}（{d['mood']}）：{d['content']}" for d in batch)
     try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": RESEARCH_PROMPT},
+                {"role": "system", "content": RESEARCH_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": transcript},
             ],
             temperature=0.55,
@@ -254,9 +263,12 @@ async def extract_promises(user_id: str, day: date, transcript: str) -> int:
     if not transcript.strip():
         return 0
     try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": PROMISE_PROMPT},
+                {"role": "system", "content": PROMISE_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"今天的日期：{day.isoformat()}\n对话记录：\n{transcript}"},
             ],
             temperature=0.2,
@@ -348,9 +360,12 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         done = rows[-1]["id"]
 
     try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": FACT_PROMPT},
+                {"role": "system", "content": FACT_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"对话记录：\n{transcript}"},
             ],
             temperature=0.3,

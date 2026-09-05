@@ -11,8 +11,12 @@ router = APIRouter(prefix="/api", tags=["tts"])
 
 
 @router.get("/tts")
-async def api_tts(text: str = "", voice: str = "zh-CN-XiaoxiaoNeural"):
+async def api_tts(text: str = "", voice: str = ""):
     """语音朗读：edge-tts 合成 mp3（带缓存）。text 为空或合成失败返回 400。"""
+    if not voice:
+        from ..core.persona_profiles import active_voice
+
+        voice = active_voice()
     if not text.strip():
         return JSONResponse({"ok": False, "error": "缺少 text"}, status_code=400)
     if len(text) > MAX_TEXT_CHARS or len(voice) > 100:

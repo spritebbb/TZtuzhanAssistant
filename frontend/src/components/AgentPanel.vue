@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { apiFetch } from '../api'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 interface TaskBrief {
@@ -278,7 +278,7 @@ function dangerLabel(d: string): string {
 
           <!-- 任务列表 -->
           <div class="a-list">
-            <div v-if="tasks.length === 0" class="a-empty">暂无任务。输入目标，让菟菚拆解计划。</div>
+            <div v-if="tasks.length === 0" class="a-empty">暂无任务。输入目标，让{{ props.personaName || '助手' }}拆解计划。</div>
             <div
               v-for="t in tasks"
               :key="t.id"

@@ -74,13 +74,15 @@ async def _memory_add(content: str = "") -> str:
     if not content:
         return tool_failure("（缺少记忆内容）")
     uid = _uid()
-    mid = userdb.db.add_long_memory(uid, content)
+    # pinned=True：用户/LLM 显式要求记住的内容打保护位，不会被容量轮转清理
+    # （clean_old_long_memory / prune_long_memory 均跳过 pinned 行）
+    mid = userdb.db.add_long_memory(uid, content, pinned=True)
     # 建语义向量索引（失败静默）
     try:
         from ...core.vector_store import index as vec_index
         await asyncio.to_thread(vec_index, uid, mid, content, "lm")
     except Exception:
-        pass
+        logger.warning("[memory_add] 向量索引写入失败（SQLite 已落库，回填任务会补）")
     return f"✅ 已写入长期记忆 #{mid}"
 
 

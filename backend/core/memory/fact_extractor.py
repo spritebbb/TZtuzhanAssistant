@@ -29,7 +29,7 @@ experience（经历/经验）/ plan（计划/约定/承诺）/ event（事件/�
 1. 只提取事实性信息：具体行为、实体关系、状态、属性、偏好、需求、计划、约定
 2. 过滤：比喻/拟人/夸张、假设/想象、纯情感表达（"我很开心"）、赞美/调侃、闲聊废话
 3. 一个句子可以提取多个五元组
-4. 主体通常是"用户"或"菟菚"，客体是具体的事物
+4. 主体通常是"用户"或"{persona_name}"，客体是具体的事物
 5. 置信度：high（明确说出的） / medium（能合理推断的） / low（猜测的，不重要的不提取）
 6. 每个五元组输出务必简洁、客观
 
@@ -46,13 +46,24 @@ experience（经历/经验）/ plan（计划/约定/承诺）/ event（事件/�
 """
 
 
-async def extract_triples(text: str, *, mock: bool = False) -> list[list[str]]:
+async def extract_triples(
+    text: str,
+    *,
+    mock: bool = False,
+    persona_name: str = "菟菚",
+) -> list[list[str]]:
     """从文本中提取结构化五元组。返回 [subject, st, predicate, obj, ot, confidence, category] 列表。"""
     if mock:
         return [["用户", "人物", "喜欢", "测试", "概念", "medium", "preference"]]
     try:
         resp = await chat(
-            [{"role": "system", "content": EXTRACT_PROMPT}, {"role": "user", "content": text}],
+            [
+                {
+                    "role": "system",
+                    "content": EXTRACT_PROMPT.format(persona_name=persona_name),
+                },
+                {"role": "user", "content": text},
+            ],
             temperature=0.3,
             max_tokens=600,
         )

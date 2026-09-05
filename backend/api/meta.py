@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from ..core.config import config
 from ..core.mood import current_mood
+from ..core.persona_profiles import active_profile, active_user_id
 from ..tools.base import ToolRegistry
 
 router = APIRouter(prefix="/api", tags=["meta"])
@@ -57,7 +58,7 @@ async def api_meta(session_id: str = ""):
 
     from ..core.affection import display as affection_display
 
-    uid = _user_id(session_id) if session_id else "assistant-main"
+    uid = _user_id(session_id) if session_id else active_user_id()
     mood_val, mood_label = current_mood(uid, city=config.mood_city)
     # 心情 emoji 映射
     if mood_val >= 85:
@@ -79,4 +80,5 @@ async def api_meta(session_id: str = ""):
         "tool_list": [t.model_dump() for t in ToolRegistry.list()],
         "mood": {"value": mood_val, "label": mood_label, "emoji": mood_emoji},
         "affection": affection_display(uid),
+        "persona": active_profile(),
     }

@@ -12,6 +12,7 @@ const emit = defineEmits<{
 const props = defineProps<{
   open: boolean
   currentId: string | null
+  personaName?: string
 }>()
 
 const archives = ref<ArchiveInfo[]>([])
@@ -136,8 +137,8 @@ defineExpose({ load })
         </svg>
       </div>
       <div class="brand-copy">
-        <span class="brand-name">菟菚</span>
-        <span class="brand-caption">BOTANICAL COMPANION</span>
+        <span class="brand-name">{{ personaName || '助手' }}</span>
+        <span class="brand-caption">PERSONA COMPANION</span>
       </div>
       <span class="brand-sub">归档</span>
     </div>
@@ -231,7 +232,7 @@ defineExpose({ load })
         <div class="viewer-body">
           <div v-if="!viewingMessages.length" class="viewer-empty">（无内容）</div>
           <div v-for="(m, i) in viewingMessages" :key="i" class="vmsg" :class="m.role">
-            <div class="vwho">{{ m.role === 'user' ? '你' : '菟菚' }}</div>
+            <div class="vwho">{{ m.role === 'user' ? '你' : (personaName || '助手') }}</div>
             <div class="vcontent">{{ m.content || '（图片）' }}</div>
             <img v-if="m.image" class="vimg" :src="resolveImageSrc(m.image)" :alt="m.content || '图片'" />
           </div>

@@ -8,7 +8,7 @@ const emit = defineEmits<{
   file: [f: File | null]
 }>()
 
-defineProps<{ busy: boolean; streaming: boolean }>()
+defineProps<{ busy: boolean; streaming: boolean; personaName?: string }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -60,14 +60,14 @@ function useShortcut(s: Shortcut) {
           <path d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
-      <button class="icon-btn" title="识图：上传图片让菟菚看看" @click="fileInput?.click()">
+      <button class="icon-btn" :title="'识图：上传图片让' + (personaName || '助手') + '看看'" @click="fileInput?.click()">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="4"/>
           <circle cx="8.5" cy="8.5" r="1.5"/>
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
-      <textarea v-model="input" :disabled="busy" rows="1" placeholder="和菟菚说点什么…（Enter 发送，Shift+Enter 换行）" @keydown.enter.exact.prevent="emit('send')"></textarea>
+      <textarea v-model="input" :disabled="busy" rows="1" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact.prevent="emit('send')"></textarea>
       <button v-if="streaming" class="btn stop" @click="emit('stop')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>

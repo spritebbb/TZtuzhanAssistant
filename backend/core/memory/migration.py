@@ -66,18 +66,37 @@ def migrate(progress_cb=None) -> dict:
         logger.warning("[迁移] Chroma 不可用，跳过迁移（向量检索降级为 TF-IDF）")
         return {"skipped": True}
 
+    # 维度锁防线：embedding 模型未就绪时（过渡期哈希回退）不迁移——
+    # 哈希向量不但无语义，还会把 collection 维度锁成 768，且写入计数会让
+    # _needs_migration 误判「迁移完成」（模型就绪后真迁移被跳过）。
+    from . import embedding as _emb
+
+    if not _emb.is_loaded():
+        try:
+            from ..config import config as _cfg
+
+            if not _cfg.memory_embed_force:
+                logger.warning(
+                    "[迁移] embedding 模型未就绪，暂缓迁移（待模型预热完成后自动触发）"
+                )
+                return {"skipped": True}
+        except Exception:
+            logger.warning("[迁移] embedding 模型未就绪，暂缓迁移")
+            return {"skipped": True}
+
     stats: dict = {"skipped": False}
 
     # 1) long_memory → lm
-    count = _migrate_table("long_memory", "lm", lambda r: r["content"], stats)
+    count = _migrate_table("long_memory", "lm", lambda r: r["content"], stats, progress_cb)
     # 2) facts → facts
-    count += _migrate_table("facts", "facts", lambda r: r["content"], stats)
+    count += _migrate_table("facts", "facts", lambda r: r["content"], stats, progress_cb)
     # 3) triples → triples（拼接 主体+谓词+客体）
     count += _migrate_table(
         "triples",
         "triples",
         lambda r: f"{r['subject']} {r['predicate']} {r['object']}",
         stats,
+        progress_cb,
     )
     # 4) user_profile → profile
     count += _migrate_table(
@@ -85,6 +104,7 @@ def migrate(progress_cb=None) -> dict:
         "profile",
         lambda r: f"{r['content']}（{r['category']}）",
         stats,
+        progress_cb,
     )
     # 5) important_dates → topic（日子算事件记忆，走 topic 分区）
     count += _migrate_table(
@@ -92,6 +112,7 @@ def migrate(progress_cb=None) -> dict:
         "topic",
         lambda r: f"{r['label']}：{r['date']}",
         stats,
+        progress_cb,
     )
     # 6) 摘要 → summary（kv_store 的 compact_summary）
     try:
@@ -102,7 +123,7 @@ def migrate(progress_cb=None) -> dict:
         conn.close()
         for user_id, val in rows:
             if val:
-                vec.add(user_id, "summary", 0, val)
+                vec.add(user_id, "summary", 0, val, _allow_during_rebuild=True)
                 stats["summary"] = stats.get("summary", 0) + 1
     except Exception:
         pass
@@ -113,7 +134,6 @@ def migrate(progress_cb=None) -> dict:
 
 def _migrate_table(table: str, kind: str, text_fn, stats: dict, progress_cb=None) -> int:
     from . import vector_store as vec
-    from .embedding import embed_batch
 
     rows = _sqlite_rows(table)
     if not rows:
@@ -122,15 +142,18 @@ def _migrate_table(table: str, kind: str, text_fn, stats: dict, progress_cb=None
     done = 0
     for i in range(0, len(rows), _BATCH):
         batch = rows[i : i + _BATCH]
-        texts = [text_fn(r) for r in batch]
-        vecs = embed_batch(texts)
-        if not vecs:
-            continue
-        for r, text, v in zip(batch, texts, vecs):
+        for r in batch:
+            text = text_fn(r)
             if not text or not text.strip():
                 continue
-            ok = vec.add(r["user_id"], kind, r["id"], text)
-            if ok:
+            # 直接走 vec.add：其内部 EF 做 embedding（带 _emb_cache 缓存）。
+            # 不再先 embed_batch 预判——那样每个文本会被推理两次（预判一次、
+            # add 内部 EF 又一次），首轮存量迁移耗时近乎翻倍。
+            # _allow_during_rebuild=True：本迁移可能由 rebuild_all 触发（_rebuilding
+            # 已置位）。若走默认闸门，重建重灌的每一条都会被 add() 拒绝，导致清库后
+            # 重灌 0 条、语义检索静默失效（P1 自锁）。迁移是批量全量重灌写方自身，
+            # 不会被重建流程误删，必须放行。
+            if vec.add(r["user_id"], kind, r["id"], text, _allow_during_rebuild=True):
                 done += 1
         if progress_cb:
             progress_cb(table, min(i + _BATCH, len(rows)), len(rows))

@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { deleteFact, getFacts, updateFact, type FactItem } from '../api/memory'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const facts = ref<FactItem[]>([])
@@ -46,7 +46,7 @@ async function saveEdit(id: number) {
 }
 
 async function remove(id: number) {
-  if (!window.confirm('确定让菟菚忘掉这条？删了就真的想不起来了')) return
+  if (!window.confirm(`确定让${props.personaName || '助手'}忘掉这条？删了就真的想不起来了`)) return
   busyId.value = id
   try {
     await deleteFact(id)
@@ -63,17 +63,17 @@ watch(() => props.show, (show) => { if (show) void load() })
 
 <template>
   <div v-if="show" class="memory-mask" @click.self="emit('close')">
-    <section class="memory-panel" role="dialog" aria-modal="true" aria-label="菟菚记住的事">
+    <section class="memory-panel" role="dialog" aria-modal="true" :aria-label="(props.personaName || '助手') + '记住的事'">
       <header>
         <div>
           <span class="eyebrow">WHAT SHE REMEMBERS</span>
-          <h2>她记住的事</h2>
+          <h2>{{ props.personaName || '助手' }}记住的事</h2>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>
       <p class="hint">她记错的可以改、可以删——改动立刻生效，下次聊天她就按新的记。</p>
       <div class="entries">
-        <p v-if="loading" class="empty">正在翻看她的记忆…</p>
+        <p v-if="loading" class="empty">正在翻看{{ props.personaName || '助手' }}的记忆…</p>
         <p v-else-if="error" class="empty">{{ error }}</p>
         <template v-else>
           <article v-for="fact in facts" :key="fact.id">

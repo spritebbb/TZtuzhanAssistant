@@ -7,7 +7,7 @@ import {
   type KnowledgeDocument,
 } from '../api/knowledge'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const documents = ref<KnowledgeDocument[]>([])
@@ -83,11 +83,11 @@ watch(() => props.show, (show) => { if (show) void load() })
 
 <template>
   <div v-if="show" class="kb-mask" @click.self="emit('close')">
-    <section class="kb-panel" role="dialog" aria-modal="true" aria-label="菟菚的书架">
+    <section class="kb-panel" role="dialog" aria-modal="true" :aria-label="(props.personaName || '助手') + '的书架'">
       <header>
         <div>
           <span class="eyebrow">BOOKSHELF</span>
-          <h2>她的书架</h2>
+          <h2>{{ props.personaName || '助手' }}的书架</h2>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>

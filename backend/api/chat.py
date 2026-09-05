@@ -16,11 +16,11 @@ from ..core.pipeline import process
 from ..core.current_user import current_user_id
 from ..session.store import CURRENT_SESSION_ID, append_messages, get_messages
 
-# 单一会话模式下，用户身份统一为 assistant-main（与 agent 任务代理、meta 兜底、
-# contextvar 默认值保持一致），保证聊天与任务代理共用同一份好感度/心情/记忆画像，
-# 避免「同一个菟菚」在聊天和任务两条线上割裂成两条互不相通的数据记录。
+# 公共会话 id 保持 current；数据层按当前人格映射到独立用户命名空间。
 def _user_id(session_id: str) -> str:
-    return "assistant-main"
+    from ..core.persona_profiles import active_user_id
+
+    return active_user_id()
 
 router = APIRouter(prefix="/api", tags=["chat"])
 

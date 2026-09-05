@@ -14,11 +14,9 @@ from fastapi.responses import JSONResponse
 from .chat import _user_id
 from ..core.log import logger
 from ..core.userdb import delete_fact, list_facts, update_fact
+from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
-
-_UID = "assistant-main"
-
 
 def _vec_delete(user_id: str, fact_id: int) -> None:
     """同步删除 facts 向量（失败静默——向量是索引，SQLite 才是事实源）。"""
@@ -44,25 +42,27 @@ def _vec_reindex(user_id: str, fact_id: int, content: str) -> None:
 
 @router.get("/facts")
 async def api_list_facts(limit: int = Query(200, ge=1, le=500)):
-    return {"ok": True, "facts": list_facts(_UID, limit)}
+    return {"ok": True, "facts": list_facts(active_user_id(), limit)}
 
 
 @router.put("/facts/{fact_id}")
 async def api_update_fact(fact_id: int, content: str = Body(..., embed=True)):
+    uid = active_user_id()
     content = content.strip()
     if not content:
         return JSONResponse({"ok": False, "error": "内容不能为空"}, status_code=400)
-    if not update_fact(_UID, fact_id, content):
+    if not update_fact(uid, fact_id, content):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
-    await asyncio.to_thread(_vec_reindex, _UID, fact_id, content)
+    await asyncio.to_thread(_vec_reindex, uid, fact_id, content)
     logger.info("[记忆管理] 改写事实 #{}: {}", fact_id, content[:40])
     return {"ok": True}
 
 
 @router.delete("/facts/{fact_id}")
 async def api_delete_fact(fact_id: int):
-    if not delete_fact(_UID, fact_id):
+    uid = active_user_id()
+    if not delete_fact(uid, fact_id):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
-    await asyncio.to_thread(_vec_delete, _UID, fact_id)
+    await asyncio.to_thread(_vec_delete, uid, fact_id)
     logger.info("[记忆管理] 删除事实 #{}", fact_id)
     return {"ok": True}
