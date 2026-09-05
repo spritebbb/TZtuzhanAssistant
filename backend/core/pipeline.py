@@ -815,12 +815,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 事后读取当前状态而与当轮 prompt 不一致。
     reply_state = None
     reply_frame = None
+    reply_season = None
     try:
         from .behavior import build_behavior_frame
+        from .seasons import current_season
         from .state import load_state
 
         reply_state = load_state(user_id)
-        reply_frame = build_behavior_frame(reply_state)
+        reply_season = current_season(user_id, reply_state)
+        reply_frame = build_behavior_frame(reply_state, season_line=reply_season["line"])
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
     stage = reply_state.stage if reply_state is not None else affection.stage_of(user["affection"])
@@ -1540,6 +1543,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             memory_rows.extend(
                 ("事件来源", source) for source in event_recall_result.get("sources", [])[:2]
             )
+            if reply_season:
+                memory_rows.append(
+                    ("关系季节", f"{reply_season['label']}（{reply_season['reason']}）")
+                )
             snapshot = build_reply_explanation(
                 reply_state,
                 reply_frame,

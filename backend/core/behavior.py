@@ -26,10 +26,13 @@ class BehaviorFrame:
     event_line: str = ""    # 事件级长期记忆 → 精确引用「你上次说的某句话」
     rest_line: str = ""     # 用户让她休息后，真实休息计时在语气里的体现
     tension_line: str = ""  # 未修复冲突与本轮修复进度
+    season_line: str = ""   # 关系季节（M4）：由真实事件推导的氛围基调
 
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
         parts = [self.mood_line, self.stage_line]
+        if self.season_line:
+            parts.append(self.season_line)
         if self.initiative:
             parts.append(self.initiative)
         if self.reaction_line:
@@ -219,8 +222,8 @@ def _event_line(s: AgentState) -> str:
     )
 
 
-def build_behavior_frame(state: AgentState) -> BehaviorFrame:
-    """根据状态生成一轮行为帧。"""
+def build_behavior_frame(state: AgentState, season_line: str = "") -> BehaviorFrame:
+    """根据状态生成一轮行为帧。season_line 由 seasons.current_season 预先算好。"""
     return BehaviorFrame(
         mood_line=_mood_line(state),
         stage_line=_stage_line(state),
@@ -230,4 +233,5 @@ def build_behavior_frame(state: AgentState) -> BehaviorFrame:
         event_line=_event_line(state),
         rest_line=_rest_line(state),
         tension_line=_tension_line(state),
+        season_line=season_line,
     )
