@@ -25,6 +25,7 @@ EVENT_TYPES: dict[str, str] = {
     "focus_finished": "一段专注陪伴完成（来源：activities）",
     "goal_completed": "一个共同目标完成（来源：activities）",
     "story_finished": "一个共同创作的故事收笔（来源：activities；payload 只含标题与轮数，不带虚构正文）",
+    "list_completed": "一份共同清单（歌单/书单）收列完成（来源：activities）",
 }
 
 _MAX_PAYLOAD_EVENTS = 2

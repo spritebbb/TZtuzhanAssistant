@@ -37,6 +37,19 @@ import {
   startWriting,
   type CoWriting,
 } from '../api/writings'
+import {
+  addListItem,
+  cancelList,
+  completeList,
+  exportListUrl,
+  listLists,
+  pauseList,
+  removeListItem,
+  resumeList,
+  startList,
+  type ListKind,
+  type SharedList,
+} from '../api/lists'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{
@@ -77,6 +90,14 @@ const writingPremise = ref('')
 const writingTurnDraft = ref('')
 const keepCoStory = ref(true)
 const writingBusy = ref(false)
+const lists = ref<SharedList[]>([])
+const currentList = ref<SharedList | null>(null)
+const showListForm = ref(false)
+const listTitle = ref('')
+const listKind = ref<ListKind>('song')
+const itemTitle = ref('')
+const itemCreator = ref('')
+const itemNote = ref('')
 const noteDraft = ref('')
 const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
@@ -96,6 +117,8 @@ const openGoals = computed(() => goals.value.filter(item => item.status === 'act
 const completedGoals = computed(() => goals.value.filter(item => item.status === 'completed').slice(0, 4))
 const openWritings = computed(() => writings.value.filter(item => item.status === 'active' || item.status === 'paused'))
 const completedWritings = computed(() => writings.value.filter(item => item.status === 'completed').slice(0, 4))
+const openLists = computed(() => lists.value.filter(item => item.status === 'active' || item.status === 'paused'))
+const completedLists = computed(() => lists.value.filter(item => item.status === 'completed').slice(0, 4))
 
 function serverViewpoint(role: ViewpointRole): string {
   if (!current.value) return ''
@@ -134,16 +157,18 @@ async function load() {
   error.value = ''
   notice.value = ''
   try {
-    const [activityRows, documentRows, goalRows, writingRows] = await Promise.all([
+    const [activityRows, documentRows, goalRows, writingRows, listRows] = await Promise.all([
       listReadingActivities(),
       listKnowledgeDocuments(),
       listGoals(),
       listWritings(),
+      listLists(),
     ])
     activities.value = activityRows
     documents.value = documentRows
     goals.value = goalRows
     writings.value = writingRows
+    lists.value = listRows
     const active = activityRows.find(item => item.status === 'active') ?? null
     current.value = active
     noteDraft.value = active?.note ?? ''
@@ -379,6 +404,88 @@ async function askTuzhanTurn() {
   }
 }
 
+function applyList(value: SharedList) {
+  currentList.value = value
+  lists.value = [value, ...lists.value.filter(item => item.id !== value.id)]
+}
+
+async function runList(action: () => Promise<SharedList>, success = '') {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    applyList(await action())
+    notice.value = success
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function createList() {
+  await runList(() => startList(listTitle.value, listKind.value), '清单开好了，先加第一个')
+  if (!error.value) {
+    showListForm.value = false
+    listTitle.value = ''
+  }
+}
+
+function openList(item: SharedList) {
+  currentList.value = item
+  itemTitle.value = ''
+  itemCreator.value = ''
+  itemNote.value = ''
+  notice.value = ''
+  error.value = ''
+}
+
+function submitItem() {
+  if (!currentList.value || !itemTitle.value.trim()) return
+  void runList(() => addListItem(currentList.value!.id, {
+    title: itemTitle.value,
+    creator: itemCreator.value,
+    note: itemNote.value,
+  }), '加进清单了')
+  if (!error.value) {
+    itemTitle.value = ''
+    itemCreator.value = ''
+    itemNote.value = ''
+  }
+}
+
+function dropItem(item: { id: number }) {
+  if (!currentList.value) return
+  void runList(() => removeListItem(currentList.value!.id, item.id), '从清单里拿掉了')
+}
+
+function leaveList() {
+  currentList.value = null
+  notice.value = ''
+  error.value = ''
+}
+
+function pauseCurrentList() {
+  const item = currentList.value
+  if (item) void runList(() => pauseList(item.id), '先放在这里')
+}
+
+function resumeCurrentList() {
+  const item = currentList.value
+  if (item) void runList(() => resumeList(item.id), '继续攒')
+}
+
+function finishCurrentList() {
+  const item = currentList.value
+  if (item) void runList(() => completeList(item.id), '收列完成，收进了共同角落')
+}
+
+function cancelCurrentList() {
+  const item = currentList.value
+  if (item) void runList(() => cancelList(item.id), '这份清单先不攒了')
+}
+
 function leaveWriting() {
   currentWriting.value = null
   writingTurnDraft.value = ''
@@ -430,7 +537,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 
       <div class="body">
         <p v-if="loading" class="empty">正在找上次夹的书签…</p>
-        <p v-else-if="error && !current && !currentGoal && !currentWriting" class="empty error">{{ error }}</p>
+        <p v-else-if="error && !current && !currentGoal && !currentWriting && !currentList" class="empty error">{{ error }}</p>
 
         <template v-else-if="currentGoal">
           <button class="back" @click="leaveGoal">← 所有活动</button>
@@ -523,6 +630,54 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           <article v-if="currentWriting.story" class="summary-box"><span>共同故事</span><p>{{ currentWriting.story }}</p></article>
           <a class="goal-export" :href="exportWritingUrl(currentWriting.id)" download>导出 Markdown</a>
           <p class="fiction-note">这是一段你们共同虚构的创作；故事只留在故事里，不会变成你们现实记忆的一部分。</p>
+        </template>
+
+        <template v-else-if="currentList">
+          <button class="back" @click="leaveList">← 所有活动</button>
+          <div class="goal-head">
+            <div>
+              <span class="status" :class="currentList.status">
+                {{ currentList.status === 'completed' ? '已收列' : currentList.status === 'paused' ? '暂放一下' : currentList.status === 'cancelled' ? '已放下' : '一起攒着' }}
+              </span>
+              <h3>{{ currentList.title }}</h3>
+              <p>共同{{ currentList.kind_label }} · {{ currentList.items.length }} 条</p>
+            </div>
+          </div>
+
+          <div class="story-turns">
+            <article v-for="item in currentList.items" :key="item.id" :class="item.added_by">
+              <span>{{ item.added_by === 'user' ? '我' : props.personaName || '她' }}推荐</span>
+              <p><strong>{{ item.title }}</strong><template v-if="item.creator"> · {{ item.creator }}</template><template v-if="item.note"><br><small>{{ item.note }}</small></template></p>
+              <button
+                v-if="currentList.status === 'active' || currentList.status === 'paused'"
+                class="term-del item-del" :disabled="busy" @click="dropItem(item)"
+              >拿掉</button>
+            </article>
+            <p v-if="!currentList.items.length" class="empty small">清单还空着，先加最想分享的那一个</p>
+          </div>
+
+          <template v-if="currentList.status === 'active' || currentList.status === 'paused'">
+            <label class="writing-turn-form">
+              <span>加一条</span>
+              <input v-model="itemTitle" maxlength="200" placeholder="歌名 / 书名">
+              <input v-model="itemCreator" maxlength="200" placeholder="歌手 / 作者（可选）">
+              <textarea v-model="itemNote" rows="2" maxlength="500" placeholder="为什么想分享（可选）"></textarea>
+            </label>
+            <div class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
+            <div class="goal-actions writing-actions">
+              <button :disabled="busy || !itemTitle.trim()" @click="submitItem">加进清单</button>
+            </div>
+            <div class="goal-actions">
+              <button v-if="currentList.status === 'active'" :disabled="busy" @click="pauseCurrentList">暂停</button>
+              <button v-else :disabled="busy" @click="resumeCurrentList">继续</button>
+              <button class="finish" :disabled="busy" @click="finishCurrentList">收列完成</button>
+              <button class="plain-action" :disabled="busy" @click="cancelCurrentList">放下清单</button>
+            </div>
+          </template>
+          <div v-else class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
+
+          <article v-if="currentList.compiled" class="summary-box"><span>共同清单</span><p>{{ currentList.compiled }}</p></article>
+          <a class="goal-export" :href="exportListUrl(currentList.id)" download>导出 Markdown</a>
         </template>
 
         <template v-else-if="current">
@@ -628,6 +783,28 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
             <div v-if="completedWritings.length" class="activity-list goal-list completed-goals">
               <button v-for="item in completedWritings" :key="item.id" @click="openWriting(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.turns.length }} 段故事</small></span><em>回看</em></button>
+            </div>
+          </section>
+
+          <section class="shelf-section goal-section writing-section list-section">
+            <div class="section-title"><span>SHARED LIST</span><h3>共同清单</h3></div>
+            <p class="focus-hint">一起攒一份歌单或书单，想分享给对方的东西都留在这里</p>
+            <button v-if="!showListForm" class="open-bookshelf" @click="showListForm = true">攒一份清单</button>
+            <div v-else class="goal-create">
+              <label><span>清单名</span><input v-model="listTitle" maxlength="120" placeholder="例如：换季歌单"></label>
+              <div class="support-choice">
+                <label><input v-model="listKind" type="radio" value="song">歌单</label>
+                <label><input v-model="listKind" type="radio" value="book">书单</label>
+              </div>
+              <div class="goal-create-actions"><button class="plain-action" @click="showListForm = false">取消</button><button class="talk" :disabled="busy || !listTitle.trim()" @click="createList">开始</button></div>
+            </div>
+            <div v-if="openLists.length" class="activity-list goal-list">
+              <button v-for="item in openLists" :key="item.id" @click="openList(item)">
+                <span class="format">LIST</span><span><strong>{{ item.title }}</strong><small>{{ item.kind_label }} · {{ item.items.length }} 条 · {{ item.status === 'paused' ? '暂放一下' : '一起攒着' }}</small></span><em>{{ item.status === 'paused' ? '继续' : '查看' }}</em>
+              </button>
+            </div>
+            <div v-if="completedLists.length" class="activity-list goal-list completed-goals">
+              <button v-for="item in completedLists" :key="item.id" @click="openList(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.kind_label }} · {{ item.items.length }} 条</small></span><em>回看</em></button>
             </div>
           </section>
 
@@ -740,6 +917,9 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 .story-turns article.user { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .story-turns article > span { color: var(--accent); font-size: 9px; letter-spacing: .12em; }
 .story-turns article p { margin: 5px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.8; }
+.item-del { margin-top: 8px; }
+.writing-turn-form input { box-sizing: border-box; width: 100%; margin-top: 7px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 11px; outline: none; color: var(--text); background: color-mix(in srgb, var(--bg-card) 82%, transparent); font: inherit; font-size: 12px; }
+.writing-turn-form input:focus { border-color: var(--accent); }
 .fiction-note { margin-top: 14px; color: var(--text-faint); font-size: 10px; line-height: 1.6; }
 .activity-mask { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgba(8,10,16,.64); backdrop-filter: blur(6px); }
 .activity-panel { width: min(720px, 97vw); height: 100%; padding: 26px 28px; overflow: hidden; display: flex; flex-direction: column; color: var(--text); background: radial-gradient(circle at 82% 3%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 34%), linear-gradient(155deg, var(--bg-card), var(--bg-main)); border-left: 1px solid var(--border); box-shadow: -24px 0 65px rgba(0,0,0,.3); }

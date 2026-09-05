@@ -20,6 +20,7 @@ import {
   startWriting,
   type CoWriting,
 } from '../../api/writings'
+import { listLists, startList, addListItem, type SharedList } from '../../api/lists'
 import ActivityPanel from '../ActivityPanel.vue'
 
 vi.mock('../../api/activities', () => ({
@@ -41,6 +42,17 @@ vi.mock('../../api/goals', () => ({
   pauseGoal: vi.fn(),
   resumeGoal: vi.fn(),
   startGoal: vi.fn(),
+}))
+vi.mock('../../api/lists', () => ({
+  addListItem: vi.fn(),
+  cancelList: vi.fn(),
+  completeList: vi.fn(),
+  exportListUrl: vi.fn((id: number) => `/api/lists/${id}/export?format=md`),
+  listLists: vi.fn(),
+  pauseList: vi.fn(),
+  removeListItem: vi.fn(),
+  resumeList: vi.fn(),
+  startList: vi.fn(),
 }))
 vi.mock('../../api/writings', () => ({
   addWritingTurn: vi.fn(),
@@ -68,6 +80,26 @@ const mockedWritings = vi.mocked(listWritings)
 const mockedStartWriting = vi.mocked(startWriting)
 const mockedAddTurn = vi.mocked(addWritingTurn)
 const mockedTuzhanTurn = vi.mocked(requestTuzhanTurn)
+const mockedLists = vi.mocked(listLists)
+const mockedStartList = vi.mocked(startList)
+const mockedAddItem = vi.mocked(addListItem)
+
+function sharedList(overrides: Partial<SharedList> = {}): SharedList {
+  return {
+    id: 31,
+    kind: 'list',
+    title: '换季歌单',
+    status: 'active',
+    list_kind: 'song',
+    kind_label: '歌单',
+    created_at: '2026-09-06T12:00:00',
+    updated_at: '2026-09-06T12:00:00',
+    completed_at: null,
+    items: [],
+    compiled: '',
+    ...overrides,
+  }
+}
 
 function writing(overrides: Partial<CoWriting> = {}): CoWriting {
   return {
@@ -116,6 +148,7 @@ describe('ActivityPanel', () => {
     mockedList.mockResolvedValue([])
     mockedGoals.mockResolvedValue([])
     mockedWritings.mockResolvedValue([])
+    mockedLists.mockResolvedValue([])
     mockedDocuments.mockResolvedValue([{
       id: 3,
       filename: '藤本植物.txt',
@@ -278,6 +311,33 @@ describe('ActivityPanel', () => {
     expect(mockedTuzhanTurn).toHaveBeenCalledWith(22)
     expect(wrapper.text()).toContain('第八天，灯塔亮了第二次')
     expect(wrapper.text()).toContain('她接了一段')
+  })
+
+  it('creates a shared list and records an item', async () => {
+    mockedStartList.mockResolvedValue(sharedList())
+    mockedAddItem.mockImplementation(async (_id, item) =>
+      sharedList({
+        items: [{ id: 1, title: item.title!, creator: item.creator ?? '', note: item.note ?? '', added_by: 'user', ts: '2026-09-06T12:01:00' }],
+      }),
+    )
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.list-section .open-bookshelf').trigger('click')
+    await wrapper.get('.list-section .goal-create input').setValue('换季歌单')
+    await wrapper.get('.list-section .goal-create .talk').trigger('click')
+    await flushPromises()
+
+    expect(mockedStartList).toHaveBeenCalledWith('换季歌单', 'song')
+    expect(wrapper.text()).toContain('清单还空着')
+
+    await wrapper.get('.writing-turn-form input').setValue('夜空中最亮的星')
+    await wrapper.get('.writing-turn-form textarea').setValue('换季必循环')
+    await wrapper.get('.writing-actions button').trigger('click')
+    await flushPromises()
+
+    expect(mockedAddItem).toHaveBeenCalledWith(31, { title: '夜空中最亮的星', creator: '', note: '换季必循环' })
+    expect(wrapper.text()).toContain('夜空中最亮的星')
   })
 
   it('shows the shared book summary from the finished list', async () => {

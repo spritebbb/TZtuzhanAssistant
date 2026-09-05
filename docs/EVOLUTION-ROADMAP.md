@@ -272,6 +272,14 @@
 
 ## 迭代记录
 
+### M3.4b · 共同清单（歌单/书单）（已完成，2026-09-06，ZCode 执行）
+
+- 持久化与生命周期：schema v9 新增 `activity_lists` / `list_items`，复用 `activities(kind='list')` 壳；song/book 两类清单可开始、暂停、恢复、收列、放下，与其他活动同壳互斥。
+- 条目只记真实添加过的内容（歌名/书名 + 歌手/作者 + 推荐语），并显式区分「我加的 / 她推荐的」；单清单上限 100 条，收列后不可改动。
+- 收列留痕：确定性汇编为 `co_list` artifact（版本化，进「我们的角落」）+ `list_completed` 关系事件（payload 只带标题/类型/条数）；支持 Markdown 导出。
+- 语境门控：`list_context` 只在用户聊到歌/书/推荐时注入真实清单摘要（含已收列清单的自然回访），普通聊天零污染；条目内容不进记忆提炼。
+- 验证：`tests/test_colists.py`（状态机/条目增删/她推荐的标记/语境门控/产物与事件/互斥）；前端 38/38。
+
 ### M1.3 · 关系导出与恢复（E03 核心闭环，2026-09-06，ZCode 执行）
 
 - 选择性导出：`backend/core/relationship_export.py` 按 9 个类别（identity/memory/milestones/life/tasks/activities/events/knowledge/conversations）导出人格命名空间全部关系数据；usage_log（成本账本）与每日 kv 状态不属于关系记忆，明确排除。

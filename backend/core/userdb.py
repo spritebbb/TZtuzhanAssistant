@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 9
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -306,6 +306,26 @@ CREATE TABLE IF NOT EXISTS writing_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_writing_turns_activity
     ON writing_turns(user_id, activity_id, id);
+-- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
+CREATE TABLE IF NOT EXISTS activity_lists (
+    activity_id  INTEGER PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    list_kind    TEXT NOT NULL DEFAULT 'song',   -- song / book
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS list_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    creator     TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    added_by    TEXT NOT NULL DEFAULT 'user',    -- user / tuzhan
+    ts          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_list_items_activity
+    ON list_items(user_id, activity_id, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -1347,7 +1367,8 @@ class UserDB:
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
                 "activity_viewpoints", "activity_goals", "goal_progress",
-                "activity_writings", "writing_turns", "relationship_events", "artifacts",
+                "activity_writings", "writing_turns", "activity_lists", "list_items",
+                "relationship_events", "artifacts",
                 "pending_thoughts",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
