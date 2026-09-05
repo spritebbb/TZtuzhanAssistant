@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """MCP 外部服务器持久化回归测试：注册落盘、恢复重连、卸载同步。"""
+import os
 import sys
+import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# 隔离数据目录：必须在导入 backend 之前设置——mcp_server._PERSIST_PATH 与
+# 日志路径都在导入时按 config.data_dir 定位，晚了会把测试数据写进真实 data/。
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_test_mcp_"))
+os.environ.setdefault("MEMORY_V2", "0")
 
 import asyncio
 
