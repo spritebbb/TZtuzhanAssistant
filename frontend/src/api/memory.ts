@@ -60,3 +60,46 @@ export async function resolveFactConflict(
   })
   if (!response.ok) throw new Error('冲突记忆确认失败')
 }
+
+export interface HerProfileSection {
+  key: string
+  label: string
+  items: string[]
+}
+
+export async function getHerProfile(): Promise<HerProfileSection[]> {
+  const response = await apiFetch('/api/memory/her-profile')
+  if (!response.ok) throw new Error('她的侧面读取失败')
+  const data = await response.json()
+  return Array.isArray(data.sections) ? data.sections : []
+}
+
+export interface UserTerm {
+  id: number
+  term: string
+  category: string
+  meaning: string
+  count: number
+}
+
+export interface InteractionStyle {
+  style: string
+  terms: UserTerm[]
+}
+
+export async function getInteractionStyle(): Promise<InteractionStyle> {
+  const response = await apiFetch('/api/memory/interaction-style')
+  if (!response.ok) throw new Error('互动偏好读取失败')
+  const data = await response.json()
+  return { style: String(data.style ?? ''), terms: Array.isArray(data.terms) ? data.terms : [] }
+}
+
+export async function resetInteractionStyle(): Promise<void> {
+  const response = await apiFetch('/api/memory/interaction-style', { method: 'DELETE' })
+  if (!response.ok) throw new Error('重置失败')
+}
+
+export async function deleteUserTerm(id: number): Promise<void> {
+  const response = await apiFetch(`/api/memory/terms/${id}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error('删除失败')
+}

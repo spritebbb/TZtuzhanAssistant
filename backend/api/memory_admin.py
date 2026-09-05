@@ -17,14 +17,51 @@ from ..core.fact_lifecycle import (
     resolve_fact_conflict_everywhere,
     update_fact_everywhere,
 )
+from ..core.her_profile import her_profile
 from ..core.log import logger
 from ..core.userdb import (
+    db,
     list_facts,
     update_fact_surface_policy,
 )
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+
+
+@router.get("/her-profile")
+async def api_her_profile():
+    """双向了解：她稳定可被了解的一面（来自人格卡，运行时不可改写）。"""
+    return {"ok": True, "sections": her_profile()}
+
+
+@router.get("/interaction-style")
+async def api_interaction_style():
+    """自动形成的互动偏好（说话风格提炼 + 共同语言），可查看、可重置。"""
+    uid = active_user_id()
+    return {
+        "ok": True,
+        "style": await asyncio.to_thread(db.get_style, uid),
+        "terms": await asyncio.to_thread(db.get_terms, uid, 30),
+    }
+
+
+@router.delete("/interaction-style")
+async def api_reset_interaction_style():
+    """重置自动形成的说话风格偏好；共同语言逐条删除。"""
+    uid = active_user_id()
+    await asyncio.to_thread(db.set_style, uid, "")
+    logger.info("[记忆管理] 已重置互动偏好（说话风格）: {}", uid)
+    return {"ok": True}
+
+
+@router.delete("/terms/{term_id}")
+async def api_delete_term(term_id: int):
+    uid = active_user_id()
+    if not await asyncio.to_thread(db.del_term, uid, term_id):
+        return JSONResponse({"ok": False, "error": "这条共同语言不存在"}, status_code=404)
+    logger.info("[记忆管理] 删除共同语言 #{}", term_id)
+    return {"ok": True}
 
 @router.get("/facts")
 async def api_list_facts(limit: int = Query(200, ge=1, le=500)):
