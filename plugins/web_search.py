@@ -21,6 +21,12 @@ async def _web_search(query: str = "") -> str:
 
     hits = await asyncio.to_thread(web_search, query)
     if not hits:
+        # 区分「真没结果」和「搜索引擎故障」：此前故障被伪装成无结果，
+        # 模型会基于训练知识自信作答（如声称刚发布的产品不存在）。
+        from backend.core.search import web_search_last_error
+
+        if web_search_last_error:
+            return f"（搜索服务暂时不可用，未能联网核实：{web_search_last_error}。请基于你已知信息回答，并明确告诉用户你刚才没能联网搜索、信息可能过时。）"
         return "（没有搜到相关内容）"
     lines = []
     for h in hits[:5]:
