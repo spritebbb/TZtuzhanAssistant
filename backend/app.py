@@ -16,6 +16,7 @@ from .api import (
     artifacts,
     audit,
     chat,
+    colists,
     config_api,
     confirm,
     dashboard,
@@ -174,6 +175,7 @@ def create_app() -> FastAPI:
     app.include_router(goals.router)
     app.include_router(writings.router)
     app.include_router(relationship.router)
+    app.include_router(colists.router)
     app.include_router(memory_admin.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)

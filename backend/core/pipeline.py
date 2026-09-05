@@ -764,6 +764,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 共同创作上下文读取失败，按无活动继续")
 
+    # 3.0.1e) M3.4 共同清单：只在聊到歌/书/推荐时注入真实清单摘要。
+    list_ctx = ""
+    try:
+        from .colists import list_context
+
+        list_ctx = await asyncio.to_thread(list_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 共同清单上下文读取失败，按无活动继续")
+
     # 3.0.2) M2 关系事件回忆：只回忆「真实发生过」的约定/特殊日子，
     # 语境门控在 relationship_events.event_recall 内部，无关话题返回空。
     event_recall_result: dict = {"context": "", "sources": []}
@@ -1161,6 +1170,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": writing_ctx,
+            }
+        )
+
+    # M3.4 共同清单：语境门控在 colists.list_context 内部，无关话题为空。
+    if list_ctx:
+        messages.append(
+            {
+                "role": "system",
+                "content": list_ctx,
             }
         )
 
