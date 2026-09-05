@@ -18,6 +18,7 @@ import datetime
 import json
 import random
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TypedDict
 
@@ -285,7 +286,8 @@ async def _tick_once() -> int:
         return 0
     _last_global_run = now
 
-    # 归档建议与约定跟进仅检查当前热切换的人格命名空间。
+    # 归档建议、约定跟进与心事：统一仲裁点出牌，一轮至多一条；
+    # 与通用主动共享每日额度（额度用尽时下方 _eligible_users 自然全跳过）。
     try:
         from .persona_profiles import active_user_id
 
@@ -293,11 +295,9 @@ async def _tick_once() -> int:
         from .focus import focus_in_progress
 
         if db.get_user(uid) and not focus_in_progress(uid):
-            await maybe_suggest_archive(uid)
-            await maybe_follow_up_promise(uid)
-            await maybe_express_pending_thoughts(uid)
+            await _arbitrate_secondary(uid)
     except Exception as e:
-        logger.warning("[主动性] 归档建议/约定跟进检查失败: {}", e)
+        logger.warning("[主动性] 次级主动源仲裁失败: {}", e)
 
     users = _eligible_users()
     if not users:
@@ -559,6 +559,100 @@ async def poll_for(user_id: str) -> str | None:
     return message["text"] if message else None
 
 
+# ---- 统一主动仲裁器（路线图原则 3，短名单债务 #2）----
+# 背景：归档建议/约定跟进/心事表达过去各自维护去重键、绕过原子占位与每日
+# 额度，同一轮 _tick_once 里可能连发多条。现在所有次级源出牌都必须经过
+# _arbited_proactive：勿扰（空闲）→ 安静模式（专注静默）→ 源内去重 →
+# 原子占位（与问候/通用主动共享每日额度 + 失败冷却）→ 生成 → 统一队列投递。
+# 语义变化：次级源现在也消耗每日主动额度（此前绕过）；专注收尾复盘仍按
+# M3.2 拍板不占额度、不经此闸门。
+
+
+async def _arbited_proactive(
+    user_id: str,
+    *,
+    source: str,
+    idle_minutes: int,
+    done_today: Callable[[], bool],
+    produce: Callable[[], Awaitable[str | None]],
+    on_delivered: Callable[[], None] | None = None,
+    on_failed: Callable[[], None] | None = None,
+) -> str | None:
+    """统一闸门：所有主动源共用一次原子占位、一份每日额度、一处失败冷却。
+
+    produce() 只做文案生成（due 条件检查由调用方在闸门前完成，条件成立但
+    生成失败/为空/投递失败都会留下失败冷却）。返回投递的文本或 None。
+    """
+    from .reset import reset_in_progress
+
+    if reset_in_progress():
+        return None
+    last = _last_chat_ts(user_id)
+    if last is not None and time.time() - last < idle_minutes * 60:
+        return None
+    try:
+        from .focus import focus_in_progress
+
+        if focus_in_progress(user_id):
+            return None
+    except Exception:
+        pass
+    if done_today():
+        return None
+    from .proactive_policy import finish_active_claim, try_claim_active
+
+    token = try_claim_active(user_id, source)
+    if not token:
+        return None
+
+    def _fail() -> None:
+        if on_failed:
+            try:
+                on_failed()
+            except Exception:
+                logger.exception("[主动仲裁] {} 失败回调异常", source)
+        finish_active_claim(user_id, token, success=False, source=source)
+
+    try:
+        text = await produce()
+    except Exception as e:
+        logger.warning("[主动仲裁] {} 生成失败: {}", source, e)
+        _fail()
+        return None
+    text = (text or "").strip()[:200]
+    if not text:
+        _fail()
+        return None
+    if not await enqueue_proactive(user_id, text):
+        _fail()
+        return None
+    finish_active_claim(user_id, token, success=True, source=source)
+    if on_delivered:
+        try:
+            on_delivered()
+        except Exception:
+            logger.exception("[主动仲裁] {} 交付回调异常", source)
+    return text
+
+
+async def _arbitrate_secondary(user_id: str) -> bool:
+    """次级源按优先级出牌；同一轮至多发一条，先到先得。
+
+    优先级：约定跟进（她记着你的事）> 未完成心事（Narrative Planner 择优）
+    > 归档建议（工具性提醒）。通用闲聊式主动仍走 _eligible_users 兜底，
+    与次级源共享同一份每日额度——额度用尽后自然全部静默。
+    """
+    for proposer in (
+        maybe_follow_up_promise,
+        maybe_express_pending_thoughts,
+        maybe_suggest_archive,
+    ):
+        text = await proposer(user_id)
+        if text:
+            return True
+    return False
+
+
 # ---- 主动归档建议（会话过长时，菟菚主动提醒归档，而非擅自清空）----
 
 _ARCHIVE_THRESHOLD = 40      # 当前会话消息数达到该值时提醒归档
@@ -626,11 +720,8 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
     「别打扰正在聊的人」：即使会话已 ≥ 阈值，若用户最近还在聊天
     （距最后一条真实消息 < _ARCHIVE_IDLE_MIN 分钟），也不提醒——
     归档建议是「你歇下来时」的轻提醒，不该在对方正聊得热络时硬插。
+    空闲、源内去重、原子占位与每日额度统一由 _arbited_proactive 仲裁。
     """
-    # 先看是否真的「空闲」：正在聊/刚聊过 → 闭嘴（即使消息数已达阈值）
-    last = _last_chat_ts(user_id)
-    if last is not None and time.time() - last < _ARCHIVE_IDLE_MIN * 60:
-        return None
     try:
         from ..session import store as _store
 
@@ -639,15 +730,18 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
         return None
     if count < _ARCHIVE_THRESHOLD:
         return None
-    if _archive_suggested_today(user_id):
-        return None
-    text = await _generate_archive_suggest(user_id)
-    if not text:
-        return None
-    if not await enqueue_proactive(user_id, text):
-        return None
-    _mark_archive_suggested(user_id)
-    return text
+
+    async def produce() -> str | None:
+        return await _generate_archive_suggest(user_id)
+
+    return await _arbited_proactive(
+        user_id,
+        source="initiative:archive_suggest",
+        idle_minutes=_ARCHIVE_IDLE_MIN,
+        done_today=lambda: _archive_suggested_today(user_id),
+        produce=produce,
+        on_delivered=lambda: _mark_archive_suggested(user_id),
+    )
 
 
 # ---- 未完成心事（M5）：Narrative Planner 择优，经既有主动队列表达 ----
@@ -658,11 +752,9 @@ _PLANNER_IDLE_MIN = 120
 async def maybe_express_pending_thoughts(user_id: str) -> str | None:
     """把到点的未完成心事用她自己的话主动提一句（每日最多一条，只在空闲时）。
 
-    复用既有额度/冷却/队列；不新增任何绕过仲裁的发送路径。
+    复用统一仲裁闸门（原子占位/共享每日额度/失败冷却）与既有投递队列；
+    不新增任何绕过仲裁的发送路径。
     """
-    last = _last_chat_ts(user_id)
-    if last is not None and time.time() - last < _PLANNER_IDLE_MIN * 60:
-        return None
     today = datetime.date.today().isoformat()
     if kv_get(user_id, f"{_PLANNER_KEY}:{today}") is not None:
         return None
@@ -676,33 +768,33 @@ async def maybe_express_pending_thoughts(user_id: str) -> str | None:
     if thought is None:
         return None
 
-    sys_prompt = build_system_prompt(
-        stage=stage_of(user["affection"] or 0),
-        address=user["nickname_pref"] or "",
-        lover_confirm=bool(user["lover_confirm"]),
-        first_chat=False,
-        affection=user["affection"] or 0,
-        user_id=user_id,
+    async def produce() -> str | None:
+        sys_prompt = build_system_prompt(
+            stage=stage_of(user["affection"] or 0),
+            address=user["nickname_pref"] or "",
+            lover_confirm=bool(user["lover_confirm"]),
+            first_chat=False,
+            affection=user["affection"] or 0,
+            user_id=user_id,
+        )
+        msgs = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": build_express_prompt(thought)},
+        ]
+        return (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
+
+    text = await _arbited_proactive(
+        user_id,
+        source="initiative:pending_thought",
+        idle_minutes=_PLANNER_IDLE_MIN,
+        done_today=lambda: kv_get(user_id, f"{_PLANNER_KEY}:{today}") is not None,
+        produce=produce,
+        on_delivered=lambda: mark_expressed(thought["id"]),
+        on_failed=lambda: record_attempt(thought["id"]),
     )
-    msgs = [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": build_express_prompt(thought)},
-    ]
-    try:
-        text = (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
-    except Exception as e:
-        logger.warning("[心事] 表达生成失败: {}", e)
-        record_attempt(thought["id"])
-        return None
-    if not text:
-        record_attempt(thought["id"])
-        return None
-    if not await enqueue_proactive(user_id, text):
-        record_attempt(thought["id"])
-        return None
-    mark_expressed(thought["id"])
-    kv_set(user_id, f"{_PLANNER_KEY}:{today}", "1")
-    logger.info("[心事] 已表达未完成心事 #{}：{}", thought["id"], text[:40])
+    if text:
+        kv_set(user_id, f"{_PLANNER_KEY}:{today}", "1")
+        logger.info("[心事] 已表达未完成心事 #{}：{}", thought["id"], text[:40])
     return text
 
 
@@ -754,10 +846,8 @@ async def maybe_follow_up_promise(user_id: str) -> str | None:
 
     返回投递的消息文本（None = 无需跟进或投递失败）。
     「在乎」从话术变成行为：她记得你说过的事，并且真的会来问。
+    空闲、原子占位、共享每日额度与失败冷却统一由 _arbited_proactive 仲裁。
     """
-    last = _last_chat_ts(user_id)
-    if last is not None and time.time() - last < _PROMISE_IDLE_MIN * 60:
-        return None
     if _promise_followed_today(user_id):
         return None
     from .userdb import get_due_promises, mark_promise_done
@@ -765,20 +855,31 @@ async def maybe_follow_up_promise(user_id: str) -> str | None:
     due = get_due_promises(user_id, datetime.date.today())
     if not due:
         return None
-    text = await _generate_promise_followup(user_id, due[0])
-    if not text:
-        return None
-    if not await enqueue_proactive(user_id, text):
-        return None
-    mark_promise_done(due[0]["id"])
-    try:
-        from .relationship_events import record_promise_completed
+    promise = due[0]
 
-        record_promise_completed(user_id, due[0])
-    except Exception:
-        logger.exception("[主动性] 约定完成事件记录失败（不影响跟进）")
-    _mark_promise_followed(user_id)
-    logger.info("[主动性] 已跟进约定：{}", due[0]["content"][:40])
+    async def produce() -> str | None:
+        return await _generate_promise_followup(user_id, promise)
+
+    def on_delivered() -> None:
+        mark_promise_done(promise["id"])
+        try:
+            from .relationship_events import record_promise_completed
+
+            record_promise_completed(user_id, promise)
+        except Exception:
+            logger.exception("[主动性] 约定完成事件记录失败（不影响跟进）")
+        _mark_promise_followed(user_id)
+
+    text = await _arbited_proactive(
+        user_id,
+        source="initiative:promise_followup",
+        idle_minutes=_PROMISE_IDLE_MIN,
+        done_today=lambda: _promise_followed_today(user_id),
+        produce=produce,
+        on_delivered=on_delivered,
+    )
+    if text:
+        logger.info("[主动性] 已跟进约定：{}", promise["content"][:40])
     return text
 
 
