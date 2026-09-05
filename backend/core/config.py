@@ -116,7 +116,7 @@ class Config:
         self.proactive_failure_cooldown_sec: int = max(30, _env_int("PROACTIVE_FAILURE_COOLDOWN_SEC", 900))
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
-        self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 70)))
+        self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))
 
         # M5 惊喜编排：隔一阵子基于真实共同产物（共同故事/书摘/目标回顾）低频送惊喜。
         # 只基于真实经历、低频、可关闭；出牌经统一仲裁器，消耗共享每日额度。

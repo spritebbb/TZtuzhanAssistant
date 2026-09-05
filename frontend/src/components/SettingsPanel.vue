@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { apiFetch } from '../api'
-import { getTtsAutoPlay, setTtsAutoPlay } from '../utils/tts'
+import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -220,6 +220,13 @@ async function pluginAction(name: string, action: 'enable' | 'disable' | 'reload
   }
 }
 
+function onTtsAutoPlayChange() {
+  // 立即持久化并立即生效：此前该偏好挂在「保存」按钮的全局配置 POST 之后，
+  // POST 失败或只切开关不点保存时，改动永远不会落盘（表现为「关不掉」）。
+  setTtsAutoPlay(ttsAutoPlay.value)
+  if (!ttsAutoPlay.value) stopTts()
+}
+
 async function open() {
   ttsAutoPlay.value = getTtsAutoPlay()
   try {
@@ -379,7 +386,7 @@ function confirmLabel(c: string): string {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
             语音
           </div>
-          <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" /></div>
+          <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" @change="onTtsAutoPlayChange" /></div>
           <div class="setting-hint">手动朗读按钮始终显示在{{ props.personaName || '助手' }}的消息下方；自动朗读只对新回复生效</div>
 
           <div class="sgroup">

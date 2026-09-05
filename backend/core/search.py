@@ -12,11 +12,12 @@ import urllib.parse
 import urllib.request
 
 from .config import config
+from .log import logger
 
 web_search_last_error = ""
 
 # TTL 缓存：{query: (expire_ts, [results])}，窗口 30 分钟，上限 200 条防内存膨胀
-_SEARCH_CACHE_TTL = 30 * 60
+_SEARCH_CACHE_TTL = 10 * 60  # 新闻/发布类时效话题 30 分钟缓存过长（曾导致「刚发布」被旧结果覆盖判断）
 _SEARCH_CACHE_MAX = 200
 _search_cache: dict[str, tuple[float, list[dict]]] = {}
 
@@ -83,6 +84,7 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
         if err:
             errors.append(f"{eng}: {err}")
     web_search_last_error = "；".join(errors)
+    logger.warning("[搜索] 全部引擎失败：{}（query={!r}）", web_search_last_error, query[:60])
     return []
 
 
@@ -147,10 +149,14 @@ def _bing_search(query: str, max_results: int, host: str = "www.bing.com"):
 
     results: list[dict] = []
     for block in re.findall(r'<li class="b_algo[^"]*".*?</li>', html, re.S)[:max_results]:
-        m_title = re.search(r'<h2[^>]*><a href="([^"]+)"[^>]*>(.*?)</a></h2>', block, re.S)
+        # 2026-09：Bing 的 <a> 属性顺序变了（href 不再紧跟 <a>，前面有 target 等），
+        # 旧正则要求 href 紧随其后导致全部解析失败、搜索静默返回空。改为顺序无关。
+        m_title = re.search(
+            r'<h2[^>]*>\s*<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', block, re.S
+        )
         if not m_title:
             continue
-        m_snippet = re.search(r"<(?:p|div)[^>]*>(.*?)</(?:p|div)>", block, re.S)
+        m_snippet = re.search(r"<p[^>]*>(.*?)</p>", block, re.S)
         title = re.sub(r"<[^>]+>", "", m_title.group(2)).strip()
         snippet = re.sub(r"<[^>]+>", "", m_snippet.group(1)).strip() if m_snippet else ""
         results.append({"title": title, "snippet": snippet, "url": m_title.group(1)})
@@ -161,10 +167,11 @@ def _bing_search(query: str, max_results: int, host: str = "www.bing.com"):
 def _ddg_search(query: str, max_results: int):
     """通过 DuckDuckGo 搜索（中国大陆可能不可用）。返回 (results, error)。"""
     text_fn = None
+    proxy = getattr(config, "llm_proxy", "") or None
     try:
         from ddgs import DDGS
 
-        text_fn = DDGS().text
+        text_fn = DDGS(proxy=proxy).text if proxy else DDGS().text
     except Exception:
         try:
             from duckduckgo_search import DDGS
