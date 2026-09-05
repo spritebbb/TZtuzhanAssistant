@@ -39,7 +39,12 @@ def _needs_migration() -> bool:
         total = 0
         missing = False
         for table, kind in table_kinds.items():
-            cnt = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"] or 0
+            where = (
+                " WHERE status = 'active' AND surface_policy != 'never_surface' "
+                "AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))"
+                if table == "facts" else ""
+            )
+            cnt = conn.execute(f"SELECT COUNT(*) AS c FROM {table}{where}").fetchone()["c"] or 0
             total += cnt
             if cnt and vec.count(kind) < cnt:
                 missing = True
@@ -53,7 +58,12 @@ def _needs_migration() -> bool:
 def _sqlite_rows(table: str) -> list[sqlite3.Row]:
     conn = sqlite3.connect(config.data_dir / "bot.db", timeout=10)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+    where = (
+        " WHERE status = 'active' AND surface_policy != 'never_surface' "
+        "AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))"
+        if table == "facts" else ""
+    )
+    rows = conn.execute(f"SELECT * FROM {table}{where} ORDER BY id").fetchall()
     conn.close()
     return rows
 

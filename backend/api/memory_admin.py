@@ -12,33 +12,19 @@ from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
 from .chat import _user_id
+from ..core.fact_lifecycle import (
+    delete_fact_everywhere,
+    resolve_fact_conflict_everywhere,
+    update_fact_everywhere,
+)
 from ..core.log import logger
-from ..core.userdb import delete_fact, list_facts, update_fact
+from ..core.userdb import (
+    list_facts,
+    update_fact_surface_policy,
+)
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
-
-def _vec_delete(user_id: str, fact_id: int) -> None:
-    """同步删除 facts 向量（失败静默——向量是索引，SQLite 才是事实源）。"""
-    try:
-        from ..core.vector_store import delete as vec_delete
-
-        vec_delete(user_id, "facts", fact_id)
-    except Exception:
-        pass
-
-
-def _vec_reindex(user_id: str, fact_id: int, content: str) -> None:
-    """改写后重建向量：先删旧再索引新。"""
-    try:
-        from ..core.vector_store import delete as vec_delete
-        from ..core.vector_store import index as vec_index
-
-        vec_delete(user_id, "facts", fact_id)
-        vec_index(user_id, fact_id, content, "facts")
-    except Exception:
-        pass
-
 
 @router.get("/facts")
 async def api_list_facts(limit: int = Query(200, ge=1, le=500)):
@@ -51,9 +37,8 @@ async def api_update_fact(fact_id: int, content: str = Body(..., embed=True)):
     content = content.strip()
     if not content:
         return JSONResponse({"ok": False, "error": "内容不能为空"}, status_code=400)
-    if not update_fact(uid, fact_id, content):
+    if not await asyncio.to_thread(update_fact_everywhere, uid, fact_id, content):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
-    await asyncio.to_thread(_vec_reindex, uid, fact_id, content)
     logger.info("[记忆管理] 改写事实 #{}: {}", fact_id, content[:40])
     return {"ok": True}
 
@@ -61,8 +46,41 @@ async def api_update_fact(fact_id: int, content: str = Body(..., embed=True)):
 @router.delete("/facts/{fact_id}")
 async def api_delete_fact(fact_id: int):
     uid = active_user_id()
-    if not delete_fact(uid, fact_id):
+    if not await asyncio.to_thread(delete_fact_everywhere, uid, fact_id):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
-    await asyncio.to_thread(_vec_delete, uid, fact_id)
     logger.info("[记忆管理] 删除事实 #{}", fact_id)
     return {"ok": True}
+
+
+@router.patch("/facts/{fact_id}/surface-policy")
+async def api_update_fact_surface_policy(
+    fact_id: int,
+    surface_policy: str = Body(..., embed=True),
+):
+    uid = active_user_id()
+    if surface_policy not in {"normal", "do_not_proactively_surface"}:
+        return JSONResponse({"ok": False, "error": "不支持的呈现策略"}, status_code=400)
+    if not update_fact_surface_policy(uid, fact_id, surface_policy):
+        return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
+    logger.info("[记忆管理] 修改事实 #{} 呈现策略: {}", fact_id, surface_policy)
+    return {"ok": True}
+
+
+@router.post("/facts/{fact_id}/resolve-conflict")
+async def api_resolve_fact_conflict(
+    fact_id: int,
+    action: str = Body(..., embed=True),
+):
+    if action not in {"accept_new", "keep_existing"}:
+        return JSONResponse({"ok": False, "error": "不支持的确认操作"}, status_code=400)
+    uid = active_user_id()
+    result = await asyncio.to_thread(
+        resolve_fact_conflict_everywhere,
+        uid,
+        fact_id,
+        accept_new=action == "accept_new",
+    )
+    if result is None:
+        return JSONResponse({"ok": False, "error": "待确认记忆不存在"}, status_code=404)
+    logger.info("[记忆管理] 冲突事实 #{} 已处理: {}", fact_id, action)
+    return {"ok": True, "resolution": result}

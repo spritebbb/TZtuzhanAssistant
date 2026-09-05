@@ -174,6 +174,13 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
         "正文只要自然提一句让对方看看，别说提示词、模型、路径或生成过程，也别逐项描述图片。"
         if has_image else ""
     )
+    avoid_facts = db.facts_not_for_proactive(user_id)
+    avoid_hint = (
+        "\n\n用户明确要求这些记忆不要由你主动提起：\n"
+        + "\n".join(f"- {fact}" for fact in avoid_facts[:20])
+        + "\n不得引用、暗示或围绕它们开启话题；只有用户先提起时才能回应。"
+        if avoid_facts else ""
+    )
     return [
         {"role": "system", "content": sys_prompt},
         {
@@ -185,6 +192,7 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
                 "一两句就够，别长篇大论，别解释，别加括号动作。"
                 "语气符合你此刻的心情和你们的熟悉程度，别装熟也别太生分。"
                 f"{narrative_hint}"
+                f"{avoid_hint}"
                 f"{image_hint}"
             ),
         },

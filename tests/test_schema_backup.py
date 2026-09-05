@@ -64,7 +64,8 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        for name in ("bot.db", "sessions.db", "agent_tasks.db"):
+        versions = {"bot.db": 3, "sessions.db": 1, "agent_tasks.db": 1}
+        for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")
             conn.execute("INSERT INTO pre_upgrade_marker VALUES (?)", (name,))
@@ -78,11 +79,20 @@ def main() -> None:
         from backend.session import store  # noqa: F401
         from backend.agent import session  # noqa: F401
 
-        for name in ("bot.db", "sessions.db", "agent_tasks.db"):
+        for name, expected_version in versions.items():
             conn = sqlite3.connect(runtime / name)
-            assert schema_version(conn) == 1
+            assert schema_version(conn) == expected_version
+            if name == "bot.db":
+                fact_columns = {row[1] for row in conn.execute("PRAGMA table_info(facts)")}
+                assert {
+                    "source_type", "source_message_ids", "confidence", "verified_at",
+                    "expires_at", "pinned", "surface_policy",
+                    "status", "conflicts_with_fact_id",
+                } <= fact_columns
             conn.close()
-            matches = list((runtime / "backups").glob(f"schema-{Path(name).stem}-v0-to-v1-*/{name}"))
+            matches = list((runtime / "backups").glob(
+                f"schema-{Path(name).stem}-v0-to-v{expected_version}-*/{name}"
+            ))
             assert len(matches) == 1, f"missing pre-upgrade snapshot for {name}"
             conn = sqlite3.connect(matches[0])
             assert schema_version(conn) == 0

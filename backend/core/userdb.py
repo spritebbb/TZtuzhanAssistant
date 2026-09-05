@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -64,10 +64,19 @@ CREATE TABLE IF NOT EXISTS mood_log (
     ts      TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS facts (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    ts      TEXT NOT NULL
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    ts                 TEXT NOT NULL,
+    source_type        TEXT NOT NULL DEFAULT 'legacy',
+    source_message_ids TEXT NOT NULL DEFAULT '[]',
+    confidence         REAL NOT NULL DEFAULT 0.5,
+    verified_at        TEXT,
+    expires_at         TEXT,
+    pinned             INTEGER NOT NULL DEFAULT 0,
+    surface_policy     TEXT NOT NULL DEFAULT 'normal',
+    status             TEXT NOT NULL DEFAULT 'active',
+    conflicts_with_fact_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS user_meta (
     user_id          TEXT PRIMARY KEY,
@@ -335,6 +344,23 @@ class UserDB:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+        # v2 记忆溯源：旧事实保守标为 legacy/中等置信度，保持原有召回行为。
+        fact_columns = (
+            ("source_type", "TEXT NOT NULL DEFAULT 'legacy'"),
+            ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            ("confidence", "REAL NOT NULL DEFAULT 0.5"),
+            ("verified_at", "TEXT"),
+            ("expires_at", "TEXT"),
+            ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+            ("surface_policy", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("status", "TEXT NOT NULL DEFAULT 'active'"),
+            ("conflicts_with_fact_id", "INTEGER"),
+        )
+        for column, definition in fact_columns:
+            try:
+                self.conn.execute(f"ALTER TABLE facts ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
         # 用户身份统一迁移：历史版本聊天链路用 f"session_{session_id}"（单一会话
         # 下即 "session_current"），现统一为 "assistant-main"，与 agent 任务代理、
         # contextvar 默认值对齐。此处把旧的 session_current 数据合并进 assistant-main，
@@ -821,7 +847,20 @@ class UserDB:
 
     # ---- facts（LLM 提炼的长期事实）----
     @_locked
-    def add_fact(self, user_id: str, content: str) -> int | None:
+    def add_fact(
+        self,
+        user_id: str,
+        content: str,
+        *,
+        source_type: str = "conversation_inference",
+        source_message_ids: str = "[]",
+        confidence: float = 0.7,
+        verified_at: str | None = None,
+        expires_at: str | None = None,
+        pinned: bool = False,
+        surface_policy: str = "normal",
+        conflicts_with_fact_id: int | None = None,
+    ) -> int | None:
         """存一条事实；与已有事实二元组重叠≥50% 视为重复则跳过。
 
         返回新记录 id；重复/跳过返回 None。
@@ -831,18 +870,39 @@ class UserDB:
             return None
         q = _bigrams(content)
         rows = self.conn.execute(
-            "SELECT content FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT 200",
+            "SELECT id, content FROM facts WHERE user_id = ? AND status = 'active' "
+            "ORDER BY id DESC LIMIT 200",
             (user_id,),
         ).fetchall()
+        conflict_target = None
+        if conflicts_with_fact_id is not None:
+            conflict_target = next(
+                (r for r in rows if int(r["id"]) == int(conflicts_with_fact_id)), None
+            )
         for r in rows:
+            if r["content"].strip() == content:
+                return None
+            if conflict_target is not None:
+                continue
             existing = _bigrams(r["content"])
             if q and existing:
                 overlap = len(q & existing) / min(len(q), len(existing))
                 if overlap >= 0.5:
                     return None
+        confidence = max(0.0, min(1.0, float(confidence)))
+        if surface_policy not in {"normal", "do_not_proactively_surface", "never_surface"}:
+            surface_policy = "normal"
+        status = "pending_confirmation" if conflict_target is not None else "active"
         cur = self.conn.execute(
-            "INSERT INTO facts (user_id, content, ts) VALUES (?, ?, ?)",
-            (user_id, content, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO facts "
+            "(user_id, content, ts, source_type, source_message_ids, confidence, verified_at, "
+            "expires_at, pinned, surface_policy, status, conflicts_with_fact_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                user_id, content, datetime.now().isoformat(timespec="seconds"), source_type,
+                source_message_ids, confidence, verified_at, expires_at, int(pinned), surface_policy,
+                status, int(conflict_target["id"]) if conflict_target is not None else None,
+            ),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -857,9 +917,13 @@ class UserDB:
         q_bigrams = _bigrams(query)
         if not q_bigrams:
             return []
+        now = datetime.now().isoformat(timespec="seconds")
         rows = self.conn.execute(
-            "SELECT content FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT 500",
-            (user_id,),
+            "SELECT content FROM facts WHERE user_id = ? "
+            "AND status = 'active' "
+            "AND surface_policy != 'never_surface' "
+            "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC LIMIT 500",
+            (user_id, now),
         ).fetchall()
         min_overlap = 1 if len(q_bigrams) != 2 else 2
         scored = []
@@ -870,6 +934,35 @@ class UserDB:
                 scored.append((overlap, r["content"]))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [{"content": c} for _, c in scored[:top_k]]
+
+    @_locked
+    def facts_not_for_proactive(self, user_id: str, limit: int = 50) -> list[str]:
+        """返回用户明确要求不要在主动消息里提起的事实。"""
+        now = datetime.now().isoformat(timespec="seconds")
+        rows = self.conn.execute(
+            "SELECT content FROM facts WHERE user_id = ? "
+            "AND status = 'active' "
+            "AND surface_policy = 'do_not_proactively_surface' "
+            "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC LIMIT ?",
+            (user_id, now, limit),
+        ).fetchall()
+        return [str(row["content"]) for row in rows]
+
+    @_locked
+    def recallable_fact_ids(self, user_id: str, fact_ids: list[int]) -> set[int]:
+        """以 SQLite 为权威过滤向量命中，阻断已删/待确认/过期事实残留召回。"""
+        clean_ids = sorted({int(value) for value in fact_ids})
+        if not clean_ids:
+            return set()
+        placeholders = ",".join("?" for _ in clean_ids)
+        now = datetime.now().isoformat(timespec="seconds")
+        rows = self.conn.execute(
+            f"SELECT id FROM facts WHERE user_id = ? AND id IN ({placeholders}) "
+            "AND status = 'active' AND surface_policy != 'never_surface' "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (user_id, *clean_ids, now),
+        ).fetchall()
+        return {int(row["id"]) for row in rows}
 
     # ---- 用户画像（user_profile）----
 
@@ -1282,34 +1375,129 @@ def list_facts(user_id: str, limit: int = 200) -> list[dict]:
     """列出用户的事实记忆（新→旧），供记忆管理页/纠偏仲裁。"""
     with db._lock:
         rows = db.conn.execute(
-            "SELECT id, content, ts FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            "SELECT f.id, f.content, f.ts, f.source_type, f.source_message_ids, f.confidence, "
+            "f.verified_at, f.expires_at, f.pinned, f.surface_policy, f.status, "
+            "f.conflicts_with_fact_id, old.content AS conflicting_content FROM facts AS f "
+            "LEFT JOIN facts AS old ON old.id = f.conflicts_with_fact_id AND old.user_id = f.user_id "
+            "WHERE f.user_id = ? AND f.status IN ('active', 'pending_confirmation') "
+            "ORDER BY CASE f.status WHEN 'pending_confirmation' THEN 0 ELSE 1 END, f.id DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def delete_fact(user_id: str, fact_id: int) -> bool:
-    """删除一条事实。返回是否真的删到（存在且属于该用户）。"""
+    """删除事实及其待确认冲突候选。向量清理由 fact_lifecycle 统一执行。"""
+    return bool(delete_fact_cascade(user_id, fact_id))
+
+
+def delete_fact_cascade(user_id: str, fact_id: int) -> list[int]:
+    """事务内删除事实与依赖它的冲突候选，返回所有需清理索引的 id。"""
     with db._lock:
-        cur = db.conn.execute(
-            "DELETE FROM facts WHERE id = ? AND user_id = ?", (fact_id, user_id)
-        )
-        db.conn.commit()
-        return cur.rowcount > 0
+        rows = db.conn.execute(
+            "SELECT id FROM facts WHERE user_id = ? "
+            "AND (id = ? OR (conflicts_with_fact_id = ? AND status = 'pending_confirmation'))",
+            (user_id, fact_id, fact_id),
+        ).fetchall()
+        ids = [int(row["id"]) for row in rows]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        try:
+            db.conn.execute("BEGIN")
+            db.conn.execute(
+                f"DELETE FROM facts WHERE user_id = ? AND id IN ({placeholders})",
+                (user_id, *ids),
+            )
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
+        return ids
 
 
 def update_fact(user_id: str, fact_id: int, content: str) -> bool:
-    """改写一条事实的内容。返回是否真的改到。"""
+    """用户改写事实；同时把来源升级为已验证的一手纠正。"""
     content = content.strip()[:100]
     if not content:
         return False
     with db._lock:
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            db.conn.execute("BEGIN")
+            cur = db.conn.execute(
+                "UPDATE facts SET content = ?, source_type = 'user_correction', confidence = 1.0, "
+                "verified_at = ? WHERE id = ? AND user_id = ? AND status = 'active'",
+                (content, now, fact_id, user_id),
+            )
+            if cur.rowcount:
+                db.conn.execute(
+                    "UPDATE facts SET status = 'rejected', verified_at = ? WHERE user_id = ? "
+                    "AND conflicts_with_fact_id = ? AND status = 'pending_confirmation'",
+                    (now, user_id, fact_id),
+                )
+            db.conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            db.conn.rollback()
+            raise
+
+
+def update_fact_surface_policy(user_id: str, fact_id: int, surface_policy: str) -> bool:
+    """修改事实的呈现策略；当前管理页支持 normal / 不主动提起。"""
+    if surface_policy not in {"normal", "do_not_proactively_surface", "never_surface"}:
+        return False
+    with db._lock:
         cur = db.conn.execute(
-            "UPDATE facts SET content = ? WHERE id = ? AND user_id = ?",
-            (content, fact_id, user_id),
+            "UPDATE facts SET surface_policy = ? WHERE id = ? AND user_id = ?",
+            (surface_policy, fact_id, user_id),
         )
         db.conn.commit()
         return cur.rowcount > 0
+
+
+def resolve_fact_conflict(user_id: str, fact_id: int, accept_new: bool) -> dict | None:
+    """确认一个冲突候选；事务内二选一，返回供向量索引同步的事实信息。"""
+    with db._lock:
+        candidate = db.conn.execute(
+            "SELECT id, content, conflicts_with_fact_id FROM facts "
+            "WHERE id = ? AND user_id = ? AND status = 'pending_confirmation'",
+            (fact_id, user_id),
+        ).fetchone()
+        if candidate is None:
+            return None
+        old_id = candidate["conflicts_with_fact_id"]
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            db.conn.execute("BEGIN")
+            if accept_new:
+                if old_id is not None:
+                    db.conn.execute(
+                        "UPDATE facts SET status = 'superseded' "
+                        "WHERE id = ? AND user_id = ? AND status = 'active'",
+                        (old_id, user_id),
+                    )
+                db.conn.execute(
+                    "UPDATE facts SET status = 'active', source_type = 'user_confirmation', "
+                    "confidence = 1.0, verified_at = ? WHERE id = ? AND user_id = ?",
+                    (now, fact_id, user_id),
+                )
+            else:
+                db.conn.execute(
+                    "UPDATE facts SET status = 'rejected', verified_at = ? "
+                    "WHERE id = ? AND user_id = ?",
+                    (now, fact_id, user_id),
+                )
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
+        return {
+            "fact_id": int(fact_id),
+            "content": str(candidate["content"]),
+            "old_fact_id": int(old_id) if old_id is not None else None,
+            "accepted": bool(accept_new),
+        }
 
 
 # ---- usage_log（D5 成本面板：token 用量记录与聚合）----

@@ -13,7 +13,8 @@ import re
 
 from .llm import chat
 from .log import logger
-from .userdb import delete_fact, list_facts
+from .fact_lifecycle import delete_fact_everywhere
+from .userdb import list_facts
 
 # 明确纠正语（刻意收窄：日常吐槽/调侃不触发仲裁，防误删）
 _CORRECTION_RE = re.compile(
@@ -87,13 +88,7 @@ async def arbitrate_and_forget(user_id: str, text: str, recent_context: str = ""
             continue
         if fid not in valid_ids:
             continue
-        if delete_fact(user_id, fid):
-            try:
-                from .vector_store import delete as vec_delete
-
-                vec_delete(user_id, "facts", fid)
-            except Exception:
-                pass
+        if delete_fact_everywhere(user_id, fid):
             deleted.append(fid)
     if deleted:
         reason = str(data.get("reason") or "")[:60]
