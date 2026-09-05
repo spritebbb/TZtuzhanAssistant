@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -246,6 +246,54 @@ CREATE INDEX IF NOT EXISTS idx_activities_user_status
     ON activities(user_id, status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_activity_notes_activity
     ON activity_notes(user_id, activity_id, position);
+-- Sprint 3 共读 2.0：双方观点按角色分开保存，模型观点不得冒充用户观点。
+CREATE TABLE IF NOT EXISTS activity_viewpoints (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    role        TEXT NOT NULL,      -- user / tuzhan / shared
+    position    INTEGER NOT NULL,   -- 针对哪一段（-1 表示全书整体）
+    content     TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    UNIQUE(activity_id, role, position)
+);
+CREATE INDEX IF NOT EXISTS idx_activity_viewpoints_activity
+    ON activity_viewpoints(user_id, activity_id);
+-- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
+-- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
+CREATE TABLE IF NOT EXISTS relationship_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    event_type   TEXT NOT NULL,      -- 首批：reading_finished
+    source_type  TEXT NOT NULL,      -- 来源表：activity / promise / important_date / fact
+    source_id    INTEGER NOT NULL,
+    subject      TEXT NOT NULL DEFAULT '',
+    object       TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    confidence   REAL NOT NULL DEFAULT 1.0,
+    privacy      TEXT NOT NULL DEFAULT 'normal',  -- normal / sensitive / ephemeral / never_surface
+    occurred_at  TEXT NOT NULL,
+    expires_at   TEXT,
+    status       TEXT NOT NULL DEFAULT 'active',  -- active / corrected / forgotten / archived
+    created_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_events_idem
+    ON relationship_events(user_id, event_type, source_id) WHERE status = 'active';
+-- M2 前置最小版：可保存的共同产物（首批：共读共同书摘）。
+CREATE TABLE IF NOT EXISTS artifacts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,
+    artifact_type TEXT NOT NULL,     -- 首批：book_summary
+    source_type   TEXT NOT NULL,
+    source_id     INTEGER NOT NULL,
+    title         TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    version       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active',
+    UNIQUE (user_id, artifact_type, source_id)
+);
 -- C4 好感度玩法闭环：解锁时刻（阈值跨越/彩蛋）队列与收集
 CREATE TABLE IF NOT EXISTS unlocks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1219,6 +1267,7 @@ class UserDB:
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
+                "activity_viewpoints", "relationship_events", "artifacts",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")

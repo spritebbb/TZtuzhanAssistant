@@ -228,7 +228,11 @@ def delete_document(user_id: str, doc_id: int) -> bool:
             "SELECT id FROM activities WHERE user_id = ? AND document_id = ?",
             (user_id, doc_id),
         ).fetchall()
+        from .activities import forget_activity_data
+
         for activity in activity_rows:
+            # 共读观点/共同书摘随源删除，reading_finished 事件作废，不留幽灵回忆
+            forget_activity_data(user_id, activity["id"])
             db.conn.execute(
                 "DELETE FROM activity_notes WHERE user_id = ? AND activity_id = ?",
                 (user_id, activity["id"]),

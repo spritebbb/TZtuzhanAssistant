@@ -34,6 +34,11 @@ class NoteBody(BaseModel):
     content: str = Field(max_length=2_000)
 
 
+class ViewpointBody(BaseModel):
+    role: str = Field(pattern="^(user|tuzhan|shared)$")
+    content: str = Field(max_length=2_000)
+
+
 def _error(exc: activities.ActivityError, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"ok": False, "error": str(exc)}, status_code=status_code)
 
@@ -86,6 +91,21 @@ async def api_save_note(activity_id: int, body: NoteBody):
     try:
         row = await asyncio.to_thread(
             activities.save_note, _active_user_id(), activity_id, body.content
+        )
+    except activities.ActivityError as exc:
+        return _error(exc)
+    return {"ok": True, "activity": row}
+
+
+@router.put("/{activity_id}/viewpoint")
+async def api_save_viewpoint(activity_id: int, body: ViewpointBody):
+    try:
+        row = await asyncio.to_thread(
+            activities.save_viewpoint,
+            _active_user_id(),
+            activity_id,
+            body.role,
+            body.content,
         )
     except activities.ActivityError as exc:
         return _error(exc)

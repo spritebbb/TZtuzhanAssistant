@@ -1,5 +1,14 @@
 import { apiFetch } from './index'
 
+export type ViewpointRole = 'user' | 'tuzhan' | 'shared'
+
+export interface ActivityViewpoint {
+  role: ViewpointRole
+  position: number
+  content: string
+  ts: string
+}
+
 export interface ReadingActivity {
   id: number
   kind: 'reading'
@@ -18,6 +27,8 @@ export interface ReadingActivity {
   excerpt: string
   note: string
   note_count: number
+  viewpoints: ActivityViewpoint[]
+  summary: string
 }
 
 async function activityRequest(path: string, init?: RequestInit): Promise<ReadingActivity> {
@@ -61,6 +72,18 @@ export function saveReadingNote(activityId: number, content: string): Promise<Re
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
+  })
+}
+
+export function saveReadingViewpoint(
+  activityId: number,
+  role: ViewpointRole,
+  content: string,
+): Promise<ReadingActivity> {
+  return activityRequest(`/api/activities/${activityId}/viewpoint`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, content }),
   })
 }
 

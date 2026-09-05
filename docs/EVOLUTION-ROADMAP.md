@@ -272,7 +272,16 @@
 
 ## 迭代记录
 
-### Sprint 1 · 可信记忆与用户主权（进行中，2026-09-05，Codex 执行）
+### Sprint 3 · 共读 2.0（已完成，2026-09-05，GLM 执行）
+
+- 双方观点分角色保存：新增 `activity_viewpoints`（schema v4），观点必须显式声明 user / tuzhan / shared 角色，未声明角色被 API 拒绝，模型观点无法冒充用户观点进入记录。
+- 读完生成两份可追溯产物：`complete_activity` 在同一事务内确定性汇编共同书摘（只汇总真实留下的书签与观点，不做模型式润色）写入 `artifacts`（book_summary，冲突时版本 +1），并幂等写入 `relationship_events` 的 `reading_finished` 事件（user_id+event_type+source_id 部分唯一索引作幂等键）。
+- 相关语境自然回访：没有正在读的书时，45 天内 `reading_finished` 事件的共同书摘作为回访素材；注入继续走既有阅读意图正则门控，普通聊天零污染，引用内容带不可信声明。
+- 删除级联：删书架文档时共同书摘与观点随源删除、事件作废为 forgotten，不留幽灵回忆；三张新表全部进入 reset 双清单。
+- 前端：共读面板新增「各自的看法」分角色编辑区（讨论草稿自动带上用户观点）、完成后的共同书摘卡片、已完成列表可点开回看书摘；新增 `PUT /api/activities/{id}/viewpoint`。
+- 验证：后端聚合 **45/45**、前端 Vitest **24/24**、`vue-tsc` + 生产构建通过、Playwright 关键路径 **5/5**。网页/EPUB 支持按路线顺延再评估；下一步进入 Sprint 2 关系事件内核（补齐其余 3 类事件、pending_thoughts、Narrative Planner）。
+
+### Sprint 1 · 可信记忆与用户主权（已完成，2026-09-05，Codex 执行）
 
 - facts schema 升至 v2：新增来源类型、来源消息 ID、0–1 置信度、验证/过期时间、固定状态与呈现策略；旧数据自动迁移为 `legacy`，升级前由 M0 快照机制备份。
 - 每日事实提炼改为结构化输出，事实记录可追溯到原始消息；模型推断置信度低于 1，用户在管理页改写后自动标为一手纠正、置信度 1 并记录验证时间。
