@@ -506,16 +506,32 @@ async def on_message(user_id: str, text: str) -> None:
     last_day = user["last_chat_date"]
     if last_day != today.isoformat():
         if last_day:
-            # 补跑：从 last_batch_date（缺省用 last_chat_date）遍历到昨天，
-            # 凡有消息且未总结的日子都调度每日总结——隔多天未聊不再丢中间日子
+            # 补跑：处理 (last_batch_date, 昨天] 之间所有有消息的日子。
+            # 边界语义（2026-09-06 修复 off-by-one）：last_batch_date 是「最后已
+            # 处理日」，缺省时从最早的消息日开始（老库可能一天批处理都没跑
+            # 过）；循环条件用 <= 包含昨天——连续每天聊天时 anchor 恰好等于
+            # 昨天，旧的严格 < 会把唯一要处理的一天排除在外，导致 daily
+            # batch（昨日好感判定/日记/约定/共同语言）永远不执行。
             try:
                 from .daily import run_daily_batch  # 延迟导入避免循环
 
-                anchor = user["last_batch_date"] or last_day
-                cur = date.fromisoformat(anchor)
                 yesterday = today - timedelta(days=1)
-                while cur < yesterday:
-                    cur += timedelta(days=1)
+                if user["last_batch_date"]:
+                    cur = date.fromisoformat(user["last_batch_date"]) + timedelta(days=1)
+                else:
+                    with db._lock:
+                        row = db.conn.execute(
+                            "SELECT MIN(substr(ts, 1, 10)) AS day FROM messages WHERE user_id = ?",
+                            (user_id,),
+                        ).fetchone()
+                    earliest = row["day"] if row and row["day"] else None
+                    # 补跑窗口上限 30 天：更早的历史直接放弃，避免长期离线
+                    # 用户回来时后台 LLM 调用突发失控。
+                    cur = (
+                        max(date.fromisoformat(earliest), yesterday - timedelta(days=29))
+                        if earliest else yesterday
+                    )
+                while cur <= yesterday:
                     if db.messages_between(user_id, cur, cur):
                         schedule(
                             f"daily:{user_id}:{cur}",
@@ -524,6 +540,7 @@ async def on_message(user_id: str, text: str) -> None:
                     else:
                         # 空日直接推进 batch 标记，避免下次重复扫描
                         db.set_batch_date(user_id, cur.isoformat())
+                    cur += timedelta(days=1)
             except Exception:
                 logger.exception("[好感度] 跨天补跑调度失败，回退只补昨天")
                 try:
