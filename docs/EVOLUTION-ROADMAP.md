@@ -272,6 +272,15 @@
 
 ## 迭代记录
 
+### Sprint 2 · 关系事件内核（已完成，2026-09-05，GLM 执行）
+
+- 统一事件服务：新增 `backend/core/relationship_events.py`——`EVENT_TYPES` 类型注册（未注册类型拒绝落库）、部分唯一索引幂等键、`expires_at` 过期过滤、`mark_corrected` 纠正、`invalidate_for_source` 按来源作废；Sprint 3 的 `reading_finished` 直写 SQL 收口进服务。
+- 4 类首批事件补齐：`promise_completed`（C6 约定到点跟进完成，`initiative.maybe_follow_up_promise` 落账后记录）、`important_date`（特殊日子到来时记录，每年重复的日子刷新同一条不逐年堆积，7 天后过期）、`memory_corrected`（管理页改写/冲突确认经 `fact_lifecycle` 留痕；对话内 LLM 仲裁真删不落事件，因为事实本体已随纠正消失）；`reading_finished` 已由 Sprint 3 落地。
+- 聊天内自然回忆（唯一表达出口）：`event_recall` 只在约定相关话题（约定/答应/说好等）或直接点名某个日子时注入真实事件素材；无关话题返回空，零污染；不新增任何主动发送路径。
+- 解释快照：事件回忆被使用时，解释面板新增「事件来源」条目，回答"因为哪件真实发生的事"；不暴露隐含推理链。
+- 删除级联：删事实（含级联候选）与删共读活动都会作废对应事件，不留幽灵回忆。
+- 验证：新增 `tests/test_relationship_events.py`（类型注册/幂等/过期/纠正/级联/记忆纠偏留痕/回忆门控/pipeline 接线与解释快照），后端聚合 **46/46** 全绿（含回归 Sprint 3 活动与记忆纠偏套件）。
+
 ### Sprint 3 · 共读 2.0（已完成，2026-09-05，GLM 执行）
 
 - 双方观点分角色保存：新增 `activity_viewpoints`（schema v4），观点必须显式声明 user / tuzhan / shared 角色，未声明角色被 API 拒绝，模型观点无法冒充用户观点进入记录。

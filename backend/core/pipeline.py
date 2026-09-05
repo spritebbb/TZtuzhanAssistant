@@ -735,6 +735,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 共读上下文读取失败，按无活动继续")
 
+    # 3.0.2) M2 关系事件回忆：只回忆「真实发生过」的约定/特殊日子，
+    # 语境门控在 relationship_events.event_recall 内部，无关话题返回空。
+    event_recall_result: dict = {"context": "", "sources": []}
+    try:
+        from .relationship_events import event_recall
+
+        event_recall_result = await asyncio.to_thread(event_recall, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 关系事件回忆失败，按无事件继续")
+
     # 3.1) 长会话压缩：总消息超阈值时，把旧消息摘要成一段记忆，只保留最近的完整消息
     ctx = short_term_messages(user_id)
     compact_summary = None
@@ -869,6 +879,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.exception("[pipeline] 特殊日子查询失败")
         today_dates = []
     if today_dates:
+        # M2：日子真的到来了——写入/刷新 important_date 事件（幂等，每年同一条）。
+        try:
+            from datetime import date as _today_cls
+
+            from .relationship_events import refresh_important_date
+
+            for _date_row in today_dates:
+                refresh_important_date(user_id, _date_row, _today_cls.today())
+        except Exception:
+            logger.exception("[pipeline] 纪念日事件记录失败（不影响注入）")
         labels = "、".join(d["label"] for d in today_dates)
         messages.append(
             {
@@ -1082,6 +1102,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": reading_context,
+            }
+        )
+
+    # M2 关系事件：只基于真实事件库的自然回忆，不做主动推送；解释快照展示来源。
+    if event_recall_result.get("context"):
+        messages.append(
+            {
+                "role": "system",
+                "content": event_recall_result["context"],
             }
         )
 
@@ -1507,6 +1536,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
                 for item in triples[:2]
                 if len(item) >= 4
+            )
+            memory_rows.extend(
+                ("事件来源", source) for source in event_recall_result.get("sources", [])[:2]
             )
             snapshot = build_reply_explanation(
                 reply_state,

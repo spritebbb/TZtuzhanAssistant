@@ -694,6 +694,12 @@ async def maybe_follow_up_promise(user_id: str) -> str | None:
     if not await enqueue_proactive(user_id, text):
         return None
     mark_promise_done(due[0]["id"])
+    try:
+        from .relationship_events import record_promise_completed
+
+        record_promise_completed(user_id, due[0])
+    except Exception:
+        logger.exception("[主动性] 约定完成事件记录失败（不影响跟进）")
     _mark_promise_followed(user_id)
     logger.info("[主动性] 已跟进约定：{}", due[0]["content"][:40])
     return text
