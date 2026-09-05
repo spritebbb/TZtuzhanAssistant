@@ -12,6 +12,7 @@ import {
   type ReadingActivity,
 } from '../../api/activities'
 import { listKnowledgeDocuments } from '../../api/knowledge'
+import { listGoals, startGoal } from '../../api/goals'
 import ActivityPanel from '../ActivityPanel.vue'
 
 vi.mock('../../api/activities', () => ({
@@ -24,6 +25,16 @@ vi.mock('../../api/activities', () => ({
   startReading: vi.fn(),
 }))
 vi.mock('../../api/knowledge', () => ({ listKnowledgeDocuments: vi.fn() }))
+vi.mock('../../api/goals', () => ({
+  addGoalProgress: vi.fn(),
+  cancelGoal: vi.fn(),
+  completeGoal: vi.fn(),
+  exportGoalUrl: vi.fn((id: number) => `/api/goals/${id}/export?format=md`),
+  listGoals: vi.fn(),
+  pauseGoal: vi.fn(),
+  resumeGoal: vi.fn(),
+  startGoal: vi.fn(),
+}))
 
 const mockedList = vi.mocked(listReadingActivities)
 const mockedDocuments = vi.mocked(listKnowledgeDocuments)
@@ -33,6 +44,8 @@ const mockedPosition = vi.mocked(setReadingPosition)
 const mockedNote = vi.mocked(saveReadingNote)
 const mockedViewpoint = vi.mocked(saveReadingViewpoint)
 const mockedComplete = vi.mocked(completeReading)
+const mockedGoals = vi.mocked(listGoals)
+const mockedStartGoal = vi.mocked(startGoal)
 
 function activity(overrides: Partial<ReadingActivity> = {}): ReadingActivity {
   return {
@@ -63,6 +76,7 @@ describe('ActivityPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockedList.mockResolvedValue([])
+    mockedGoals.mockResolvedValue([])
     mockedDocuments.mockResolvedValue([{
       id: 3,
       filename: '藤本植物.txt',
@@ -83,6 +97,21 @@ describe('ActivityPanel', () => {
       viewpoints: [{ role, position: 0, content, ts: '2026-09-04T12:00:00' }],
     }))
     mockedComplete.mockResolvedValue(activity({ status: 'completed', completed_at: '2026-09-04T13:00:00', summary: '《藤本植物.txt》读完时留下的东西：' }))
+    mockedStartGoal.mockResolvedValue({
+      id: 18,
+      kind: 'goal',
+      title: '整理作品集',
+      status: 'active',
+      motivation: '想把做过的事讲清楚',
+      next_step: '先挑三个项目',
+      support_mode: 'companion',
+      reminder_at: null,
+      created_at: '2026-09-05T12:00:00',
+      updated_at: '2026-09-05T12:00:00',
+      completed_at: null,
+      progress_entries: [],
+      review: '',
+    })
   })
 
   it('starts a reading activity from a bookshelf document', async () => {
@@ -97,6 +126,26 @@ describe('ActivityPanel', () => {
     expect(mockedStart).toHaveBeenCalledWith(3)
     expect(wrapper.text()).toContain('第一段讲菟丝子的生长')
     expect(wrapper.text()).toContain('第 1 / 2 段')
+  })
+
+  it('creates a shared goal with an explicit next small step', async () => {
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.goal-section .open-bookshelf').trigger('click')
+    const inputs = wrapper.findAll('.goal-create input[type="text"], .goal-create input:not([type])')
+    await inputs[0].setValue('整理作品集')
+    await wrapper.get('.goal-create textarea').setValue('想把做过的事讲清楚')
+    await inputs[1].setValue('先挑三个项目')
+    await wrapper.get('.goal-create .talk').trigger('click')
+    await flushPromises()
+
+    expect(mockedStartGoal).toHaveBeenCalledWith(expect.objectContaining({
+      title: '整理作品集',
+      next_step: '先挑三个项目',
+      support_mode: 'companion',
+    }))
+    expect(wrapper.text()).toContain('NEXT SMALL STEP')
   })
 
   it('saves a bookmark, turns the page and hands a draft back to chat', async () => {

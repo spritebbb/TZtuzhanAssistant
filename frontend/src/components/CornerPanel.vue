@@ -11,6 +11,7 @@ const error = ref('')
 
 const TYPE_LABELS: Record<string, string> = {
   book_summary: '共同书摘',
+  goal_review: '目标回顾',
 }
 
 function typeLabel(type: string) {
@@ -58,7 +59,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
           </article>
         </template>
         <p v-else class="empty">
-          这里还空着——和{{ props.personaName || '她' }}一起读完第一本书，就会留下第一件东西
+          这里还空着——和{{ props.personaName || '她' }}一起读完第一本书或完成第一个目标，就会留下第一件东西
         </p>
       </div>
     </section>

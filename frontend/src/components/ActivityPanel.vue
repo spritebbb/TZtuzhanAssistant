@@ -12,6 +12,18 @@ import {
   type ViewpointRole,
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
+import {
+  addGoalProgress,
+  cancelGoal,
+  completeGoal,
+  exportGoalUrl,
+  listGoals,
+  pauseGoal,
+  resumeGoal,
+  startGoal,
+  type GoalSupportMode,
+  type SharedGoal,
+} from '../api/goals'
 import { useFocusMode } from '../utils/focusMode'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
@@ -33,6 +45,18 @@ const focusCountdown = computed(() => {
 const activities = ref<ReadingActivity[]>([])
 const documents = ref<KnowledgeDocument[]>([])
 const current = ref<ReadingActivity | null>(null)
+const goals = ref<SharedGoal[]>([])
+const currentGoal = ref<SharedGoal | null>(null)
+const showGoalForm = ref(false)
+const goalTitle = ref('')
+const goalMotivation = ref('')
+const goalNextStep = ref('')
+const goalSupport = ref<GoalSupportMode>('companion')
+const goalReminderAt = ref('')
+const progressDraft = ref('')
+const progressPercent = ref<number | null>(null)
+const progressNextStep = ref('')
+const keepGoalReview = ref(true)
 const noteDraft = ref('')
 const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
@@ -48,6 +72,8 @@ const viewpointRoles = computed(() => [
 
 const unfinished = computed(() => activities.value.filter(item => item.status !== 'completed'))
 const completed = computed(() => activities.value.filter(item => item.status === 'completed').slice(0, 4))
+const openGoals = computed(() => goals.value.filter(item => item.status === 'active' || item.status === 'paused'))
+const completedGoals = computed(() => goals.value.filter(item => item.status === 'completed').slice(0, 4))
 
 function serverViewpoint(role: ViewpointRole): string {
   if (!current.value) return ''
@@ -86,12 +112,14 @@ async function load() {
   error.value = ''
   notice.value = ''
   try {
-    const [activityRows, documentRows] = await Promise.all([
+    const [activityRows, documentRows, goalRows] = await Promise.all([
       listReadingActivities(),
       listKnowledgeDocuments(),
+      listGoals(),
     ])
     activities.value = activityRows
     documents.value = documentRows
+    goals.value = goalRows
     const active = activityRows.find(item => item.status === 'active') ?? null
     current.value = active
     noteDraft.value = active?.note ?? ''
@@ -100,6 +128,93 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function applyGoal(value: SharedGoal) {
+  currentGoal.value = value
+  goals.value = [value, ...goals.value.filter(item => item.id !== value.id)]
+  progressNextStep.value = value.next_step
+}
+
+async function runGoal(action: () => Promise<SharedGoal>, success = '') {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    applyGoal(await action())
+    notice.value = success
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function createGoal() {
+  await runGoal(() => startGoal({
+    title: goalTitle.value,
+    motivation: goalMotivation.value,
+    next_step: goalNextStep.value,
+    support_mode: goalSupport.value,
+    reminder_at: goalSupport.value === 'reminder' ? goalReminderAt.value || null : null,
+  }), '目标放在这里了，先走眼前这一小步')
+  if (!error.value) {
+    showGoalForm.value = false
+    goalTitle.value = ''
+    goalMotivation.value = ''
+    goalNextStep.value = ''
+    goalReminderAt.value = ''
+  }
+}
+
+function openGoal(item: SharedGoal) {
+  currentGoal.value = item
+  progressNextStep.value = item.next_step
+  progressDraft.value = ''
+  progressPercent.value = null
+  notice.value = ''
+  error.value = ''
+}
+
+async function saveProgress() {
+  if (!currentGoal.value) return
+  await runGoal(() => addGoalProgress(currentGoal.value!.id, {
+    content: progressDraft.value,
+    percent: progressPercent.value,
+    next_step: progressNextStep.value,
+  }), '这一步确实发生过，记下了')
+  if (!error.value) {
+    progressDraft.value = ''
+    progressPercent.value = null
+  }
+}
+
+function leaveGoal() {
+  currentGoal.value = null
+  progressDraft.value = ''
+  notice.value = ''
+  error.value = ''
+}
+
+function pauseCurrentGoal() {
+  const item = currentGoal.value
+  if (item) void runGoal(() => pauseGoal(item.id), '先放在这里，回来还能继续')
+}
+
+function resumeCurrentGoal() {
+  const item = currentGoal.value
+  if (item) void runGoal(() => resumeGoal(item.id), '继续走这一步')
+}
+
+function finishCurrentGoal() {
+  const item = currentGoal.value
+  if (item) void runGoal(() => completeGoal(item.id, keepGoalReview.value), '做成了，过程也如实收好了')
+}
+
+function cancelCurrentGoal() {
+  const item = currentGoal.value
+  if (item) void runGoal(() => cancelGoal(item.id), '这个目标已经放下')
 }
 
 async function run(action: () => Promise<ReadingActivity>, success = '') {
@@ -197,14 +312,62 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
         <div>
           <span class="eyebrow">DOING THINGS TOGETHER</span>
           <h2>一起做点什么</h2>
-          <p>先从共读开始，把话题从聊天框里拿出来</p>
+          <p>共读、专注，也把想做成的事一步步留在这里</p>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>
 
       <div class="body">
         <p v-if="loading" class="empty">正在找上次夹的书签…</p>
-        <p v-else-if="error && !current" class="empty error">{{ error }}</p>
+        <p v-else-if="error && !current && !currentGoal" class="empty error">{{ error }}</p>
+
+        <template v-else-if="currentGoal">
+          <button class="back" @click="leaveGoal">← 所有活动</button>
+          <div class="goal-head">
+            <div>
+              <span class="status" :class="currentGoal.status">
+                {{ currentGoal.status === 'completed' ? '已完成' : currentGoal.status === 'paused' ? '暂放一下' : currentGoal.status === 'cancelled' ? '已放下' : '一起进行中' }}
+              </span>
+              <h3>{{ currentGoal.title }}</h3>
+              <p v-if="currentGoal.motivation">为什么想做：{{ currentGoal.motivation }}</p>
+            </div>
+          </div>
+          <article class="next-step-card">
+            <span>NEXT SMALL STEP</span>
+            <strong>{{ currentGoal.next_step }}</strong>
+            <small>{{ currentGoal.support_mode === 'companion' ? '陪做模式 · 你提起时她才跟进' : `轻提醒一次${currentGoal.reminder_at ? ` · ${currentGoal.reminder_at.slice(0, 16).replace('T', ' ')}` : ''}` }}</small>
+          </article>
+
+          <template v-if="currentGoal.status === 'active' || currentGoal.status === 'paused'">
+            <div class="goal-progress-form">
+              <label><span>这次实际做了什么</span><textarea v-model="progressDraft" rows="3" maxlength="1000" placeholder="只记真实发生的进展，不用写得漂亮"></textarea></label>
+              <div class="goal-progress-row">
+                <label><span>大约进度（可选）</span><input v-model.number="progressPercent" type="number" min="0" max="100" placeholder="%"></label>
+                <label><span>接下来最小一步</span><input v-model="progressNextStep" maxlength="500"></label>
+              </div>
+              <button class="talk" :disabled="busy || !progressDraft.trim()" @click="saveProgress">记下这次进展</button>
+            </div>
+            <div class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
+            <div class="goal-actions">
+              <button v-if="currentGoal.status === 'active'" :disabled="busy" @click="pauseCurrentGoal">暂停</button>
+              <button v-else :disabled="busy" @click="resumeCurrentGoal">继续</button>
+              <label class="keepsake-choice"><input v-model="keepGoalReview" type="checkbox">完成后留下过程回顾</label>
+              <button class="finish" :disabled="busy" @click="finishCurrentGoal">完成目标</button>
+              <button class="plain-action" :disabled="busy" @click="cancelCurrentGoal">放下目标</button>
+            </div>
+          </template>
+
+          <section v-if="currentGoal.progress_entries.length" class="goal-timeline">
+            <div class="section-title"><span>REAL PROGRESS</span><h3>实际进展</h3></div>
+            <article v-for="entry in [...currentGoal.progress_entries].reverse()" :key="entry.id">
+              <span>{{ entry.ts.slice(0, 10) }}<template v-if="entry.percent !== null"> · {{ entry.percent }}%</template></span>
+              <p>{{ entry.content }}</p>
+              <small v-if="entry.next_step">下一步：{{ entry.next_step }}</small>
+            </article>
+          </section>
+          <article v-if="currentGoal.review" class="summary-box"><span>过程回顾</span><p>{{ currentGoal.review }}</p></article>
+          <a class="goal-export" :href="exportGoalUrl(currentGoal.id)" download>导出 Markdown</a>
+        </template>
 
         <template v-else-if="current">
           <button class="back" @click="leaveCurrent">← 共读书架</button>
@@ -268,6 +431,31 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
         </template>
 
         <template v-else>
+          <section class="shelf-section goal-section">
+            <div class="section-title"><span>SHARED GOALS</span><h3>共同目标</h3></div>
+            <p class="focus-hint">把动机和下一小步放清楚；她可以陪你做，也可以只轻轻提醒一次</p>
+            <button v-if="!showGoalForm" class="open-bookshelf" @click="showGoalForm = true">立一个共同目标</button>
+            <div v-else class="goal-create">
+              <label><span>想做成什么</span><input v-model="goalTitle" maxlength="120" placeholder="例如：整理出第一版作品集"></label>
+              <label><span>为什么想做（可选）</span><textarea v-model="goalMotivation" rows="2" maxlength="1000"></textarea></label>
+              <label><span>现在能走的最小一步</span><input v-model="goalNextStep" maxlength="500" placeholder="例如：先挑出 3 个项目"></label>
+              <div class="support-choice">
+                <label><input v-model="goalSupport" type="radio" value="companion">我提起时陪我做</label>
+                <label><input v-model="goalSupport" type="radio" value="reminder">到点轻提醒一次</label>
+              </div>
+              <label v-if="goalSupport === 'reminder'"><span>提醒时间（留空默认 3 天后）</span><input v-model="goalReminderAt" type="datetime-local"></label>
+              <div class="goal-create-actions"><button class="plain-action" @click="showGoalForm = false">取消</button><button class="talk" :disabled="busy || !goalTitle.trim() || !goalNextStep.trim()" @click="createGoal">开始</button></div>
+            </div>
+            <div v-if="openGoals.length" class="activity-list goal-list">
+              <button v-for="item in openGoals" :key="item.id" @click="openGoal(item)">
+                <span class="format">GOAL</span><span><strong>{{ item.title }}</strong><small>下一步：{{ item.next_step }}</small></span><em>{{ item.status === 'paused' ? '继续' : '查看' }}</em>
+              </button>
+            </div>
+            <div v-if="completedGoals.length" class="activity-list goal-list completed-goals">
+              <button v-for="item in completedGoals" :key="item.id" @click="openGoal(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.progress_entries.length }} 条真实进展</small></span><em>回看</em></button>
+            </div>
+          </section>
+
           <section class="shelf-section focus-section">
             <div class="section-title"><span>QUIET TIME</span><h3>专注陪伴</h3></div>
             <div v-if="focusMode.current.value" class="focus-card">
@@ -340,6 +528,33 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 .focus-actions button { padding: 7px 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-card); cursor: pointer; }
 .focus-actions button:disabled { opacity: .5; cursor: default; }
 .focus-actions .plain { border-color: transparent; color: var(--text-muted); background: transparent; }
+.goal-section { padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 16px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.goal-create, .goal-progress-form { margin-top: 12px; display: grid; gap: 10px; }
+.goal-create label, .goal-progress-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }
+.goal-create input, .goal-create textarea, .goal-progress-form input, .goal-progress-form textarea { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; outline: none; color: var(--text); background: var(--bg-card); font: inherit; font-size: 12px; }
+.goal-create textarea, .goal-progress-form textarea { resize: vertical; }
+.support-choice { display: flex; flex-wrap: wrap; gap: 16px; }
+.support-choice label { display: flex; align-items: center; gap: 6px; }
+.support-choice input, .keepsake-choice input { width: auto; }
+.goal-create-actions, .goal-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 9px; }
+.plain-action { padding: 8px 10px; border: 0; color: var(--text-muted); background: transparent; cursor: pointer; }
+.goal-list { margin-top: 10px; }
+.completed-goals { opacity: .82; }
+.goal-head h3 { margin: 8px 0 5px; font-size: 22px; }
+.goal-head p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.next-step-card { margin: 16px 0; padding: 16px; display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 15px; background: color-mix(in srgb, var(--accent) 7%, var(--bg-card)); }
+.next-step-card span { color: var(--accent); font-size: 9px; letter-spacing: .15em; }
+.next-step-card strong { font-size: 15px; font-weight: 550; }
+.next-step-card small { color: var(--text-muted); font-size: 10px; }
+.goal-progress-row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; }
+.goal-actions { margin: 8px 0 20px; }
+.goal-actions > button { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.keepsake-choice { margin-right: auto; display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 10px; }
+.goal-timeline { margin-top: 18px; }
+.goal-timeline article { margin-top: 8px; padding: 10px 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--bg-card) 80%, transparent); }
+.goal-timeline article > span, .goal-timeline article > small { color: var(--text-muted); font-size: 9px; }
+.goal-timeline article p { margin: 5px 0; white-space: pre-wrap; font-size: 12px; }
+.goal-export { display: inline-block; margin-top: 12px; color: var(--accent); font-size: 11px; text-decoration: none; }
 .activity-mask { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgba(8,10,16,.64); backdrop-filter: blur(6px); }
 .activity-panel { width: min(720px, 97vw); height: 100%; padding: 26px 28px; overflow: hidden; display: flex; flex-direction: column; color: var(--text); background: radial-gradient(circle at 82% 3%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 34%), linear-gradient(155deg, var(--bg-card), var(--bg-main)); border-left: 1px solid var(--border); box-shadow: -24px 0 65px rgba(0,0,0,.3); }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-shrink: 0; }
@@ -416,5 +631,6 @@ header p, .reading-head p { margin: 0; color: var(--text-muted); font-size: 12px
   .excerpt { padding: 24px 22px; }
   .page-actions { grid-template-columns: 80px 1fr 80px; }
   .primary-actions { grid-template-columns: 1fr; }
+  .goal-progress-row { grid-template-columns: 1fr; }
 }
 </style>

@@ -745,6 +745,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 专注上下文读取失败，按无活动继续")
 
+    # 3.0.1c) M3.3 共同目标：只在目标/计划相关话题下注入真实进展。
+    goal_ctx = ""
+    try:
+        from .goals import goal_context
+
+        goal_ctx = await asyncio.to_thread(goal_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 共同目标上下文读取失败，按无活动继续")
+
     # 3.0.2) M2 关系事件回忆：只回忆「真实发生过」的约定/特殊日子，
     # 语境门控在 relationship_events.event_recall 内部，无关话题返回空。
     event_recall_result: dict = {"context": "", "sources": []}
@@ -1124,6 +1133,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": focus_ctx,
+            }
+        )
+
+    if goal_ctx:
+        messages.append(
+            {
+                "role": "system",
+                "content": goal_ctx,
             }
         )
 

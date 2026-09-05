@@ -46,6 +46,15 @@ describe('CornerPanel', () => {
     expect(wrapper.text()).toContain('读完第一本书')
   })
 
+  it('labels a goal review as a real shared artifact', async () => {
+    mocked.mockResolvedValue([{ ...artifact, artifact_type: 'goal_review', title: '作品集过程回顾' }])
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('目标回顾')
+    expect(wrapper.text()).toContain('作品集过程回顾')
+  })
+
   it('marks updated artifacts with a version badge', async () => {
     mocked.mockResolvedValue([{ ...artifact, version: 3 }])
     const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })

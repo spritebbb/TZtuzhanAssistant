@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from .log import logger
 from .userdb import db
 
-_THOUGHT_KINDS = ("resume_reading", "confirm_memory")
+_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin")
 _PAUSED_READING_DAYS = 3
 _CONFIRM_MEMORY_HOURS = 2
 _THOUGHT_TTL_DAYS = 7
@@ -78,6 +78,13 @@ def sync_pending_thoughts(user_id: str) -> int:
             "AND occurred_at >= ?",
             (user_id, (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")),
         ).fetchall()
+        due_goals = db.conn.execute(
+            "SELECT a.id, a.title, g.next_step, g.reminder_at FROM activities a "
+            "JOIN activity_goals g ON g.activity_id = a.id AND g.user_id = a.user_id "
+            "WHERE a.user_id = ? AND a.kind = 'goal' AND a.status IN ('active', 'paused') "
+            "AND g.support_mode = 'reminder' AND g.reminder_at IS NOT NULL AND g.reminder_at <= ?",
+            (user_id, now),
+        ).fetchall()
     for row in paused:
         earliest = (
             datetime.fromisoformat(row["updated_at"]) + timedelta(days=_PAUSED_READING_DAYS)
@@ -96,6 +103,13 @@ def sync_pending_thoughts(user_id: str) -> int:
             user_id, "confirm_memory", "fact", int(row["source_id"]),
             "她刚改过一条记你的事，想找个自然的时机确认这次记对了没",
             earliest_at=earliest, priority=3, commit=False,
+        ):
+            added += 1
+    for row in due_goals:
+        if _add(
+            user_id, "goal_checkin", "activity", int(row["id"]),
+            f"对方请你在合适时轻轻问一次共同目标「{row['title']}」；下一小步是「{row['next_step']}」",
+            earliest_at=row["reminder_at"], priority=5, commit=False,
         ):
             added += 1
     if added:
