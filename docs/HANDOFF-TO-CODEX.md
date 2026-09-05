@@ -1,7 +1,7 @@
 # 菟菚桌面助手 —— Codex 接手交接报告（2026-09-06 更新）
 
 > 本报告为 Codex 接手的**最新**状态。上一版（D5 交接）已过时——此后经历了 D2 RAG 知识库、C4 好感度玩法闭环、历史文档归档。
-> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线已完成 M0–M2、M4、M5 的退出标准，M3 已交付共读、专注陪伴与共同目标，M6 首批低成本原型完成。当前工作区验证基线为后端聚合 **52/52**、前端 Vitest **34/34**、生产构建通过、浏览器关键路径 **5/5**。
+> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线已完成 M0–M2、M4、M5 的退出标准，M3 已交付共读、专注陪伴与共同目标，M6 首批低成本原型完成。当前工作区验证基线为后端聚合 **53/53**、前端 Vitest **34/34**、生产构建通过、浏览器关键路径 **5/5**。
 
 ---
 
@@ -76,7 +76,7 @@ env -u CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR -u CODEBUDDY_TOOL_CALL_ID .venv/Scri
 
 ### 3. 测试套件入口 + 计数
 - 全量：`pytest tests/test_suite_runner.py -q`（聚合 `tests/` 各模块）
-- 当前聚合基线为 **52/52**；`test_edge_regressions.py` 另有快速边界回归
+- 当前聚合基线为 **53/53**；`test_edge_regressions.py` 另有快速边界回归
 - 改动后先 `py_compile` 相关 .py 再跑套件
 
 ### 4. 前端改完要过 vue-tsc + vite build
@@ -121,7 +121,7 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 
 ## 八、给你的下一步（Codex 建议行动序列）
 
-1. **先跑全量测试确认基线**：`.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q` → 当前基线应 **52/52 全绿**；前端执行 `npm test` 与 `npm run test:e2e`。
+1. **先跑全量测试确认基线**：`.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q` → 当前基线应 **53/53 全绿**；前端执行 `npm test` 与 `npm run test:e2e`。
 2. 读 `docs/EVOLUTION-ROADMAP.md`（逐项验收标准）+ `persona-菟菚.md`（人格约束，改动别破坏人设）
 3. **下一推荐切片为 M3.4 共同创作**；此外可继续 M6 物件类型扩展/共同审美、M4 互动气质/幽默记忆/领域信任、M5 低频生活事件、M1 导出恢复/自然遗忘。桌面宠物与 STT 仍需用户拍板。
 4. **D8 不要直接开做**：它仍卡公网部署、HTTPS、推送凭据与通知策略，需先与用户对齐资源和方案。
