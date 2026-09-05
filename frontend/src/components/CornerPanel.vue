@@ -12,6 +12,7 @@ const error = ref('')
 const TYPE_LABELS: Record<string, string> = {
   book_summary: '共同书摘',
   goal_review: '目标回顾',
+  co_story: '共同故事',
 }
 
 function typeLabel(type: string) {

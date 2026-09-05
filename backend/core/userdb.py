@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 7
+_SCHEMA_VERSION = 8
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -286,6 +286,26 @@ CREATE INDEX IF NOT EXISTS idx_activity_goals_user
     ON activity_goals(user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_goal_progress_activity
     ON goal_progress(user_id, activity_id, ts);
+-- M3.4 共同创作：活动壳负责生命周期，开头设定与轮流正文保存在专属侧表。
+-- 虚构隔离：故事正文只存这里，不进会话历史与记忆提炼；进 prompt 的唯一
+-- 通道是 cowriting.cowriting_context 的虚构声明门控注入。
+CREATE TABLE IF NOT EXISTS activity_writings (
+    activity_id  INTEGER PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    premise      TEXT NOT NULL DEFAULT '',   -- 开头设定（题材/世界观一句话）
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS writing_turns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    author      TEXT NOT NULL,      -- user / tuzhan
+    content     TEXT NOT NULL,
+    ts          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_writing_turns_activity
+    ON writing_turns(user_id, activity_id, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -1326,7 +1346,8 @@ class UserDB:
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
-                "activity_viewpoints", "activity_goals", "goal_progress", "relationship_events", "artifacts",
+                "activity_viewpoints", "activity_goals", "goal_progress",
+                "activity_writings", "writing_turns", "relationship_events", "artifacts",
                 "pending_thoughts",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):

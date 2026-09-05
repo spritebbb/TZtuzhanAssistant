@@ -40,6 +40,7 @@ from .api import (
     usage,
     user_reset,
     vision,
+    writings,
 )
 from .maintenance.loop import checkpoint_all, maintenance_loop
 from .session import store as session_store
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
     app.include_router(diary.router)
     app.include_router(focus.router)
     app.include_router(goals.router)
+    app.include_router(writings.router)
     app.include_router(memory_admin.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)

@@ -13,6 +13,13 @@ import {
 } from '../../api/activities'
 import { listKnowledgeDocuments } from '../../api/knowledge'
 import { listGoals, startGoal } from '../../api/goals'
+import {
+  addWritingTurn,
+  listWritings,
+  requestTuzhanTurn,
+  startWriting,
+  type CoWriting,
+} from '../../api/writings'
 import ActivityPanel from '../ActivityPanel.vue'
 
 vi.mock('../../api/activities', () => ({
@@ -35,6 +42,17 @@ vi.mock('../../api/goals', () => ({
   resumeGoal: vi.fn(),
   startGoal: vi.fn(),
 }))
+vi.mock('../../api/writings', () => ({
+  addWritingTurn: vi.fn(),
+  cancelWriting: vi.fn(),
+  completeWriting: vi.fn(),
+  exportWritingUrl: vi.fn((id: number) => `/api/writings/${id}/export?format=md`),
+  listWritings: vi.fn(),
+  pauseWriting: vi.fn(),
+  requestTuzhanTurn: vi.fn(),
+  resumeWriting: vi.fn(),
+  startWriting: vi.fn(),
+}))
 
 const mockedList = vi.mocked(listReadingActivities)
 const mockedDocuments = vi.mocked(listKnowledgeDocuments)
@@ -46,6 +64,26 @@ const mockedViewpoint = vi.mocked(saveReadingViewpoint)
 const mockedComplete = vi.mocked(completeReading)
 const mockedGoals = vi.mocked(listGoals)
 const mockedStartGoal = vi.mocked(startGoal)
+const mockedWritings = vi.mocked(listWritings)
+const mockedStartWriting = vi.mocked(startWriting)
+const mockedAddTurn = vi.mocked(addWritingTurn)
+const mockedTuzhanTurn = vi.mocked(requestTuzhanTurn)
+
+function writing(overrides: Partial<CoWriting> = {}): CoWriting {
+  return {
+    id: 22,
+    kind: 'writing',
+    title: '灯塔看守人的猫',
+    status: 'active',
+    premise: '一座只会亮一次的灯塔',
+    created_at: '2026-09-06T12:00:00',
+    updated_at: '2026-09-06T12:00:00',
+    completed_at: null,
+    turns: [],
+    story: '',
+    ...overrides,
+  }
+}
 
 function activity(overrides: Partial<ReadingActivity> = {}): ReadingActivity {
   return {
@@ -77,6 +115,7 @@ describe('ActivityPanel', () => {
     vi.clearAllMocks()
     mockedList.mockResolvedValue([])
     mockedGoals.mockResolvedValue([])
+    mockedWritings.mockResolvedValue([])
     mockedDocuments.mockResolvedValue([{
       id: 3,
       filename: '藤本植物.txt',
@@ -181,6 +220,64 @@ describe('ActivityPanel', () => {
     await flushPromises()
 
     expect(mockedViewpoint).toHaveBeenCalledWith(8, 'user', '我觉得菟丝子是在装弱')
+  })
+
+  it('starts a story relay and records the user turn', async () => {
+    mockedStartWriting.mockResolvedValue(writing())
+    mockedAddTurn.mockImplementation(async (_id, content) =>
+      writing({ turns: [{ id: 1, author: 'user', content, ts: '2026-09-06T12:01:00' }] }),
+    )
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.writing-section .open-bookshelf').trigger('click')
+    const titleInput = wrapper.get('.writing-section .goal-create input').element as HTMLInputElement
+    await wrapper.get('.writing-section .goal-create input').setValue('灯塔看守人的猫')
+    expect(titleInput.value).toBe('灯塔看守人的猫')
+    await wrapper.get('.writing-section .goal-create .talk').trigger('click')
+    await flushPromises()
+
+    expect(mockedStartWriting).toHaveBeenCalledWith('灯塔看守人的猫', '')
+    expect(wrapper.text()).toContain('故事还没有正文')
+
+    await wrapper.get('.writing-turn-form textarea').setValue('猫在第七天开始学着数浪。')
+    await wrapper.get('.writing-actions button:first-child').trigger('click')
+    await flushPromises()
+
+    expect(mockedAddTurn).toHaveBeenCalledWith(22, '猫在第七天开始学着数浪。')
+    expect(wrapper.text()).toContain('猫在第七天开始学着数浪')
+    expect(wrapper.text()).toContain('虚构')
+  })
+
+  it('asks her to continue the story and keeps fiction labeled', async () => {
+    mockedWritings.mockResolvedValue([
+      writing({
+        turns: [
+          { id: 1, author: 'user', content: '猫在第七天开始学着数浪。', ts: '2026-09-06T12:01:00' },
+        ],
+      }),
+    ])
+    mockedTuzhanTurn.mockImplementation(async () =>
+      writing({
+        turns: [
+          { id: 1, author: 'user', content: '猫在第七天开始学着数浪。', ts: '2026-09-06T12:01:00' },
+          { id: 2, author: 'tuzhan', content: '第八天，灯塔亮了第二次。', ts: '2026-09-06T12:02:00' },
+        ],
+      }),
+    )
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.activity-list.goal-list button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('猫在第七天开始学着数浪')
+
+    await wrapper.get('.writing-actions button:last-child').trigger('click')
+    await flushPromises()
+
+    expect(mockedTuzhanTurn).toHaveBeenCalledWith(22)
+    expect(wrapper.text()).toContain('第八天，灯塔亮了第二次')
+    expect(wrapper.text()).toContain('她接了一段')
   })
 
   it('shows the shared book summary from the finished list', async () => {
