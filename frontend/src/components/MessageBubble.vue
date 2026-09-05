@@ -17,6 +17,7 @@ const props = defineProps<{
   isActiveMatch?: boolean
   toolStatus?: string
   ttsKey: string
+  personaName?: string
 }>()
 
 // ---- 自包含状态：复制反馈 / 图片灯箱 ----
@@ -109,7 +110,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
     <div class="avatar" :class="message.role === 'user' ? 'user-avatar' : 'bot-avatar'">
       <img
         :src="message.role === 'user' ? userAvatar : assistantAvatar"
-        :alt="message.role === 'user' ? '你的头像' : '菟菚头像'"
+        :alt="message.role === 'user' ? '你的头像' : (personaName || '助手') + '头像'"
       />
     </div>
     <div class="col">

@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS long_memory (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     content TEXT NOT NULL,
-    ts      TEXT NOT NULL
+    ts      TEXT NOT NULL,
+    pinned  INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS affection_log (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -291,6 +292,13 @@ class UserDB:
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # 兼容旧库：long_memory 补 pinned 列（用户显式要求记住的记忆不被轮转清理）
+        try:
+            self.conn.execute(
+                "ALTER TABLE long_memory ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
         # 心情系统字段（旧库迁移）
@@ -713,10 +721,11 @@ class UserDB:
 
     # ---- long memory ----
     @_locked
-    def add_long_memory(self, user_id: str, content: str) -> int:
+    def add_long_memory(self, user_id: str, content: str, pinned: bool = False) -> int:
+        """写入一条长期记忆。pinned=True 表示用户显式要求记住，不被容量清理截断。"""
         cur = self.conn.execute(
-            "INSERT INTO long_memory (user_id, content, ts) VALUES (?, ?, ?)",
-            (user_id, content, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO long_memory (user_id, content, ts, pinned) VALUES (?, ?, ?, ?)",
+            (user_id, content, datetime.now().isoformat(timespec="seconds"), 1 if pinned else 0),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -728,14 +737,15 @@ class UserDB:
         调用方拿到 id 后应同步清理对应的向量索引，避免 Chroma 里残留孤儿向量。
         长期记忆表按用户无限增长，每轮对话还会双写（用户说/菟菚说），
         这里把每用户记录数限制在 keep 条以内。
+        pinned=1（用户显式要求记住的）永不删除，不计入 keep 配额。
         """
         keep_rows = self.conn.execute(
-            "SELECT id FROM long_memory WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            "SELECT id FROM long_memory WHERE user_id=? AND pinned=0 ORDER BY id DESC LIMIT ?",
             (user_id, keep),
         ).fetchall()
         keep_ids = {r["id"] for r in keep_rows}
         all_rows = self.conn.execute(
-            "SELECT id FROM long_memory WHERE user_id=?", (user_id,)
+            "SELECT id FROM long_memory WHERE user_id=? AND pinned=0", (user_id,)
         ).fetchall()
         removed = [r["id"] for r in all_rows if r["id"] not in keep_ids]
         if removed:

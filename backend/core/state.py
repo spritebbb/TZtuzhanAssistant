@@ -184,17 +184,18 @@ def begin_rest(user_id: str, *, minutes: int = _REST_DEFAULT_MINUTES, now: datet
     return data
 
 
-def is_rest_request(text: str) -> bool:
+def is_rest_request(text: str, persona_name: str = "菟菚") -> bool:
     """只识别用户让菟菚休息，不把“我去睡了”误当成让她睡。"""
     compact = re.sub(r"\s+", "", text or "")
     if not compact:
         return False
     first_person = re.search(r"我.{0,4}(?:睡|休息|歇)", compact)
-    addresses_her = "你" in compact or "菟菚" in compact
+    addresses_her = "你" in compact or persona_name in compact
     if first_person and not addresses_her:
         return False
+    target = rf"(?:你|{re.escape(persona_name)})"
     return bool(re.search(
-        r"(?:你|菟菚).{0,6}(?:去|快|先|好好|也该|可以)?(?:睡|休息|歇)|"
+        target + r".{0,6}(?:去|快|先|好好|也该|可以)?(?:睡|休息|歇)|"
         r"(?:去|快|赶紧|先|好好)(?:睡|休息|歇)(?:会儿|一会儿|一下)?吧?|"
         r"(?:睡|休息|歇)(?:会儿|一会儿|一下)吧",
         compact,
@@ -262,7 +263,13 @@ def repair_tension(user_id: str, text: str) -> dict:
 def handle_state_interaction(user_id: str, text: str) -> dict:
     """同步处理会影响当轮行为帧的显式交互意图。"""
     result = {"rest_started": False, "repair": "", "tension": 0}
-    if is_rest_request(text):
+    try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
+    except Exception:
+        persona_name = "菟菚"
+    if is_rest_request(text, persona_name):
         begin_rest(user_id)
         result["rest_started"] = True
     repaired = repair_tension(user_id, text)

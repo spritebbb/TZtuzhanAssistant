@@ -3,7 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { apiFetch } from '../api'
 import { getTtsAutoPlay, setTtsAutoPlay } from '../utils/tts'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 interface ConfigData {
@@ -201,7 +201,7 @@ async function pluginAction(name: string, action: 'enable' | 'disable' | 'reload
   if (action === 'disable') {
     const risky = target && hasRiskyTools(target)
     const tip = risky
-      ? `禁用插件「${target?.display_name || name}」？\n它注册了写/命令类工具（写入、执行命令、本机操控等），禁用后菟菚将失去这些能力，且立即生效。`
+      ? `禁用插件「${target?.display_name || name}」？\n它注册了写/命令类工具（写入、执行命令、本机操控等），禁用后${props.personaName || '助手'}将失去这些能力，且立即生效。`
       : `禁用插件「${target?.display_name || name}」？其注册的能力会立即卸载。`
     if (!confirm(tip)) return
   }
@@ -380,7 +380,7 @@ function confirmLabel(c: string): string {
             语音
           </div>
           <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" /></div>
-          <div class="setting-hint">手动朗读按钮始终显示在菟菚的消息下方；自动朗读只对新回复生效</div>
+          <div class="setting-hint">手动朗读按钮始终显示在{{ props.personaName || '助手' }}的消息下方；自动朗读只对新回复生效</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>

@@ -23,6 +23,7 @@ import uuid
 from pathlib import Path
 
 from ..core.config import config
+from ..core.persona_profiles import active_id, session_storage_id
 
 _DB: Path = config.data_dir / "sessions.db"
 
@@ -40,6 +41,17 @@ def _connect() -> sqlite3.Connection:
     # 直接撞 "database is locked" 异常而非短暂等待
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+def _ensure_session(conn: sqlite3.Connection, session_id: str) -> None:
+    """Ensure the active persona's private ``current`` row exists."""
+    if not session_id.startswith(CURRENT_SESSION_ID):
+        return
+    now = time.time()
+    conn.execute(
+        "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at) VALUES (?,?,?,?)",
+        (session_id, "新会话", now, now),
+    )
 
 
 def _init() -> None:
@@ -68,8 +80,13 @@ def _init() -> None:
             "CREATE TABLE IF NOT EXISTS archives ("
             "id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '归档',"
             "created_at REAL NOT NULL, message_count INTEGER NOT NULL DEFAULT 0,"
-            "messages_json TEXT NOT NULL DEFAULT '[]')"
+            "messages_json TEXT NOT NULL DEFAULT '[]',"
+            "persona_id TEXT NOT NULL DEFAULT 'default')"
         )
+        try:
+            conn.execute("ALTER TABLE archives ADD COLUMN persona_id TEXT NOT NULL DEFAULT 'default'")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_archives_created ON archives(created_at)"
         )
@@ -87,8 +104,11 @@ def _init() -> None:
 # ---- 数据访问（内部同步实现，外部经 async 包装）----
 
 def _get_messages_sync(session_id: str) -> list[dict] | None:
+    session_id = session_storage_id(session_id)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
+        conn.commit()
         exists = conn.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
         if exists is None:
             return None
@@ -114,8 +134,11 @@ def _get_messages_sync(session_id: str) -> list[dict] | None:
 
 def _message_count_sync(session_id: str) -> int:
     """当前会话的消息条数（用于判断是否该建议归档）。"""
+    session_id = session_storage_id(session_id)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
+        conn.commit()
         row = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (session_id,)
         ).fetchone()
@@ -125,8 +148,10 @@ def _message_count_sync(session_id: str) -> int:
 
 
 def _append_sync(session_id: str, messages: list[dict]) -> bool:
+    session_id = session_storage_id(session_id)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
         row = conn.execute("SELECT title FROM sessions WHERE id=?", (session_id,)).fetchone()
         if row is None:
             return False
@@ -163,12 +188,15 @@ def _archive_current_sync() -> dict | None:
 
     返回归档信息；若当前会话无消息则返回 None（不产生空归档）。
     """
+    persona_id = active_id()
+    session_id = session_storage_id(CURRENT_SESSION_ID)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
         rows = conn.execute(
             "SELECT role, content, image, explanation_json, ts FROM messages"
             " WHERE session_id=? ORDER BY id ASC",
-            (CURRENT_SESSION_ID,),
+            (session_id,),
         ).fetchall()
         if not rows:
             return None
@@ -191,13 +219,13 @@ def _archive_current_sync() -> dict | None:
         aid = uuid.uuid4().hex[:12]
         now = time.time()
         conn.execute(
-            "INSERT INTO archives (id, title, created_at, message_count, messages_json) VALUES (?,?,?,?,?)",
-            (aid, title, now, len(msgs), json.dumps(msgs, ensure_ascii=False)),
+            "INSERT INTO archives (id, title, created_at, message_count, messages_json, persona_id) VALUES (?,?,?,?,?,?)",
+            (aid, title, now, len(msgs), json.dumps(msgs, ensure_ascii=False), persona_id),
         )
-        conn.execute("DELETE FROM messages WHERE session_id=?", (CURRENT_SESSION_ID,))
+        conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
         conn.execute(
             "UPDATE sessions SET title='新会话', updated_at=? WHERE id=?",
-            (now, CURRENT_SESSION_ID),
+            (now, session_id),
         )
         conn.commit()
         return {"id": aid, "title": title, "created_at": now, "message_count": len(msgs)}
@@ -206,10 +234,12 @@ def _archive_current_sync() -> dict | None:
 
 
 def _list_archives_sync() -> list[dict]:
+    persona_id = active_id()
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT id, title, created_at, message_count FROM archives ORDER BY created_at DESC"
+            "SELECT id, title, created_at, message_count FROM archives WHERE persona_id=? ORDER BY created_at DESC",
+            (persona_id,),
         ).fetchall()
         return [
             {
@@ -225,11 +255,12 @@ def _list_archives_sync() -> list[dict]:
 
 
 def _get_archive_sync(archive_id: str) -> dict | None:
+    persona_id = active_id()
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT id, title, created_at, message_count, messages_json FROM archives WHERE id=?",
-            (archive_id,),
+            "SELECT id, title, created_at, message_count, messages_json FROM archives WHERE id=? AND persona_id=?",
+            (archive_id, persona_id),
         ).fetchone()
         if row is None:
             return None
@@ -269,21 +300,22 @@ def _search_archives_sync(q: str) -> list[dict]:
     # LIKE 中的 % 和 _ 是通配符；搜索框应按用户输入的字面内容匹配。
     escaped = q.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
     pattern = f"%{escaped}%"
+    persona_id = active_id()
     conn = _connect()
     try:
         # 标题命中：直接 LIKE 匹配
         title_rows = conn.execute(
             "SELECT id, title, created_at, message_count, messages_json"
-            " FROM archives WHERE title COLLATE NOCASE LIKE ? ESCAPE '\\'"
+            " FROM archives WHERE persona_id=? AND title COLLATE NOCASE LIKE ? ESCAPE '\\'"
             " ORDER BY created_at DESC LIMIT ?",
-            (pattern, _SEARCH_LIMIT),
+            (persona_id, pattern, _SEARCH_LIMIT),
         ).fetchall()
         # 内容命中：messages_json 是 JSON 文本，同样用 LIKE 匹配其字符串形式
         content_rows = conn.execute(
             "SELECT id, title, created_at, message_count, messages_json"
-            " FROM archives WHERE messages_json COLLATE NOCASE LIKE ? ESCAPE '\\'"
+            " FROM archives WHERE persona_id=? AND messages_json COLLATE NOCASE LIKE ? ESCAPE '\\'"
             " ORDER BY created_at DESC LIMIT ?",
-            (pattern, _SEARCH_LIMIT),
+            (persona_id, pattern, _SEARCH_LIMIT),
         ).fetchall()
         # 按 id 去重（标题与内容可能同时命中），保持 created_at 降序
         seen: dict[str, dict] = {}
@@ -354,8 +386,10 @@ async def append_messages(session_id: str, messages: list[dict]) -> bool:
 
 def _append_proactive_sync(session_id: str, text: str, image: str | None = None) -> bool:
     """追加一条 bot 主动消息（content+image 幂等，支持主动发图）。"""
+    session_id = session_storage_id(session_id)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
         row = conn.execute("SELECT title FROM sessions WHERE id=?", (session_id,)).fetchone()
         if row is None:
             return False
@@ -390,16 +424,18 @@ def _clear_current_sync() -> int:
     用于「彻底失忆/重新开始」：重置时不需要像归档那样把对话存进 archives，
     而是直接把当前气泡连同标题一起抹掉，让会话回到全新空白态。
     """
+    session_id = session_storage_id(CURRENT_SESSION_ID)
     conn = _connect()
     try:
+        _ensure_session(conn, session_id)
         cur = conn.execute(
-            "DELETE FROM messages WHERE session_id=?", (CURRENT_SESSION_ID,)
+            "DELETE FROM messages WHERE session_id=?", (session_id,)
         )
         deleted = cur.rowcount
         now = time.time()
         conn.execute(
             "UPDATE sessions SET title='新会话', updated_at=? WHERE id=?",
-            (now, CURRENT_SESSION_ID),
+            (now, session_id),
         )
         conn.commit()
         return int(deleted)

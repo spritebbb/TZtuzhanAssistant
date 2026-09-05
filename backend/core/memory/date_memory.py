@@ -68,9 +68,12 @@ async def extract_from_message(user_id: str, text: str, *, mock: bool = False) -
         return []
     today = date.today().strftime("%Y年%m月%d日")
     try:
+        from ..persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": DETECT_PROMPT},
+                {"role": "system", "content": DETECT_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"今天日期：{today}\n用户的话：{text}"},
             ],
             temperature=0.2,
@@ -82,8 +85,9 @@ async def extract_from_message(user_id: str, text: str, *, mock: bool = False) -
         return []
     saved = []
     for d in dates:
-        save_important_date(user_id, d["date"], d["label"], d["kind"], d["year"])
-        saved.append(d)
+        # save_important_date 返回「是否新增」；已存在（去重）不算新存，不返回
+        if save_important_date(user_id, d["date"], d["label"], d["kind"], d["year"]):
+            saved.append(d)
     return saved
 
 
@@ -99,9 +103,12 @@ async def extract_from_transcript(user_id: str, transcript: str, *, mock: bool =
         return []
     today = date.today().strftime("%Y年%m月%d日")
     try:
+        from ..persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         resp = await chat(
             [
-                {"role": "system", "content": REVIEW_PROMPT},
+                {"role": "system", "content": REVIEW_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"今天日期：{today}\n对话：\n{transcript[:4000]}"},
             ],
             temperature=0.2,
@@ -113,6 +120,7 @@ async def extract_from_transcript(user_id: str, transcript: str, *, mock: bool =
         return []
     saved = []
     for d in dates:
-        save_important_date(user_id, d["date"], d["label"], d["kind"], d["year"])
-        saved.append(d)
+        # save_important_date 返回「是否新增」；已存在（去重）不算新存，不返回
+        if save_important_date(user_id, d["date"], d["label"], d["kind"], d["year"]):
+            saved.append(d)
     return saved

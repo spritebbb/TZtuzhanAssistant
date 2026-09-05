@@ -60,7 +60,7 @@ def test_step_confirm():
 
 
 def test_audit_query():
-    """审计日志：过滤/计数/清空。"""
+    """审计日志：过滤/计数/清空，并保留不可静默擦除的清理记录。"""
     clear_log()
     log_tool_call(tool="run_command", args={"command": "echo hi"},
                   confirmed="allow", ok=True, result="hi", user="test")
@@ -77,13 +77,18 @@ def test_audit_query():
     print("[OK] 按确认状态过滤")
 
     r4 = query_log(ok=True)
-    assert len(r4) == 1 and r4[0]["ok"] is True
+    assert len(r4) == 2
+    assert all(row["ok"] is True for row in r4)
+    assert {row["tool"] for row in r4} == {"run_command", "__audit__"}
     print("[OK] 按成功状态过滤")
 
-    assert count_log() == 2
+    assert count_log() == 3
     cleared = clear_log()
-    assert cleared == 2 and count_log() == 0
-    print("[OK] 清空: 清除 2 条")
+    assert cleared == 3
+    remaining = query_log()
+    assert len(remaining) == 1 and remaining[0]["tool"] == "__audit__"
+    assert remaining[0]["args"] == {"action": "clear_log", "cleared": 3}
+    print("[OK] 清空: 清除 3 条并保留清理审计")
 
 
 def main():

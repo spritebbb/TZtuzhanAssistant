@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { getUsageSummary, type UsageSummary } from '../api/usage'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const summary = ref<UsageSummary | null>(null)
@@ -42,11 +42,11 @@ watch(() => props.show, (show) => { if (show) void load() })
 
 <template>
   <div v-if="show" class="usage-mask" @click.self="emit('close')">
-    <section class="usage-panel" role="dialog" aria-modal="true" aria-label="养菟菚的账本">
+    <section class="usage-panel" role="dialog" aria-modal="true" :aria-label="(props.personaName || '助手') + '的用量账本'">
       <header>
         <div>
           <span class="eyebrow">COST LEDGER</span>
-          <h2>养她的账本</h2>
+          <h2>{{ props.personaName || '助手' }}的用量账本</h2>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>

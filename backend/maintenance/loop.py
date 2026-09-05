@@ -30,6 +30,10 @@ IMGS_MAX_MB = 300                    # 生图目录软上限（MB）
 SCREENSHOTS_MAX_MB = 200             # 截图目录软上限（MB）
 SCREENSHOTS_KEEP = 50                # 截图目录保留的最新份数（防只增不减）
 LONG_MEMORY_KEEP = 2000              # long_memory 表保留的最新条数（防无限增长）
+# pinned 行（memory_add 显式写入）永不随普通轮转清理，但若任其无限累积同样膨胀。
+# 设一个宽松上限：每用户 pinned 超过该值时，最旧的超量 pinned 降级为普通行
+# （内容保留，转为受 LONG_MEMORY_KEEP 约束），既保住显式记住的内容，又防病态增长。
+PINNED_MEMORY_KEEP = 800
 AUDIT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 审计日志单文件上限（5MB）
 AUDIT_LOG_KEEP = 3                   # 轮转保留份数
 
@@ -211,21 +215,85 @@ def clean_old_screenshots(max_mb: int = SCREENSHOTS_MAX_MB, keep: int = SCREENSH
     return removed
 
 
+def _demote_overflowing_pinned(conn) -> int:
+    """把每用户超出 PINNED_MEMORY_KEEP 的最旧 pinned 记忆降级为普通行。
+
+    返回降级条数。pinned 行受显式保护不随普通轮转清理，但若 LLM/用户高频调用
+    memory_add，会让 pinned 无限累积。这里在维护周期内给 pinned 设宽松上限，
+    超量的最旧行置 pinned=0（内容仍在表内，转入普通配额，超旧后被正常轮转）。
+    逐用户 Python 处理：维护任务低频（小时级），数据量小，成本可忽略。
+    """
+    over = conn.execute(
+        "SELECT user_id, COUNT(*) AS n FROM long_memory WHERE pinned=1 "
+        "GROUP BY user_id HAVING n > ?",
+        (PINNED_MEMORY_KEEP,),
+    ).fetchall()
+    demoted = 0
+    for row in over:
+        # 该用户应降级的最旧条数 = 超出上限的部分
+        excess = row["n"] - PINNED_MEMORY_KEEP
+        cur = conn.execute(
+            "UPDATE long_memory SET pinned=0 WHERE id IN ("
+            "  SELECT id FROM long_memory WHERE user_id=? AND pinned=1 "
+            "  ORDER BY id ASC LIMIT ?)",
+            (row["user_id"], excess),
+        )
+        demoted += cur.rowcount or 0
+    return demoted
+
+
 def clean_old_long_memory(keep: int = LONG_MEMORY_KEEP) -> int:
-    """清理 long_memory 表中过旧的记录，返回删除条数（防表无限增长）。"""
+    """清理 long_memory 表中过旧的记录，返回删除条数（防表无限增长）。
+
+    与向量库同步：SQLite 删除前先删对应的 Chroma 向量（按 user 分组批量删），
+    避免向量库残留孤儿条目——检索端若回表校验只是白费召回，若直接返回
+    则被删的旧内容会「复活」。
+    保护：pinned=1（用户显式要求记住的记忆）永不清理。
+    """
     try:
         conn = sqlite3.connect(str(_BOT_DB), timeout=5)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
-            cur = conn.execute(
-                "DELETE FROM long_memory WHERE id NOT IN ("
-                "  SELECT id FROM long_memory ORDER BY id DESC LIMIT ?)",
+            # pinned 上限防线：每用户 pinned 数超过 PINNED_MEMORY_KEEP 时，把最旧的
+            # 超量 pinned 降级为普通行（pinned=0，内容保留）。否则 memory_add 高频调用
+            # 会让 pinned 行永久绕过所有配额、表与向量无限增长（审查「需关注」项）。
+            # 降级后这些行落入下方「pinned=0 保留最近 keep 条」的普通配额，超旧的会
+            # 随本轮清理被删，与对话流水记忆一致，不会单独堆积。
+            demoted = _demote_overflowing_pinned(conn)
+            # 选出待删行（保留最近 keep 条非 pinned 行；pinned 行降级后同按普通配额）
+            rows = conn.execute(
+                "SELECT id, user_id FROM long_memory WHERE pinned=0 AND id NOT IN ("
+                "  SELECT id FROM long_memory WHERE pinned=0 ORDER BY id DESC LIMIT ?)",
                 (keep,),
+            ).fetchall()
+            if not rows:
+                if demoted:
+                    conn.commit()
+                    logger.info("[维护] pinned 记忆超上限，已降级 {} 条为普通行（内容保留）", demoted)
+                return 0
+            # 先删向量（按用户分组批量），再删 SQLite 行
+            try:
+                from ..core.memory import vector_store as vec
+
+                by_user: dict[str, list[int]] = {}
+                for r in rows:
+                    by_user.setdefault(r["user_id"], []).append(r["id"])
+                vec_removed = 0
+                for uid, ids in by_user.items():
+                    vec_removed += vec.delete_many(uid, "lm", ids)
+                if vec_removed:
+                    logger.info("[维护] 同步删除 {} 条旧长期记忆向量", vec_removed)
+            except Exception as e:
+                # 向量删除失败不阻断 SQLite 清理（孤儿向量可由重建流程兜底）
+                logger.warning(f"[维护] 旧记忆向量同步删除失败: {e}")
+            cur = conn.executemany(
+                "DELETE FROM long_memory WHERE id=?",
+                [(r["id"],) for r in rows],
             )
             conn.commit()
-            n = cur.rowcount
+            n = cur.rowcount or len(rows)
             if n:
-                logger.info("[维护] 清理旧长期记忆 {} 条（保留最近 {} 条）", n, keep)
+                logger.info("[维护] 清理旧长期记忆 {} 条（保留最近 {} 条，pinned 记忆受保护）", n, keep)
             return n
         finally:
             conn.close()
@@ -310,7 +378,9 @@ def health() -> dict:
         extra["llm_configured"] = False
     # 2) persona 人格源文件是否存在
     try:
-        persona_path = _cfg.persona_file
+        from ..core.persona_profiles import active_card_path
+
+        persona_path = active_card_path()
         extra["persona_ok"] = bool(persona_path and persona_path.exists())
     except Exception:
         extra["persona_ok"] = False

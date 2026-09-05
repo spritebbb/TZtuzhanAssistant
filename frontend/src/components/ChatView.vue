@@ -15,6 +15,7 @@ import { portraitBondFor, portraitMoodFor, type PortraitBond, type PortraitMood 
 const props = defineProps<{
   sessionId: string | null
   reloadKey?: number
+  personaName?: string
   externalDraft?: string
   externalDraftKey?: number
 }>()
@@ -531,7 +532,7 @@ function handleProactiveMessage(input: ProactiveMessage | string) {
   // 在页面隐藏时主动请求一次系统通知，主进程 notify 里用 lastNotifiedText 去重，
   // 与轮询通道谁先到都只弹一次，不会双弹。
   if (document.hidden) {
-    window.electronAPI?.notify('菟菚', message.text)
+    window.electronAPI?.notify(props.personaName || '助手', message.text)
   }
 }
 
@@ -622,8 +623,8 @@ function isActive(i: number): boolean {
             </svg>
           </div>
           <div class="eyebrow"><span></span>此刻也在这里</div>
-          <div class="t">细藤缠绕 · 温润坚韧</div>
-          <div class="t-sub">我是菟菚，寄生予万物，也联结着万物。说说看？</div>
+          <div class="t">{{ props.personaName || '人格助手' }}</div>
+          <div class="t-sub">我是{{ props.personaName || '你的助手' }}。说说看？</div>
           <div class="chips">
             <span class="hint-chip" @click="input = '帮我查一下今天襄阳的天气'">查天气</span>
             <span class="hint-chip" @click="input = '帮我画一张好看的图'">画张图</span>
@@ -639,13 +640,14 @@ function isActive(i: number): boolean {
         :is-streaming-last="streaming && i === messages.length - 1"
         :tool-status="streaming && i === messages.length - 1 ? toolStatus : ''"
         :tts-key="ttsKey(m, i)"
+        :persona-name="props.personaName"
         :search-query="searchQuery"
         :is-match="isMatch(i)"
         :is-active-match="isActive(i)"
       />
     </div>
     <ConfirmPanel :pending="pendingConfirm" @resolve="resolveConfirm" />
-    <ChatInput v-model:input="input" :busy="busy || initializing" :streaming="streaming" @send="send" @stop="stop" @file="handleImageFile" />
+    <ChatInput v-model:input="input" :busy="busy || initializing" :streaming="streaming" :persona-name="props.personaName" @send="send" @stop="stop" @file="handleImageFile" />
   </div>
 </template>
 

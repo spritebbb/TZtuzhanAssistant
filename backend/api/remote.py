@@ -106,7 +106,7 @@ async def api_remote_task(request: Request):
 
             result = await run_tool_round(
                 [
-                    {"role": "system", "content": "你是菟菚助手，请执行用户的任务。"},
+                    {"role": "system", "content": "你是任务助手，请执行用户的任务。"},
                     {"role": "user", "content": task},
                 ],
                 chat=lambda ms: chat(ms),

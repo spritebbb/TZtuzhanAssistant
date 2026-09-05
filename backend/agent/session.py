@@ -330,6 +330,14 @@ def clear_all_tasks() -> int:
     return max(0, int(cur.rowcount or 0))
 
 
+def clear_user_tasks(user_id: str) -> int:
+    """只删除当前人格命名空间的 Agent 任务。"""
+    conn = _connect()
+    cur = conn.execute("DELETE FROM agent_tasks WHERE user_id=?", (user_id,))
+    conn.commit()
+    return max(0, int(cur.rowcount or 0))
+
+
 def confirm_step(task_id: str, step_index: int, allow: bool) -> AgentTask | None:
     """确认/拒绝计划中的某一步。返回更新后的任务，或 None（任务不存在）。"""
     task = _load(task_id)

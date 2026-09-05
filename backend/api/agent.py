@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..agent import session as agent_session
 from ..core.log import logger
+from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -77,7 +78,7 @@ async def api_agent_create(request: Request):
     from ..core.reset import reset_in_progress
     if reset_in_progress():
         return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
-    uid = user_id or "assistant-main"
+    uid = user_id or active_user_id()
     try:
         task = await agent_session.create_task(uid, objective)
         return {"ok": True, "task": agent_session.to_dict(task)}
@@ -89,7 +90,7 @@ async def api_agent_create(request: Request):
 @router.get("/tasks")
 async def api_agent_list(user_id: str = ""):
     """任务列表。"""
-    uid = user_id or "assistant-main"
+    uid = user_id or active_user_id()
     return {"ok": True, "tasks": agent_session.list_tasks(uid)}
 
 
@@ -162,9 +163,13 @@ async def api_agent_run(task_id: str):
                 pass
 
     # 执行上下文里注入 SSE 推送器（供 confirm_hook 使用）
+    from ..core.current_user import current_user_id
     from ..tools.confirm import current_sse_push
     ctx = contextvars.copy_context()
     ctx.run(current_sse_push.set, push)
+    # 任务可能在创建后才执行；固定使用任务创建时的人格用户空间，避免切换后
+    # 工具调用、用量统计或记忆写入落进另一个人格。
+    ctx.run(current_user_id.set, task.user_id)
 
     async def _run():
         try:

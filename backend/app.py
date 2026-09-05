@@ -28,6 +28,7 @@ from .api import (
     mcp_servers,
     memory_admin,
     meta,
+    personas,
     plugins as plugins_api,
     remote,
     sessions,
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(vision.router)
     app.include_router(images.router)
     app.include_router(meta.router)
+    app.include_router(personas.router)
     app.include_router(audit.router)
     app.include_router(remote.router)
     app.include_router(config_api.router)

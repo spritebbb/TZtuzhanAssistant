@@ -5,6 +5,8 @@ __pycache__/
 data/
 .tmp/
 .pytest_cache/
+_tmp_*
+tests/_tmp_plugins/
 
 # 前端构建产物与依赖
 frontend/node_modules/
@@ -15,6 +17,11 @@ frontend/.npm-cache/
 frontend/.npm-tmp/
 frontend/*.tsbuildinfo
 frontend/_electron_*.log
+
+# Release 构建产物只上传 GitHub Releases，不再写入 Git 历史
+deploy/TZtuzhanAssistant-Deploy-v*/
+deploy/TZtuzhanAssistant-Deploy-Full-v*/
+deploy/*.zip
 
 # 本地日志
 *.log

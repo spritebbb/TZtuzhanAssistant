@@ -27,9 +27,9 @@ def _fmt_ts(ts) -> str:
         return ""
 
 
-def _render_message(m: dict) -> str:
+def _render_message(m: dict, persona_name: str = "菟菚") -> str:
     role = "user" if m.get("role") == "user" else "bot"
-    who = "你" if role == "user" else "菟菚"
+    who = "你" if role == "user" else persona_name
     content = html.escape(str(m.get("content") or "")).replace("\n", "<br>")
     image = str(m.get("image") or "")
     img_html = ""
@@ -45,19 +45,30 @@ def _render_message(m: dict) -> str:
     )
 
 
-def render_keepsake(title: str, created_at: float, messages: list[dict]) -> str:
+def render_keepsake(
+    title: str,
+    created_at: float,
+    messages: list[dict],
+    persona_name: str = "菟菚",
+) -> str:
     title_html = html.escape(title or "一段对话")
     try:
         date_str = datetime.fromtimestamp(float(created_at)).strftime("%Y年%m月%d日")
     except (TypeError, ValueError, OSError):
         date_str = ""
-    body = "\n".join(_render_message(m) for m in messages)
+    body = "\n".join(_render_message(m, persona_name) for m in messages)
+    safe_persona_name = html.escape(persona_name)
+    footer = (
+        "菟丝子研究所 · 纪念册 · 她替你收着的这一段"
+        if persona_name == "菟菚"
+        else f"{safe_persona_name} · 纪念册 · 一起收着的这一段"
+    )
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title_html} · 菟菚纪念册</title>
+<title>{title_html} · {safe_persona_name}纪念册</title>
 <style>
   :root {{ --ink: #3a4033; --soft: #8a917d; --paper: #f7f5ee; --card: #fffdf6;
            --vine: #7d9b5f; --vine-deep: #5c7a44; --user-bubble: #e8f0dc; --bot-bubble: #fffdf6; }}
@@ -99,7 +110,7 @@ def render_keepsake(title: str, created_at: float, messages: list[dict]) -> str:
     <div class="rule"></div>
   </header>
   {body}
-  <footer>菟丝子研究所 · 纪念册 · 她替你收着的这一段</footer>
+  <footer>{footer}</footer>
 </div>
 </body>
 </html>"""
@@ -114,10 +125,13 @@ async def api_keepsake(archive_id: str):
     messages = archive.get("messages")
     if not isinstance(messages, list):
         messages = []
+    from ..core.persona_profiles import active_name
+
     return HTMLResponse(
         render_keepsake(
             str(archive.get("title") or "一段对话"),
             archive.get("created_at") or 0,
             [m for m in messages if isinstance(m, dict)],
+            active_name(),
         )
     )

@@ -59,6 +59,22 @@ def _glob_sync(pattern: str = "", path: str = "") -> str:
         return tool_failure(f"（搜索失败：{e}）")
 
 
+# 正则长度上限：阻断灾难性回溯（ReDoS）。超长 pattern 几乎必是 LLM/用户
+# 误传或恶意构造，直接拒绝而非编译扫描。
+_MAX_PATTERN_LEN = 256
+# 单行扫描最大长度：超长单行（如压缩成一行的大文件）跳过，避免回溯放大。
+_MAX_LINE_LEN = 4096
+
+
+def _compile_guard(pattern: str, what: str = "模式") -> re.Pattern:
+    """编译正则并做 ReDoS 防护：长度上限 + 编译异常转失败信息。"""
+    if not pattern:
+        raise ValueError(f"（缺少{what}）")
+    if len(pattern) > _MAX_PATTERN_LEN:
+        raise ValueError(f"（{what}过长（>{_MAX_PATTERN_LEN} 字符），已拒绝）")
+    return re.compile(pattern)
+
+
 def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
     """在文件内容中检索正则表达式，返回 文件:行号:内容（对标 Harness 的 grep）。"""
     if not pattern:
@@ -70,9 +86,9 @@ def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
         # 默认跳过隐藏目录和常见产物目录
         skip_dirs = {".git", ".venv", "node_modules", "dist", "dist-electron",
                      "release", "__pycache__", ".npm-cache", ".tmp", "data"}
-        rx = re.compile(pattern)
+        rx = _compile_guard(pattern)
         results = []
-        include_rx = re.compile(include) if include else None
+        include_rx = _compile_guard(include, "文件名过滤") if include else None
 
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in skip_dirs]
@@ -85,9 +101,13 @@ def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
                         for lineno, line in enumerate(fh, 1):
-                            if rx.search(line.rstrip("\n")):
+                            stripped = line.rstrip("\n")
+                            # 超长单行跳过，避免单行内灾难性回溯放大
+                            if len(stripped) > _MAX_LINE_LEN:
+                                continue
+                            if rx.search(stripped):
                                 rel = str(fpath.relative_to(root))
-                                results.append(f"{rel}:{lineno}:{line.rstrip()[:200]}")
+                                results.append(f"{rel}:{lineno}:{stripped[:200]}")
                                 if len(results) >= 100:
                                     break
                 except (OSError, PermissionError):
@@ -101,6 +121,10 @@ def _grep_sync(pattern: str = "", path: str = "", include: str = "") -> str:
             return f"（无匹配: {pattern}）"
         body = "\n".join(results)
         return body if len(results) < 100 else body + "\n...（已达上限 100 条）"
+    except ValueError as e:
+        return tool_failure(str(e))
+    except re.error as e:
+        return tool_failure(f"（正则非法：{e}）")
     except Exception as e:
         return tool_failure(f"（检索失败：{e}）")
 

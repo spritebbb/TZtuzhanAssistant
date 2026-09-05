@@ -93,9 +93,14 @@ def _last_chat_ts(user_id: str) -> float | None:
 def _eligible_users() -> list[dict]:
     """找出「值得主动找」的用户：久未聊 + 关系够近 + 今天还没主动过。"""
     eligible = []
+    from .persona_profiles import active_user_id
+
+    active_uid = active_user_id()
     try:
         with db._lock:
-            rows = db.conn.execute("SELECT user_id FROM users").fetchall()
+            rows = db.conn.execute(
+                "SELECT user_id FROM users WHERE user_id=?", (active_uid,)
+            ).fetchall()
     except Exception:
         return eligible
     now = time.time()
@@ -188,7 +193,9 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
 
 async def generate_proactive_message(user_id: str) -> str | None:
     """为某用户生成一条主动消息。返回文本或 None（失败静默）。"""
-    msgs = _build_proactive_prompt(user_id)
+    # _build_proactive_prompt 内部含同步 Chroma 检索（collect_offline_context），
+    # 放线程池执行，避免慢查询阻塞事件循环
+    msgs = await asyncio.to_thread(_build_proactive_prompt, user_id)
     if not msgs:
         return None
     try:
@@ -236,7 +243,8 @@ async def _generate_proactive_image(user_id: str) -> str | None:
 async def generate_proactive_content(user_id: str) -> ProactiveMessage | None:
     """生成一条完整主动消息；图片失败时自动退化为纯文字。"""
     image = await _generate_proactive_image(user_id)
-    msgs = _build_proactive_prompt(user_id, has_image=bool(image))
+    # _build_proactive_prompt 内部含同步 Chroma 检索，放线程池避免阻塞事件循环
+    msgs = await asyncio.to_thread(_build_proactive_prompt, user_id, has_image=bool(image))
     if not msgs:
         return None
     try:
@@ -259,14 +267,14 @@ async def _tick_once() -> int:
         return 0
     _last_global_run = now
 
-    # 归档建议独立于「主动找人」：会话是全局的，只要当前会话过长就提醒，
-    # 用首个有记录的用户作为投递归属（单一会话模式下所有消息共享同一 user）。
+    # 归档建议与约定跟进仅检查当前热切换的人格命名空间。
     try:
-        with db._lock:
-            row = db.conn.execute("SELECT user_id FROM users LIMIT 1").fetchone()
-        if row:
-            await maybe_suggest_archive(row["user_id"])
-            await maybe_follow_up_promise(row["user_id"])
+        from .persona_profiles import active_user_id
+
+        uid = active_user_id()
+        if db.get_user(uid):
+            await maybe_suggest_archive(uid)
+            await maybe_follow_up_promise(uid)
     except Exception as e:
         logger.warning("[主动性] 归档建议/约定跟进检查失败: {}", e)
 
@@ -562,7 +570,7 @@ def _build_archive_suggest_prompt(user_id: str) -> list[dict] | None:
                 "你发现再聊下去前面的话会越来越难翻找，想提醒对方："
                 "可以把这段对话归档存档，然后开一段新的。"
                 "自然地说一句，别命令式、别啰嗦，一句到两句就够，"
-                "符合你的性格（干脆、带点腹黑毒舌也行），别加括号动作。"
+                "符合当前人格卡的性格与说话方式，别加括号动作。"
             ),
         },
     ]
@@ -650,7 +658,7 @@ def _build_promise_followup_prompt(user_id: str, promise: dict) -> list[dict] | 
                 f"你一直记着一件事：{promise['content']}。"
                 "现在到了该问问的时候了。主动开口自然地提起这件事——"
                 "像朋友随口问起，不像催债、不像提醒事项、别一板一眼；"
-                "一句到两句就够，符合你的性格（干脆、可以带点腹黑毒舌），别加括号动作。"
+                "一句到两句就够，符合当前人格卡的性格与说话方式，别加括号动作。"
             ),
         },
     ]

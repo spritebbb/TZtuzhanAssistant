@@ -133,8 +133,11 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
         old_rows = [r for r in oldest_batch if r["id"] not in keep_ids]
         if not old_rows:
             return None
+        from ..persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
         transcript = "\n".join(
-            f"{'对方' if r['role'] == 'user' else '菟菚'}：{r['content'][:120]}"
+            f"{'对方' if r['role'] == 'user' else persona_name}：{r['content'][:120]}"
             for r in old_rows
         )
         if not transcript.strip():
@@ -195,7 +198,7 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
 
                 _kv_set(user_id, _COMPACT_CURSOR_KEY, str(old_rows[-1]["id"]))
             except Exception:
-                pass
+                logger.warning("[记忆] 压缩游标推进失败（下次可能重复处理旧消息）")
         # 把摘要也写入 Chroma 向量库（summary kind），跨会话检索可用
         if summary:
             try:
@@ -207,7 +210,7 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
                     asyncio.to_thread(vec.add, user_id, "summary", 0, summary, {"ts": datetime.now().isoformat()})
                 )
             except Exception:
-                pass
+                logger.warning("[记忆] 摘要向量写入失败（不影响压缩结果，检索降级）")
         keep = [{"role": r["role"], "content": r["content"]} for r in rows[-recent_count:]]
         return summary, keep
     except Exception:

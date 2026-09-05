@@ -11,8 +11,10 @@ import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
+import PersonaSwitcher from './components/PersonaSwitcher.vue'
 import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
+import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
@@ -23,11 +25,16 @@ const usageOpen = ref(false)
 const dashboardOpen = ref(false)
 const activityOpen = ref(false)
 const sidebarOpen = ref(false)
+const personaOpen = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
 const chatReloadKey = ref(0)
 const chatDraft = ref('')
 const chatDraftKey = ref(0)
+const activePersona = ref<PersonaProfile>({
+  id: 'default', name: '菟菚', subtitle: '细藤缠绕 · 温润坚韧 · 你的拟人助手',
+  theme: 'dark', voice: 'zh-CN-XiaoxiaoNeural', active: true, created_at: 0,
+})
 
 // 生成中状态（由 ChatView 上报）：流式生成中禁用归档，避免拆对话
 const generating = ref(false)
@@ -124,6 +131,8 @@ function applyTheme(t: 'dark' | 'light', persist = true) {
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   applyTheme(theme.value, true)  // 手动切换才固定偏好
+  activePersona.value.theme = theme.value
+  void updatePersona(activePersona.value.id, { theme: theme.value }).catch(() => {})
 }
 
 watch(theme, (t) => applyTheme(t, false), { immediate: false })
@@ -144,6 +153,7 @@ function onKeydown(e: KeyboardEvent) {
     activityOpen.value = false
     knowledgeOpen.value = false
     sidebarOpen.value = false
+    personaOpen.value = false
   }
 }
 
@@ -165,10 +175,32 @@ function openBookshelfFromActivity() {
   knowledgeOpen.value = true
 }
 
+async function loadActivePersona() {
+  try {
+    const data = await listPersonas()
+    activePersona.value = data.active
+    theme.value = data.active.theme || theme.value
+    applyTheme(theme.value, false)
+  } catch { /* 人格库不可用时保留内置展示 */ }
+}
+
+function onPersonaSwitched(profile: PersonaProfile) {
+  activePersona.value = profile
+  theme.value = profile.theme || 'dark'
+  applyTheme(theme.value, false)
+  personaOpen.value = false
+  currentId.value = CURRENT_SESSION_ID
+  sessionListKey.value += 1
+  chatReloadKey.value += 1
+  refreshAffection()
+  window.dispatchEvent(new CustomEvent('tztuzhan:persona-switched', { detail: profile }))
+}
+
 onMounted(async () => {
   await ensureBaseUrl()
   loadTheme()
-  applyTheme(theme.value, false)  // 初始应用不落盘：自动模式每天重新判断
+  await loadActivePersona()
+  applyTheme(theme.value, false)
   document.addEventListener('keydown', onKeydown)
   refreshAffection()  // 首屏载入好感度条
 })
@@ -185,6 +217,7 @@ onUnmounted(() => {
       :key="sessionListKey"
       :open="sidebarOpen"
       :current-id="currentId"
+      :persona-name="activePersona.name"
       @close-sidebar="sidebarOpen = false"
       @open-settings="openSettings"
     />
@@ -202,12 +235,14 @@ onUnmounted(() => {
           <Portrait :size="40" />
         </div>
         <div class="header-center">
-          <div class="header-kicker"><span></span>BOTANICAL COMPANION</div>
-          <div class="name"><span>菟菚</span><i>·</i><em>cuscuta chinensis</em></div>
-          <div class="sub">细藤缠绕 · 温润坚韧 · 你的拟人助手</div>
+          <div class="header-kicker"><span></span>PERSONA COMPANION</div>
+          <button class="persona-title" title="切换人格" @click="personaOpen = true">
+            <div class="name"><span>{{ activePersona.name }}</span><i>·</i><em>PERSONA</em></div>
+            <div class="sub">{{ activePersona.subtitle || '独立人格档案' }} <span class="persona-caret">⌄</span></div>
+          </button>
         </div>
         <div class="header-sprig" aria-hidden="true"><span></span><i></i><span></span></div>
-        <div class="presence" title="菟菚正在陪伴你">
+        <div class="presence" :title="activePersona.name + '正在陪伴你'">
           <span class="presence-dot"></span>
           陪伴中
         </div>
@@ -222,7 +257,7 @@ onUnmounted(() => {
               <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m4 8 6-5 6 8 5-5"/>
             </svg>
           </button>
-          <button class="icon-btn" title="偷看菟菚的日记" @click="diaryOpen = true">
+          <button class="icon-btn" :title="'查看' + activePersona.name + '的日记'" @click="diaryOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
@@ -232,12 +267,12 @@ onUnmounted(() => {
               <path d="M12 3a7 7 0 0 0-7 7c0 2.4 1.2 4.5 3 5.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3c1.8-1.2 3-3.3 3-5.7a7 7 0 0 0-7-7z"/>
             </svg>
           </button>
-          <button class="icon-btn" title="养她的账本（token 用量）" @click="usageOpen = true">
+          <button class="icon-btn" :title="activePersona.name + '的用量账本（token 用量）'" @click="usageOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 3v18h18"/><path d="M7 15l4-4 4 3 5-6"/>
             </svg>
           </button>
-          <button class="icon-btn" title="她的书架（投喂文档）" @click="knowledgeOpen = true">
+          <button class="icon-btn" :title="activePersona.name + '的书架（投喂文档）'" @click="knowledgeOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>
             </svg>
@@ -269,7 +304,7 @@ onUnmounted(() => {
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
           </button>
-          <button class="icon-btn reset-btn" title="重新开始（让菟菚忘记你）" @click="openResetConfirm">
+          <button class="icon-btn reset-btn" :title="'重新开始（让' + activePersona.name + '忘记你）'" @click="openResetConfirm">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="1 4 1 10 7 10"/>
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
@@ -289,28 +324,29 @@ onUnmounted(() => {
         <span v-if="affection.next" class="aff-next" :title="'距「' + affection.next + '」还需 ' + (affection.next_at - affection.value) + ' 点'">→ {{ affection.next }} {{ affection.next_at - affection.value }}</span>
         <span v-else class="aff-next max">♥ 已至圆满</span>
       </div>
-      <ChatView :session-id="currentId" :reload-key="chatReloadKey" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
+      <ChatView :session-id="currentId" :reload-key="chatReloadKey" :persona-name="activePersona.name" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
 
     <!-- 面板 -->
-    <SettingsPanel :show="settingsOpen" @close="closeSettings" />
-    <AgentPanel :show="agentOpen" @close="agentOpen = false" />
-    <DiaryPanel :show="diaryOpen" @close="diaryOpen = false" />
-    <KnowledgePanel :show="knowledgeOpen" @close="knowledgeOpen = false" />
-    <MemoryPanel :show="memoryOpen" @close="memoryOpen = false" />
-    <UsagePanel :show="usageOpen" @close="usageOpen = false" />
+    <SettingsPanel :show="settingsOpen" :persona-name="activePersona.name" @close="closeSettings" />
+    <AgentPanel :show="agentOpen" :persona-name="activePersona.name" @close="agentOpen = false" />
+    <DiaryPanel :show="diaryOpen" :persona-name="activePersona.name" @close="diaryOpen = false" />
+    <KnowledgePanel :show="knowledgeOpen" :persona-name="activePersona.name" @close="knowledgeOpen = false" />
+    <MemoryPanel :show="memoryOpen" :persona-name="activePersona.name" @close="memoryOpen = false" />
+    <UsagePanel :show="usageOpen" :persona-name="activePersona.name" @close="usageOpen = false" />
     <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
-    <ActivityPanel :show="activityOpen" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
+    <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
+    <PersonaSwitcher :show="personaOpen" :disabled="generating" @close="personaOpen = false" @switched="onPersonaSwitched" />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
       <div class="modal reset-modal">
         <div class="modal-title">重新开始？</div>
         <div class="modal-body">
-          <p>这会让菟菚<b>忘记你积累的一切</b>：</p>
+          <p>这会让{{ activePersona.name }}<b>忘记你积累的一切</b>：</p>
           <ul>
             <li>她对你的好感度、给你的昵称、恋人关系</li>
-            <li>她的记忆、你告诉她的事、共同回忆、向量库</li>
+            <li>{{ activePersona.name }}的记忆、你告诉对方的事、共同回忆、向量库</li>
             <li>当前这段对话的气泡</li>
           </ul>
           <p class="muted">回到最开始的「初识」状态。此操作<b>不可撤销</b>（已归档的对话仍保留，可在侧栏查看）。</p>
@@ -423,6 +459,18 @@ onUnmounted(() => {
   position: relative;
   z-index: 1;
 }
+.persona-title {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.persona-title:hover .name span { color: var(--primary-light); }
+.persona-caret { color: var(--accent); font-size: .72rem; }
 .header-kicker {
   display: flex;
   align-items: center;

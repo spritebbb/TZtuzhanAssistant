@@ -101,30 +101,3 @@ async def _mem0_add_task(user_id: str, text: str) -> None:
         await asyncio.to_thread(manager.add, user_id, text)
     except Exception:
         pass
-
-
-def startup_backfill() -> None:
-    """启动时后台回填向量索引（旧 sqlite-vec 的 backfill 职责迁移到这里）。"""
-    if not config.memory_v2:
-        return
-    try:
-        from ..userdb import db
-        from . import vector_store as vec
-
-        def _scan_and_index():
-            # 工作线程读共享连接：用 UserDB 写锁串行化，避免与事件循环线程并发交错
-            with db._lock:
-                conn = db.conn
-                for table, kind in (("long_memory", "lm"), ("facts", "facts")):
-                    rows = conn.execute(
-                        f"SELECT id, user_id, content FROM {table} WHERE id > 0 ORDER BY id"
-                    ).fetchall()
-                    for r in rows:
-                        vec.add(r["user_id"], kind, r["id"], r["content"])
-            logger.info("[记忆引擎] 向量索引回填完成")
-
-        import asyncio as _asyncio
-
-        _spawn(_asyncio.to_thread(_scan_and_index))
-    except Exception:
-        logger.warning("[记忆引擎] 向量回填失败（下次启动重试）")

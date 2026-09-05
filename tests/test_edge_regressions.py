@@ -93,6 +93,7 @@ def suite_archive_search_caps_query_length():
 
 def suite_archive_search_treats_wildcards_literally(tmp_path, monkeypatch):
     """搜索框里的 SQL LIKE 通配符应当按普通字符匹配。"""
+    from backend.core.persona_profiles import active_id
     from backend.session import store
 
     monkeypatch.setattr(store, "_DB", tmp_path / "wildcards.db")
@@ -100,11 +101,11 @@ def suite_archive_search_treats_wildcards_literally(tmp_path, monkeypatch):
     conn = store._connect()
     try:
         conn.executemany(
-            "INSERT INTO archives (id, title, created_at, message_count, messages_json) "
-            "VALUES (?, ?, ?, 1, ?)",
+            "INSERT INTO archives (id, title, created_at, message_count, messages_json, persona_id) "
+            "VALUES (?, ?, ?, 1, ?, ?)",
             [
-                ("literal", "100%_done", 2.0, json.dumps([{"content": "literal"}])),
-                ("plain", "ordinary", 1.0, json.dumps([{"content": "plain"}])),
+                ("literal", "100%_done", 2.0, json.dumps([{"content": "literal"}]), active_id()),
+                ("plain", "ordinary", 1.0, json.dumps([{"content": "plain"}]), active_id()),
             ],
         )
         conn.commit()
@@ -213,4 +214,96 @@ def suite_archive_search_route_declared_before_dynamic():
     assert search_idx < dynamic_idx, (
         "/archives/search 必须在 /archives/{archive_id} 之前声明，"
         "否则搜索请求会被动态路由吞掉返回 404"
+    )
+
+
+# ---- 5. rebuild_all 自锁（P1）：重建期间 migrate 重灌必须放行 ----
+
+def suite_rebuild_migrate_write_is_not_self_locked(monkeypatch):
+    """rebuild_all 置 _rebuilding=True 后调 migration.migrate() 全量重灌。
+
+    P1 自锁回归：rebuild_all 清空 _collections 缓存后置 _rebuilding=True，
+    若 migration 写入走 add() 默认闸门、或 _collection() 第二道闸门不放行，
+    清库后每一条重灌都会被拒 → 重灌 0 条 → 语义检索静默失效（仅 TF-IDF 兜底）。
+    修复：vec.add 加 _allow_during_rebuild 参数，migration 重灌时显式放行，
+    且 add() 必须把该参数透传给 _collection()（两道闸门同步放行）。
+
+    本用例走真实 _collection() 闸门链，不触碰 chromadb / embedding 真实写入：
+    - _embedding_ready_for_write 恒真（越过就绪检查）
+    - 清空 _collections 缓存 + 打桩 _client_instance（模拟 rebuild_all 删除后的空缓存
+      现场；get_or_create 返回记录 upsert 的 fake collection）
+    注意：不得整体替换 vec._collection——那会绕过本缺陷所在的第二道闸门，
+    使测试在 P1 未闭环时虚假通过（历史教训）。
+    """
+    import pytest
+
+    from backend.core.memory import vector_store as vec
+
+    # 让 add 越过 embedding-ready 检查，直达 _rebuilding 闸门决策。
+    monkeypatch.setattr(vec, "_embedding_ready_for_write", lambda: True)
+
+    upserts = []
+
+    class _FakeCol:
+        def upsert(self, **kw):
+            upserts.append(kw)
+
+    class _FakeClient:
+        def get_or_create_collection(self, name, embedding_function=None, metadata=None):
+            return _FakeCol()
+
+    # 模拟 rebuild_all 现场：缓存已清空、client 层已删库（get_or_create 重建即可写）
+    monkeypatch.setattr(vec, "_collections", {})
+    monkeypatch.setattr(vec, "_client_instance", lambda: _FakeClient())
+
+    # 场景 A：重建期间，业务写入（未传放行参数）→ 被 add() 内层闸门拦截，不触达 upsert
+    monkeypatch.setattr(vec, "_rebuilding", True)
+    assert vec.add("u", "lm", 1, "text") is False
+    assert upserts == [], "重建期间业务写入不应触达 upsert（被闸门拦截）"
+
+    # 场景 B：重建期间，migrate 重灌（_allow_during_rebuild=True）→ 真实 _collection()
+    # 缓存 miss 后必须同步放行（第二道闸门），完成 get_or_create + upsert
+    assert vec.add("u", "lm", 2, "text", _allow_during_rebuild=True) is True
+    assert len(upserts) == 1, "重建期间 migrate 重灌必须穿透两道闸门完成 upsert，否则 P1 自锁"
+
+    # 场景 C：非重建期，业务写正常触达 upsert
+    monkeypatch.setattr(vec, "_rebuilding", False)
+    assert vec.add("u", "lm", 3, "text") is True
+    assert len(upserts) == 2
+
+
+def suite_migrate_table_passes_rebuild_exemption(monkeypatch):
+    """migration._migrate_table 对 vec.add 的每次调用必须传 _allow_during_rebuild=True。
+
+    防止未来重构把该参数漏掉，重新引入「重建时 migrate 自锁、重灌 0 条」的 P1。
+    包裹 vec.add 捕获实际 kwargs 断言。不触碰真实 SQLite / chroma：
+    - monkeypatch _sqlite_rows 返回内存行（跳过真实读库）
+    - monkeypatch vec.add 捕获 kwargs
+    """
+    import backend.core.memory.vector_store as vec
+    import backend.core.memory.migration as mig
+
+    captured = {}
+
+    def _fake_add(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return True
+
+    monkeypatch.setattr(vec, "add", _fake_add)
+
+    class _Row(dict):
+        """dict 子类让 r['content'] 可用，替代 sqlite3.Row。"""
+
+    def _rows(table):
+        if table == "long_memory":
+            return [_Row(id=1, user_id="u1", content="一条长期记忆")]
+        return []
+
+    monkeypatch.setattr(mig, "_sqlite_rows", _rows)
+
+    stats = {}
+    done = mig._migrate_table("long_memory", "lm", lambda r: r["content"], stats)
+    assert done == 1
+    assert captured["kwargs"].get("_allow_during_rebuild") is True, (
+        "migration 写向量必须传 _allow_during_rebuild=True，否则重建期 migrate 自锁"
     )

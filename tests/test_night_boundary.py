@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""D6 边界场景：深夜 emo 守护（全员）+ 健康边界（熟人以上）的注入逻辑。"""
+"""D6 边界场景：深夜情绪守护（全员）+ 健康边界（熟人以上）的注入逻辑。"""
 from __future__ import annotations
 
 import asyncio
@@ -55,13 +55,18 @@ def _systems(messages: list[dict]) -> list[str]:
     return [m["content"] for m in messages if m["role"] == "system"]
 
 
+def _has_late_night_guard(systems: list[str]) -> bool:
+    """匹配跨人格通用的深夜守护语义，不绑定菟菚专属措辞。"""
+    return any("暂时收起可能伤人的玩笑" in s and "先接住情绪" in s for s in systems)
+
+
 async def test_late_night_intimate() -> None:
     db.ensure_user(UID)
     affection.set_affection(UID, 60)  # 亲密
     db.set_first_chat_done(UID)
     _set_hour(2)
     systems = _systems(await _run_and_capture())
-    assert any("收起你的毒舌和地狱笑话" in s for s in systems), "深夜 emo 守护缺失"
+    assert _has_late_night_guard(systems), "深夜情绪守护缺失"
     assert any("催他去睡" in s for s in systems), "熟人健康边界缺失"
     print("[OK] 凌晨 2 点·亲密：emo 守护 + 催睡都在")
 
@@ -70,7 +75,7 @@ async def test_late_night_stranger() -> None:
     affection.set_affection(UID, 5)  # 初识
     _set_hour(2)
     systems = _systems(await _run_and_capture())
-    assert any("收起你的毒舌和地狱笑话" in s for s in systems), "初识也应有 emo 守护"
+    assert _has_late_night_guard(systems), "初识也应有深夜情绪守护"
     assert not any("催他去睡" in s for s in systems), "初识不应催睡（关系没到）"
     print("[OK] 凌晨 2 点·初识：只守护、不催睡")
 
@@ -78,7 +83,7 @@ async def test_late_night_stranger() -> None:
 async def test_daytime_none() -> None:
     _set_hour(14)
     systems = _systems(await _run_and_capture())
-    assert not any("收起你的毒舌和地狱笑话" in s for s in systems), "白天不应有 emo 守护"
+    assert not _has_late_night_guard(systems), "白天不应有深夜情绪守护"
     assert not any("催他去睡" in s for s in systems), "白天不应催睡"
     print("[OK] 下午 2 点：两条边界都不注入")
 

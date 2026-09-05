@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { getDiaries, getResearchReports, type DiaryEntry, type ResearchReport } from '../api/diary'
 import { getUnlocks, type UnlockSlot } from '../api/unlocks'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const tab = ref<'diary' | 'research' | 'ours'>('diary')
 const diaries = ref<DiaryEntry[]>([])
@@ -32,11 +32,11 @@ watch(() => props.show, (show) => { if (show) void load() })
 
 <template>
   <div v-if="show" class="diary-mask" @click.self="emit('close')">
-    <section class="diary-panel" role="dialog" aria-modal="true" aria-label="菟菚的私人记录">
+    <section class="diary-panel" role="dialog" aria-modal="true" :aria-label="(props.personaName || '助手') + '的私人记录'">
       <header>
         <div>
           <span class="eyebrow">PRIVATE FIELD NOTES</span>
-          <h2>菟菚的抽屉</h2>
+          <h2>{{ props.personaName || '助手' }}的抽屉</h2>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>

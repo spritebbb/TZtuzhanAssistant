@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import random
 import threading
@@ -38,13 +39,26 @@ _FALLBACK_GREETINGS = [
     "我还猜你今天会不会来。",
 ]
 
+_GENERIC_FALLBACK_GREETINGS = [
+    "你回来了。",
+    "好久不见，最近怎么样？",
+    "看到你上线了，欢迎回来。",
+    "又见面了。",
+]
+
 # 每个 user 上一次抽到的兜底索引，避免连续两次抽到同一句
 _last_fallback_idx: dict[str, int] = {}
 
 
 def _fallback_greeting(user_id: str) -> str:
     """从兜底池轮换抽一句，且尽量不与上一次相同。"""
-    pool = _FALLBACK_GREETINGS
+    from .persona_profiles import DEFAULT_PERSONA_ID, profile_id_from_user_id
+
+    pool = (
+        _FALLBACK_GREETINGS
+        if profile_id_from_user_id(user_id) == DEFAULT_PERSONA_ID
+        else _GENERIC_FALLBACK_GREETINGS
+    )
     prev = _last_fallback_idx.get(user_id)
     idx = random.randrange(len(pool))
     if prev is not None and len(pool) > 1:
@@ -104,7 +118,11 @@ async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str
         try:
             from .offline_narrative import collect_offline_context
 
-            narrative = collect_offline_context(user_id, gap_hours, now=now)
+            # collect_offline_context 内部含同步 Chroma 检索（query_triples），
+            # 放线程池执行，避免慢查询阻塞事件循环
+            narrative = await asyncio.to_thread(
+                collect_offline_context, user_id, gap_hours, now=now
+            )
             # 梦境只在亲密/恋人采用；关系未到时降为研究碎片，避免借梦越级。
             if narrative.mode == "dream" and affection.stage_of(affection_val) in {"初识", "熟悉"}:
                 narrative = type(narrative)(

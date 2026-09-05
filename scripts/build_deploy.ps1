@@ -1,3 +1,9 @@
+[CmdletBinding()]
+param(
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = '2.5.0'
+)
+
 $ErrorActionPreference = 'Stop'
 
 # Rebuild both deterministic one-click packages from the current source tree.
@@ -9,10 +15,9 @@ if (-not $resolvedOutput.StartsWith($resolvedSource + [IO.Path]::DirectorySepara
     throw "unsafe deploy output path: $resolvedOutput"
 }
 
-$fullSuffix = ([string][char]0x5927) + ([char]0x676F) + ([char]0x7248)
 $packages = @(
-    @{ Name = 'TZtuzhanAssistant-Deploy-v2.1.0'; Full = $false },
-    @{ Name = ('TZtuzhanAssistant-Deploy-Full-v2.1.0-' + $fullSuffix); Full = $true }
+    @{ Name = "TZtuzhanAssistant-Deploy-v$Version"; Full = $false },
+    @{ Name = "TZtuzhanAssistant-Deploy-Full-v$Version-Large"; Full = $true }
 )
 
 function Build-Package([string]$name, [bool]$full) {

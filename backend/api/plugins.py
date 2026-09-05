@@ -27,16 +27,19 @@ async def api_plugins_list():
 
 @router.post("/plugins/{name}/enable")
 async def api_plugin_enable(name: str):
-    """启用插件：从禁用集合移除并立即加载。"""
+    """启用插件：先加载，成功后再清除禁用标记（失败保持禁用，避免半注册状态残留）。"""
     if not loader.plugin_name_ok(name):
         return JSONResponse({"ok": False, "error": f"插件不存在: {name}"}, status_code=404)
     if not (loader.PLUGINS_DIR / f"{name}.py").exists():
         return JSONResponse({"ok": False, "error": f"插件不存在: {name}"}, status_code=404)
+    # 先临时移除禁用标记（load_plugin 会因 disabled 跳过），加载成功后再持久化
     loader.set_disabled(name, False)
     path = loader.PLUGINS_DIR / f"{name}.py"
     ok = loader.load_plugin(path)
     st = loader.plugin_states().get(name, {})
     if not ok:
+        # 加载失败：回滚禁用标记，保持「禁用」状态，避免热加载反复重试半注册插件
+        loader.set_disabled(name, True)
         return JSONResponse({
             "ok": False,
             "error": st.get("error") or "加载失败",

@@ -23,8 +23,8 @@ from .log import logger
 
 # ---- LLM 感知 prompt ----
 _PERCEPTION_SYSTEM = (
-    "你是菟菚的「感知层」，负责判断用户刚说的这句话，对菟菚（一个坚强、腹黑毒舌、"
-    "独立但有分寸的女孩子，与用户是隔着屏幕的网友）会产生什么样的情绪和好感度影响。\n\n"
+    "你是菟菚的「感知层」，负责判断用户刚说的这句话，对菟菚（一个有尊严、"
+    "尊重边界的对话伙伴）会产生什么样的情绪和好感度影响。\n\n"
     "只输出一个 JSON 对象，不要输出任何解释、不要用 markdown 代码块。字段如下：\n"
     "{\n"
     '  "emotion_delta": 整数，范围 -15 到 +15，这句话让菟菚心情变好(正)还是变差(负)，0 表示无明显影响,\n'
@@ -40,7 +40,7 @@ _PERCEPTION_SYSTEM = (
     '  "bad_address": 布尔，用户是否在要求菟菚用侮辱性/失当的称呼叫他,\n'
     '  "dismiss": 布尔，用户是否在轻视/敷衍/不尊重菟菚\n'
     "}\n\n"
-    "判断要贴合菟菚的性格：她坚强、有尊严、不吃套路。对方善意玩笑用腹黑化解，恶意挑衅才真生气；"
+    "判断要尊重菟菚的独立人格与边界。善意玩笑不应当作攻击，恶意挑衅才产生明显负面影响；"
     "过早表白会让她反感（扣分），真诚关心会让她心里一暖（加分）。\n\n"
     "【重要：判定从严，避免误伤】你们是关系熟络的网友/朋友，对方的日常说话是口语化的：\n"
     "  - 好友式吐槽、调侃、玩笑（如\"你小子\"\"存着玩吧\"\"你这人真是\"）绝不是冒犯或轻视，不算 dismiss/abuse，delta 取 0；\n"
@@ -131,7 +131,7 @@ def _debias_negatives(perc: dict[str, Any], text: str) -> dict[str, Any]:
     return perc
 
 
-async def perceive(text: str, *, mock: bool = False) -> dict[str, Any]:
+async def perceive(text: str, *, mock: bool = False, persona_name: str = "菟菚") -> dict[str, Any]:
     """对用户消息做 LLM 语义感知，返回规整后的感知结果 dict。
 
     mock=True 或 LLM 不可用/失败时，降级到关键词规则（见 _fallback_rule）。
@@ -146,7 +146,7 @@ async def perceive(text: str, *, mock: bool = False) -> dict[str, Any]:
 
         raw = await chat(
             [
-                {"role": "system", "content": _PERCEPTION_SYSTEM},
+                {"role": "system", "content": _PERCEPTION_SYSTEM.replace("菟菚", persona_name)},
                 {"role": "user", "content": text},
             ],
             temperature=0.1,

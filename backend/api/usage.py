@@ -6,11 +6,9 @@ from fastapi import APIRouter, Query
 
 from ..core.config import config
 from ..core.userdb import usage_summary
+from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/usage", tags=["usage"])
-
-_UID = "assistant-main"
-
 
 def _cost(prompt: int, completion: int) -> float:
     return round(
@@ -22,7 +20,7 @@ def _cost(prompt: int, completion: int) -> float:
 
 @router.get("/summary")
 async def api_usage_summary(days: int = Query(7, ge=1, le=90)):
-    data = usage_summary(_UID, days)
+    data = usage_summary(active_user_id(), days)
     data["today"]["cost"] = _cost(data["today"]["prompt"], data["today"]["completion"])
     data["period"]["cost"] = _cost(data["period"]["prompt"], data["period"]["completion"])
     for row in data["by_channel"]:

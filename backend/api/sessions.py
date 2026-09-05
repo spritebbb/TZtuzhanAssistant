@@ -79,6 +79,9 @@ async def api_sessions_export(session_id: str, fmt: str = "md"):
     if msgs is None:
         return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=404)
 
+    from ..core.persona_profiles import active_name
+
+    persona_name = active_name()
     title = "新会话"
     if fmt == "json":
         return {
@@ -88,9 +91,9 @@ async def api_sessions_export(session_id: str, fmt: str = "md"):
             "messages": msgs,
         }
     # Markdown 导出
-    lines = [f"# {title}", "", "> 导出自 菟菚 桌面助手", ""]
+    lines = [f"# {title}", "", f"> 导出自 {persona_name} 桌面助手", ""]
     for m in msgs:
-        who = "你" if m["role"] == "user" else "菟菚"
+        who = "你" if m["role"] == "user" else persona_name
         content = (m.get("content") or "").strip()
         img = m.get("image") or ""
         if not content and img:

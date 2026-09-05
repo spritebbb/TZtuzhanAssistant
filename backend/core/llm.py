@@ -123,7 +123,10 @@ def _record_usage(channel: str, model: str, usage, prompt_text: str, completion_
         if estimated:
             pt = max(1, round(len(prompt_text) / 1.5))
             ct = max(1, round(len(completion_text) / 1.5))
-        log_usage("assistant-main", channel, model or "", pt, ct, estimated)
+        from .current_user import current_user_id
+        from .persona_profiles import active_user_id
+
+        log_usage(current_user_id.get() or active_user_id(), channel, model or "", pt, ct, estimated)
     except Exception:
         pass
 
@@ -308,7 +311,7 @@ async def chat_stream(
 
 
 _ADDRESS_EXTRACT_PROMPT = (
-    "你是称呼提取器。用户在给菟菚设置自己希望被称呼的名字。"
+    "你是称呼提取器。用户在给对话助手设置自己希望被称呼的名字。"
     "只有用户在明确告诉你怎么称呼他（如『叫我某某』『你可以叫我某某』）时才提取；"
     "如果只是普通聊天、或不是在设置称呼，就输出空。"
     "提取时只取一个最合适的称呼，只输出这一个词本身，不要输出任何其他文字、符号、引号或解释。\n"

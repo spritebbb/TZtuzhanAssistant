@@ -90,21 +90,44 @@ def recent_log(n: int = 50) -> list[dict]:
     return query_log(limit=n, offset=0)
 
 
-def _load_all() -> list[dict]:
-    """读取全部审计记录（已解析），无记录返回空列表。"""
+def _log_files() -> list[Path]:
+    """返回审计日志文件列表，按时间升序（旧 → 新）。
+
+    含轮转文件 tool_log.N.jsonl（N 越大越旧）与主文件 tool_log.jsonl（最新）。
+    轮转后查询侧若只读主文件会漏掉历史记录，这里统一纳入，保证审计追溯不因
+    轮转断裂。排序：.keep → ... → .1 → 主文件。
+    """
     try:
-        if not _LOG_PATH.exists():
-            return []
-        with _lock:
-            lines = _LOG_PATH.read_text(encoding="utf-8").splitlines()
+        rotated = sorted(
+            _LOG_PATH.parent.glob("tool_log.*.jsonl"),
+            key=lambda p: int(p.stem.rsplit(".", 1)[-1]),
+            reverse=True,  # 数字大者（更旧）在前
+        )
+        files = rotated
+        if _LOG_PATH.exists():
+            files = files + [_LOG_PATH]
+        return files
+    except Exception:
+        return [_LOG_PATH] if _LOG_PATH.exists() else []
+
+
+def _load_all() -> list[dict]:
+    """读取全部审计记录（含轮转文件，已解析），无记录返回空列表。"""
+    try:
         records = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                records.append(json.loads(line))
-            except Exception:
-                continue
+        with _lock:
+            for path in _log_files():
+                try:
+                    lines = path.read_text(encoding="utf-8").splitlines()
+                except Exception:
+                    continue
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        records.append(json.loads(line))
+                    except Exception:
+                        continue
         return records
     except Exception:
         return []
@@ -196,13 +219,37 @@ def count_log(*, tool: str | None = None, confirmed: str | None = None,
 
 
 def clear_log() -> int:
-    """清空审计日志，返回清除条数。"""
+    """清空审计日志，返回清除条数。
+
+    清除动作本身记一条「清除审计」记录（不可清），保留审计痕迹——避免审计日志
+    被静默清空后无从追溯。同时清理轮转文件，保证「清空」语义完整。
+    """
     try:
         with _lock:
-            if not _LOG_PATH.exists():
-                return 0
-            n = sum(1 for _ in _LOG_PATH.open(encoding="utf-8"))
-            _LOG_PATH.unlink(missing_ok=True)
+            n = 0
+            if _LOG_PATH.exists():
+                n = sum(1 for _ in _LOG_PATH.open(encoding="utf-8"))
+            # 主文件 + 轮转文件一并清除
+            for path in _log_files():
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    continue
+            # 清除后立刻写入一条审计记录，标记本次清除动作
+            record = {
+                "ts": datetime.now().isoformat(timespec="milliseconds"),
+                "user": "system",
+                "tool": "__audit__",
+                "args": {"action": "clear_log", "cleared": n},
+                "confirmed": "allow",
+                "ok": True,
+                "elapsed_ms": 0,
+                "result": f"已清空审计日志（{n} 条）",
+                "error": "",
+            }
+            _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
             return n
     except Exception:
         return 0
