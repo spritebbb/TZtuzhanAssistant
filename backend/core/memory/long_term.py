@@ -148,8 +148,15 @@ async def _with_expansion(
         try:
             from . import vector_store as vec
 
-            hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, kind)
+            vector_limit = LONG_TERM_TOP_K * 4 if kind == "facts" else LONG_TERM_TOP_K
+            hits = await asyncio.to_thread(vec.search, user_id, query, vector_limit, kind)
+            allowed_fact_ids = (
+                db.recallable_fact_ids(user_id, [h.record_id for h in hits])
+                if kind == "facts" else None
+            )
             for h in hits:
+                if allowed_fact_ids is not None and h.record_id not in allowed_fact_ids:
+                    continue
                 if h.text and h.text not in vec_docs:
                     vec_docs.append(h.text)
         except Exception:
@@ -206,8 +213,13 @@ async def recall_facts(user_id: str, query: str, *, mock: bool = False) -> list[
         try:
             from . import vector_store as vec
 
-            hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "facts")
+            hits = await asyncio.to_thread(
+                vec.search, user_id, query, LONG_TERM_TOP_K * 4, "facts"
+            )
+            allowed_fact_ids = db.recallable_fact_ids(user_id, [h.record_id for h in hits])
             for h in hits:
+                if h.record_id not in allowed_fact_ids:
+                    continue
                 if h.text and h.text not in base:
                     base.append(h.text)
         except Exception:

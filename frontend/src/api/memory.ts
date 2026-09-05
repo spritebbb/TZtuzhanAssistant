@@ -4,6 +4,16 @@ export interface FactItem {
   id: number
   content: string
   ts: string
+  source_type: 'legacy' | 'conversation_inference' | 'user_correction' | string
+  source_message_ids: string
+  confidence: number
+  verified_at: string | null
+  expires_at: string | null
+  pinned: number
+  surface_policy: 'normal' | 'do_not_proactively_surface' | 'never_surface'
+  status: 'active' | 'pending_confirmation'
+  conflicts_with_fact_id: number | null
+  conflicting_content: string | null
 }
 
 export async function getFacts(limit = 200): Promise<FactItem[]> {
@@ -25,4 +35,28 @@ export async function updateFact(id: number, content: string): Promise<void> {
 export async function deleteFact(id: number): Promise<void> {
   const response = await apiFetch(`/api/memory/facts/${id}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('删除失败')
+}
+
+export async function updateFactSurfacePolicy(
+  id: number,
+  surfacePolicy: 'normal' | 'do_not_proactively_surface',
+): Promise<void> {
+  const response = await apiFetch(`/api/memory/facts/${id}/surface-policy`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ surface_policy: surfacePolicy }),
+  })
+  if (!response.ok) throw new Error('呈现策略更新失败')
+}
+
+export async function resolveFactConflict(
+  id: number,
+  action: 'accept_new' | 'keep_existing',
+): Promise<void> {
+  const response = await apiFetch(`/api/memory/facts/${id}/resolve-conflict`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  })
+  if (!response.ok) throw new Error('冲突记忆确认失败')
 }

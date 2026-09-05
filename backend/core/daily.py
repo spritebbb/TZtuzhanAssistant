@@ -11,7 +11,7 @@ from . import affection
 from .llm import chat
 from .log import logger
 from .pipeline import clean_address
-from .userdb import db
+from .userdb import db, list_facts
 
 JUDGE_PROMPT = """你是「菟菚」的好感度管理员。根据以下某用户与菟菚昨天的对话记录，判断并只输出 JSON：
 1) hobby：用户是否聊了自己的爱好？（是→1，否→0）
@@ -26,11 +26,11 @@ JUDGE_PROMPT = """你是「菟菚」的好感度管理员。根据以下某用�
 """
 
 FACT_PROMPT = """你是记忆提取员。根据下面的对话，提取两样东西，只输出一个 JSON：
-1) facts：值得**长期记住**的关于用户的事实——喜好、习惯、工作/生活状态、约定承诺、关系进展、重要经历、家人朋友等。**不要**把一次性话题记进去（比如"今天吃了饺子"这种只聊一次的琐事，除非它反映长期习惯）。每条一句短话，以「用户」开头，最多 5 条。
+1) facts：值得**长期记住**的关于用户的事实——喜好、习惯、工作/生活状态、约定承诺、关系进展、重要经历、家人朋友等。**不要**把一次性话题记进去（比如"今天吃了饺子"这种只聊一次的琐事，除非它反映长期习惯）。每条包含 content（以「用户」开头的一句短话）、confidence（0-1）和 conflicts_with_fact_id（与已有事实明确矛盾时填其编号，否则为 null）；用户明确说出的事实可为 0.9，依据间接或存在推断时不得高于 0.7。最多 5 条。不得自行覆盖或删除冲突事实。
 2) style：对「用户说话风格」的简要描述（1-2 句），包括：句子长短、是否爱用语气词/表情、常用口头禅、语气是直接还是委婉、爱不爱开玩笑等。
 
 输出格式（不要任何其他内容）：
-{"facts": ["用户喜欢下雨天", "用户和菟菚约好每周五晚上视频"], "style": "对方说话简短直接，常用'啊'和'哈'，喜欢发短句和表情。"}
+{"facts": [{"content":"用户喜欢下雨天","confidence":0.9,"conflicts_with_fact_id":null}, {"content":"用户住在武汉","confidence":0.9,"conflicts_with_fact_id":12}], "style": "对方说话简短直接，常用'啊'和'哈'，喜欢发短句和表情。"}
 没有值得记的事实就输出 {"facts": [], "style": "..."}
 """
 
@@ -306,7 +306,10 @@ async def extract_terms(user_id: str, day: date, transcript: str) -> int:
         resp = await chat(
             [
                 {"role": "system", "content": TERMS_PROMPT},
-                {"role": "user", "content": f"对话记录：\n{transcript}"},
+                {
+                    "role": "user",
+                    "content": f"对话记录：\n{transcript}",
+                },
             ],
             temperature=0.2,
             max_tokens=240,
@@ -363,10 +366,24 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         from .persona_profiles import persona_name_for_user_id
 
         persona_name = persona_name_for_user_id(user_id)
+        existing = list_facts(user_id, 100)
+        active_fact_ids = {
+            int(fact["id"])
+            for fact in existing
+            if fact["status"] == "active" and fact["surface_policy"] != "never_surface"
+        }
+        existing_text = "\n".join(
+            f"{fact['id']}. {fact['content']}"
+            for fact in existing
+            if int(fact["id"]) in active_fact_ids
+        ) or "（暂无）"
         resp = await chat(
             [
                 {"role": "system", "content": FACT_PROMPT.replace("菟菚", persona_name)},
-                {"role": "user", "content": f"对话记录：\n{transcript}"},
+                {
+                    "role": "user",
+                    "content": f"已有事实（仅用于判断冲突）：\n{existing_text}\n\n对话记录：\n{transcript}",
+                },
             ],
             temperature=0.3,
             max_tokens=400,
@@ -386,14 +403,38 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         style = ""
     if isinstance(facts, list):
         for f in facts:
-            fid = db.add_fact(user_id, str(f).strip()[:100])
+            if isinstance(f, dict):
+                content = str(f.get("content") or "").strip()[:100]
+                try:
+                    confidence = float(f.get("confidence", 0.7))
+                except (TypeError, ValueError):
+                    confidence = 0.7
+                try:
+                    conflict_id = int(f["conflicts_with_fact_id"]) if f.get("conflicts_with_fact_id") is not None else None
+                except (TypeError, ValueError):
+                    conflict_id = None
+                if conflict_id not in active_fact_ids:
+                    conflict_id = None
+            else:  # 兼容旧模型/旧测试仍返回字符串数组
+                content = str(f).strip()[:100]
+                confidence = 0.7
+                conflict_id = None
+            source_ids = json.dumps([int(r["id"]) for r in rows], separators=(",", ":"))
+            fid = db.add_fact(
+                user_id,
+                content,
+                source_type="conversation_inference",
+                source_message_ids=source_ids,
+                confidence=confidence,
+                conflicts_with_fact_id=conflict_id,
+            )
             # 给新事实建稠密向量索引（失败静默）
-            if fid is not None:
+            if fid is not None and conflict_id is None:
                 try:
                     import asyncio as _asyncio
                     from .vector_store import index as vec_index
 
-                    await _asyncio.to_thread(vec_index, user_id, fid, str(f).strip()[:100], "facts")
+                    await _asyncio.to_thread(vec_index, user_id, fid, content, "facts")
                 except Exception:
                     pass
     if style:
