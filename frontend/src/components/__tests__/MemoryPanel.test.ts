@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   deleteFact,
+  deleteUserTerm,
   getFacts,
+  getHerProfile,
+  getInteractionStyle,
+  resetInteractionStyle,
   updateFact,
   resolveFactConflict,
   updateFactSurfacePolicy,
@@ -17,6 +21,10 @@ vi.mock('../../api/memory', () => ({
   deleteFact: vi.fn(),
   updateFactSurfacePolicy: vi.fn(),
   resolveFactConflict: vi.fn(),
+  getHerProfile: vi.fn(),
+  getInteractionStyle: vi.fn(),
+  resetInteractionStyle: vi.fn(),
+  deleteUserTerm: vi.fn(),
 }))
 
 const fact: FactItem = {
@@ -42,10 +50,23 @@ describe('MemoryPanel', () => {
     vi.mocked(deleteFact).mockReset()
     vi.mocked(updateFactSurfacePolicy).mockReset()
     vi.mocked(resolveFactConflict).mockReset()
+    vi.mocked(getHerProfile).mockReset()
+    vi.mocked(getInteractionStyle).mockReset()
+    vi.mocked(resetInteractionStyle).mockReset()
+    vi.mocked(deleteUserTerm).mockReset()
     vi.mocked(getFacts).mockResolvedValue([{ ...fact }])
     vi.mocked(updateFact).mockResolvedValue()
     vi.mocked(updateFactSurfacePolicy).mockResolvedValue()
     vi.mocked(resolveFactConflict).mockResolvedValue()
+    vi.mocked(getHerProfile).mockResolvedValue([
+      { key: 'likes', label: '她喜欢', items: ['熬夜、咖啡、冷笑话'] },
+    ])
+    vi.mocked(getInteractionStyle).mockResolvedValue({
+      style: '喜欢短句、偶尔用省略号',
+      terms: [{ id: 3, term: '菟丝子', category: 'slang', meaning: '我们的黑话', count: 2 }],
+    })
+    vi.mocked(resetInteractionStyle).mockResolvedValue()
+    vi.mocked(deleteUserTerm).mockResolvedValue()
   })
 
   it('shows provenance and persists the proactive-surface preference', async () => {
@@ -101,5 +122,30 @@ describe('MemoryPanel', () => {
 
     expect(resolveFactConflict).toHaveBeenCalledWith(8, 'accept_new')
     expect(wrapper.text()).not.toContain('等你确认')
+  })
+
+  it('shows her stable profile and resets auto-formed interaction preferences', async () => {
+    vi.stubGlobal('confirm', () => true)
+    const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.tab-row button:nth-child(2)').trigger('click')
+    await flushPromises()
+
+    expect(getHerProfile).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('她喜欢')
+    expect(wrapper.text()).toContain('熬夜、咖啡、冷笑话')
+    expect(wrapper.text()).toContain('喜欢短句、偶尔用省略号')
+    expect(wrapper.text()).toContain('菟丝子')
+
+    await wrapper.get('.reset-btn').trigger('click')
+    await flushPromises()
+    expect(resetInteractionStyle).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('还没形成')
+
+    await wrapper.get('.term-del').trigger('click')
+    await flushPromises()
+    expect(deleteUserTerm).toHaveBeenCalledWith(3)
+    vi.unstubAllGlobals()
   })
 })
