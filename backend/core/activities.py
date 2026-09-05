@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from .log import logger
 from .userdb import db
 
 _READING_CUE_RE = re.compile(
@@ -377,6 +378,12 @@ def forget_activity_data(user_id: str, activity_id: int) -> None:
         (user_id, activity_id),
     )
     invalidate_for_source(user_id, "activity", activity_id, commit=False)
+    try:
+        from .pending_thoughts import forget_thoughts_for_source
+
+        forget_thoughts_for_source(user_id, "activity", activity_id)
+    except Exception:
+        logger.warning("[共同活动] 心事级联清理失败：activity_id={}", activity_id)
 
 
 def _finished_reading_context_locked(user_id: str) -> str:

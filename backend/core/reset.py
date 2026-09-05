@@ -29,6 +29,7 @@ _TABLES = (
     "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
     "tasks", "promises", "usage_log", "activity_notes", "activities",
     "activity_viewpoints", "relationship_events", "artifacts",
+    "pending_thoughts",
     "kb_documents", "kb_chunks", "unlocks",
 )
 

@@ -285,6 +285,7 @@ async def _tick_once() -> int:
         if db.get_user(uid):
             await maybe_suggest_archive(uid)
             await maybe_follow_up_promise(uid)
+            await maybe_express_pending_thoughts(uid)
     except Exception as e:
         logger.warning("[主动性] 归档建议/约定跟进检查失败: {}", e)
 
@@ -628,6 +629,62 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
     if not await enqueue_proactive(user_id, text):
         return None
     _mark_archive_suggested(user_id)
+    return text
+
+
+# ---- 未完成心事（M5）：Narrative Planner 择优，经既有主动队列表达 ----
+_PLANNER_KEY = "initiative:planner_expressed"  # kv 去重键（每日最多一条）
+_PLANNER_IDLE_MIN = 120
+
+
+async def maybe_express_pending_thoughts(user_id: str) -> str | None:
+    """把到点的未完成心事用她自己的话主动提一句（每日最多一条，只在空闲时）。
+
+    复用既有额度/冷却/队列；不新增任何绕过仲裁的发送路径。
+    """
+    last = _last_chat_ts(user_id)
+    if last is not None and time.time() - last < _PLANNER_IDLE_MIN * 60:
+        return None
+    today = datetime.date.today().isoformat()
+    if kv_get(user_id, f"{_PLANNER_KEY}:{today}") is not None:
+        return None
+    from .narrative_planner import build_express_prompt, plan_next
+    from .pending_thoughts import mark_expressed, record_attempt
+
+    user = db.get_user(user_id)
+    if not user:
+        return None
+    thought = await asyncio.to_thread(plan_next, user_id, stage_of(user["affection"] or 0))
+    if thought is None:
+        return None
+
+    sys_prompt = build_system_prompt(
+        stage=stage_of(user["affection"] or 0),
+        address=user["nickname_pref"] or "",
+        lover_confirm=bool(user["lover_confirm"]),
+        first_chat=False,
+        affection=user["affection"] or 0,
+        user_id=user_id,
+    )
+    msgs = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": build_express_prompt(thought)},
+    ]
+    try:
+        text = (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
+    except Exception as e:
+        logger.warning("[心事] 表达生成失败: {}", e)
+        record_attempt(thought["id"])
+        return None
+    if not text:
+        record_attempt(thought["id"])
+        return None
+    if not await enqueue_proactive(user_id, text):
+        record_attempt(thought["id"])
+        return None
+    mark_expressed(thought["id"])
+    kv_set(user_id, f"{_PLANNER_KEY}:{today}", "1")
+    logger.info("[心事] 已表达未完成心事 #{}：{}", thought["id"], text[:40])
     return text
 
 

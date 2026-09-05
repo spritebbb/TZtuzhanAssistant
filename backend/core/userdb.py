@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -279,6 +279,26 @@ CREATE TABLE IF NOT EXISTS relationship_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_events_idem
     ON relationship_events(user_id, event_type, source_id) WHERE status = 'active';
+-- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
+CREATE TABLE IF NOT EXISTS pending_thoughts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    kind           TEXT NOT NULL,     -- resume_reading / confirm_memory
+    source_type    TEXT NOT NULL,     -- activity / fact
+    source_id      INTEGER NOT NULL,
+    content        TEXT NOT NULL,     -- 叙事素材（她惦记的事，自然语言）
+    earliest_at    TEXT NOT NULL,     -- 最早可表达时间（Narrative Planner 门控）
+    expires_at     TEXT,              -- 过期即放弃
+    priority       INTEGER NOT NULL DEFAULT 5,  -- 1-9，小=优先
+    max_attempts   INTEGER NOT NULL DEFAULT 2,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    status         TEXT NOT NULL DEFAULT 'pending',  -- pending / expressed / dismissed
+    created_at     TEXT NOT NULL,
+    UNIQUE(user_id, kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_thoughts_user
+    ON pending_thoughts(user_id, status, earliest_at);
 -- M2 前置最小版：可保存的共同产物（首批：共读共同书摘）。
 CREATE TABLE IF NOT EXISTS artifacts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1268,6 +1288,7 @@ class UserDB:
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
                 "activity_viewpoints", "relationship_events", "artifacts",
+                "pending_thoughts",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
