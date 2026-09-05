@@ -26,6 +26,11 @@ vi.mock('../../api/memory', () => ({
   resetInteractionStyle: vi.fn(),
   deleteUserTerm: vi.fn(),
 }))
+vi.mock('../../api/relationship', () => ({
+  exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
+  previewRestore: vi.fn(),
+  restoreRelationship: vi.fn(),
+}))
 
 const fact: FactItem = {
   id: 7,
@@ -122,6 +127,45 @@ describe('MemoryPanel', () => {
 
     expect(resolveFactConflict).toHaveBeenCalledWith(8, 'accept_new')
     expect(wrapper.text()).not.toContain('等你确认')
+  })
+
+  it('shows the backup tab with export link and preview-then-restore flow', async () => {
+    const { previewRestore, restoreRelationship } = await import('../../api/relationship')
+    vi.mocked(previewRestore).mockResolvedValue({
+      ok: true,
+      errors: [],
+      counts: { facts: 2, activities: 1 },
+      total: 3,
+      kv_exported: 1,
+      target_user_id: 'assistant-main-bak',
+      source_user_id: 'assistant-main',
+    })
+    vi.mocked(restoreRelationship).mockResolvedValue({ total: 3 })
+    const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.findAll('.tab-row button')[2].trigger('click')
+    expect(wrapper.find('a[href="/api/relationship/export"]').exists()).toBe(true)
+
+    const bundle = { kind: 'tuzhan-relationship-bundle', data: {} }
+    const file = new File([JSON.stringify(bundle)], 'backup.json', { type: 'application/json' })
+    const input = wrapper.get<HTMLInputElement>('input[type="file"]').element
+    Object.defineProperty(input, 'files', { value: [file] })
+    await wrapper.get('input[type="file"]').trigger('change')
+    await flushPromises()
+
+    await wrapper.get('.restore-target input').setValue('assistant-main-bak')
+    await wrapper.get('.restore-target input').trigger('change')
+    await flushPromises()
+    expect(previewRestore).toHaveBeenCalledWith(bundle, 'assistant-main-bak')
+    expect(wrapper.text()).toContain('将写入 3 条记录')
+
+    vi.stubGlobal('confirm', () => true)
+    await wrapper.get('.reset-btn:not(.export-link)').trigger('click')
+    await flushPromises()
+    vi.unstubAllGlobals()
+    expect(restoreRelationship).toHaveBeenCalledWith(bundle, 'assistant-main-bak')
+    expect(wrapper.text()).toContain('恢复完成：共写入 3 条记录')
   })
 
   it('shows her stable profile and resets auto-formed interaction preferences', async () => {

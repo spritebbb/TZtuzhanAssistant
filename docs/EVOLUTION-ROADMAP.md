@@ -272,6 +272,15 @@
 
 ## 迭代记录
 
+### M1.3 · 关系导出与恢复（E03 核心闭环，2026-09-06，ZCode 执行）
+
+- 选择性导出：`backend/core/relationship_export.py` 按 9 个类别（identity/memory/milestones/life/tasks/activities/events/knowledge/conversations）导出人格命名空间全部关系数据；usage_log（成本账本）与每日 kv 状态不属于关系记忆，明确排除。
+- kv 键登记表（短名单 #5）：`backend/core/kv_registry.py` 登记全部 19 个键模式（归属模块/用途/生命周期/是否导出）；`state:*` 持久关系状态随包导出，其余按登记表跳过；测试断言真实流程产生的键无未登记项。
+- 恢复预览：格式/版本/schema 一致性、引用完整性（含跨类别引用，如事件 → 活动/约定/事实、产物 → 活动）、目标命名空间占用三重校验，任何失败都不写数据。
+- 恢复写入：只允许恢复到空命名空间；bot.db 被 multi 人格共享、整数主键全局唯一，故按 AUTOINCREMENT 重映射主键并重建引用（拓扑序插入 + 自引用二阶段回填），user_id 文本列重写为目标命名空间；恢复后由既有向量重建机制补齐索引（SQLite 是唯一权威源）。
+- 用户入口：`/api/relationship/export|restore/preview|restore` + MemoryPanel 新增「带走 / 恢复」tab（导出下载、文件选择、预览计数与错误、确认恢复）。
+- 验证：`tests/test_relationship_bundle.py`（计数完整与排除项、kv 登记覆盖、恢复后计数与引用一致、重复恢复拒绝、坏包四类拒绝）；前端 37/37。
+
 ### M5.2 · 惊喜编排（已完成，2026-09-06，ZCode 执行）
 
 - 约束落地：只基于真实经历（素材仅取 60 天内的 `co_story`/`book_summary`/`goal_review` artifacts，prompt 以 `<real_memory>` 如实引用摘录并明确禁止编造新经历）、低频（默认间隔 ≥14 天 + 到点后 35% 概率门，全部外置可调）、可关闭（`PROACTIVE_SURPRISE_ENABLED=0`）。
