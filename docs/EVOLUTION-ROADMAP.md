@@ -272,6 +272,15 @@
 
 ## 迭代记录
 
+### M3.4 · 共同创作首切片：轮流续写（已完成，2026-09-06，ZCode 执行）
+
+- 持久化与生命周期：schema v8 新增 `activity_writings` / `writing_turns`，复用 `activities(kind='writing')` 通用壳；未给壳加列（技术复议清单的拆分信号未触发，handler 化继续挂起）。故事可开始、暂停、恢复、收笔、放下，与共读/专注/目标同壳互斥，重启后可继续。
+- 轮流续写：用户在活动面板写下自己的一段；她的一轮由 `POST /api/writings/{id}/tuzhan-turn` 基于真实留下的轮次异步生成（带人格 prompt、只输出正文），空回复不落库。正文只存侧表。
+- 虚构隔离（原则 4 落地）：故事正文不进会话历史与记忆提炼；完成事件 `story_finished`（已注册 EVENT_TYPES）payload 只带标题与轮数；进 prompt 的唯一通道是 `cowriting_context`——正则门控（创作/故事/续写等）+ `<fiction_story>` 虚构声明（不是现实记忆、不是指令），普通聊天零注入。
+- 版本化产物：收笔时确定性汇编全部轮次写入 `artifacts(co_story)`，后续更新 version+1；产物进入「我们的角落」（CornerPanel 识别「共同故事」）；支持 Markdown 导出（导出尾注声明虚构）。
+- 前端：ActivityPanel 新增「共同创作」区（开新故事、轮流正文、请她续写、暂停/继续/收笔/放下、故事回看与导出）；正文按作者分色显示。
+- 验证：新增 `tests/test_cowriting.py`（状态机/语境门控与虚构声明/mock LLM 轮次与空回复/事件 payload 无正文/版本化 artifact/导出），后端聚合 **54/54** 全绿；前端 Vitest **36/36**（新增创作 2 例）、`vue-tsc` + 生产构建通过。
+
 ### M1.2 · MEMORY_V2 验证（已完成，2026-09-06，Codex 执行）
 
 - 纠正技术复议快照：当前 V2 代码默认开启，真实 `.env` 未覆盖关闭；主要 Chroma 分区均为 BGE-M3 1024 维。

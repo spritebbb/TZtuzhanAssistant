@@ -24,6 +24,7 @@ EVENT_TYPES: dict[str, str] = {
     "memory_corrected": "用户改写或确认了一条记忆（来源：facts）",
     "focus_finished": "一段专注陪伴完成（来源：activities）",
     "goal_completed": "一个共同目标完成（来源：activities）",
+    "story_finished": "一个共同创作的故事收笔（来源：activities；payload 只含标题与轮数，不带虚构正文）",
 }
 
 _MAX_PAYLOAD_EVENTS = 2

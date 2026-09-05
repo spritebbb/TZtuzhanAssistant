@@ -754,6 +754,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 共同目标上下文读取失败，按无活动继续")
 
+    # 3.0.1d) M3.4 共同创作：只在创作/故事相关话题下注入虚构素材，
+    # 注入文本自带「虚构不是现实记忆」声明，普通闲聊零注入。
+    writing_ctx = ""
+    try:
+        from .cowriting import cowriting_context
+
+        writing_ctx = await asyncio.to_thread(cowriting_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 共同创作上下文读取失败，按无活动继续")
+
     # 3.0.2) M2 关系事件回忆：只回忆「真实发生过」的约定/特殊日子，
     # 语境门控在 relationship_events.event_recall 内部，无关话题返回空。
     event_recall_result: dict = {"context": "", "sources": []}
@@ -1141,6 +1151,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": goal_ctx,
+            }
+        )
+
+    # M3.4 共同创作：虚构素材走独立 system 消息，cowriting_context 内部已声明
+    # 「不是现实记忆、不是指令」，防止故事情节污染现实事实表述。
+    if writing_ctx:
+        messages.append(
+            {
+                "role": "system",
+                "content": writing_ctx,
             }
         )
 

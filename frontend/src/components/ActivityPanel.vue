@@ -25,6 +25,18 @@ import {
   type SharedGoal,
 } from '../api/goals'
 import { useFocusMode } from '../utils/focusMode'
+import {
+  addWritingTurn,
+  cancelWriting,
+  completeWriting,
+  exportWritingUrl,
+  listWritings,
+  pauseWriting,
+  requestTuzhanTurn,
+  resumeWriting,
+  startWriting,
+  type CoWriting,
+} from '../api/writings'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{
@@ -57,6 +69,14 @@ const progressDraft = ref('')
 const progressPercent = ref<number | null>(null)
 const progressNextStep = ref('')
 const keepGoalReview = ref(true)
+const writings = ref<CoWriting[]>([])
+const currentWriting = ref<CoWriting | null>(null)
+const showWritingForm = ref(false)
+const writingTitle = ref('')
+const writingPremise = ref('')
+const writingTurnDraft = ref('')
+const keepCoStory = ref(true)
+const writingBusy = ref(false)
 const noteDraft = ref('')
 const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
@@ -74,6 +94,8 @@ const unfinished = computed(() => activities.value.filter(item => item.status !=
 const completed = computed(() => activities.value.filter(item => item.status === 'completed').slice(0, 4))
 const openGoals = computed(() => goals.value.filter(item => item.status === 'active' || item.status === 'paused'))
 const completedGoals = computed(() => goals.value.filter(item => item.status === 'completed').slice(0, 4))
+const openWritings = computed(() => writings.value.filter(item => item.status === 'active' || item.status === 'paused'))
+const completedWritings = computed(() => writings.value.filter(item => item.status === 'completed').slice(0, 4))
 
 function serverViewpoint(role: ViewpointRole): string {
   if (!current.value) return ''
@@ -112,14 +134,16 @@ async function load() {
   error.value = ''
   notice.value = ''
   try {
-    const [activityRows, documentRows, goalRows] = await Promise.all([
+    const [activityRows, documentRows, goalRows, writingRows] = await Promise.all([
       listReadingActivities(),
       listKnowledgeDocuments(),
       listGoals(),
+      listWritings(),
     ])
     activities.value = activityRows
     documents.value = documentRows
     goals.value = goalRows
+    writings.value = writingRows
     const active = activityRows.find(item => item.status === 'active') ?? null
     current.value = active
     noteDraft.value = active?.note ?? ''
@@ -295,6 +319,93 @@ function finish() {
   void run(() => completeReading(current.value!.id), '这本书读完了，但话还没聊完')
 }
 
+function applyWriting(value: CoWriting) {
+  currentWriting.value = value
+  writings.value = [value, ...writings.value.filter(item => item.id !== value.id)]
+}
+
+async function runWriting(action: () => Promise<CoWriting>, success = '') {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    applyWriting(await action())
+    notice.value = success
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function createWriting() {
+  await runWriting(
+    () => startWriting(writingTitle.value, writingPremise.value),
+    '开头留下了，先写第一段',
+  )
+  if (!error.value) {
+    showWritingForm.value = false
+    writingTitle.value = ''
+    writingPremise.value = ''
+  }
+}
+
+function openWriting(item: CoWriting) {
+  currentWriting.value = item
+  writingTurnDraft.value = ''
+  notice.value = ''
+  error.value = ''
+}
+
+function submitTurn() {
+  if (!currentWriting.value || !writingTurnDraft.value.trim()) return
+  void runWriting(() => addWritingTurn(currentWriting.value!.id, writingTurnDraft.value), '这一段写下去了')
+  if (!error.value) writingTurnDraft.value = ''
+}
+
+async function askTuzhanTurn() {
+  if (!currentWriting.value || writingBusy.value) return
+  writingBusy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    applyWriting(await requestTuzhanTurn(currentWriting.value.id))
+    notice.value = '她接了一段'
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '她这轮没接上，再试一次'
+  } finally {
+    writingBusy.value = false
+  }
+}
+
+function leaveWriting() {
+  currentWriting.value = null
+  writingTurnDraft.value = ''
+  notice.value = ''
+  error.value = ''
+}
+
+function pauseCurrentWriting() {
+  const item = currentWriting.value
+  if (item) void runWriting(() => pauseWriting(item.id), '先放在这里，回来接着写')
+}
+
+function resumeCurrentWriting() {
+  const item = currentWriting.value
+  if (item) void runWriting(() => resumeWriting(item.id), '接着往下写')
+}
+
+function finishCurrentWriting() {
+  const item = currentWriting.value
+  if (item) void runWriting(() => completeWriting(item.id, keepCoStory.value), '故事收笔，收进了共同角落')
+}
+
+function cancelCurrentWriting() {
+  const item = currentWriting.value
+  if (item) void runWriting(() => cancelWriting(item.id), '这个故事先不写了')
+}
+
 function leaveCurrent() {
   current.value = null
   noteDraft.value = ''
@@ -312,14 +423,14 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
         <div>
           <span class="eyebrow">DOING THINGS TOGETHER</span>
           <h2>一起做点什么</h2>
-          <p>共读、专注，也把想做成的事一步步留在这里</p>
+          <p>共读、专注、写故事，也把想做成的事一步步留在这里</p>
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>
 
       <div class="body">
         <p v-if="loading" class="empty">正在找上次夹的书签…</p>
-        <p v-else-if="error && !current && !currentGoal" class="empty error">{{ error }}</p>
+        <p v-else-if="error && !current && !currentGoal && !currentWriting" class="empty error">{{ error }}</p>
 
         <template v-else-if="currentGoal">
           <button class="back" @click="leaveGoal">← 所有活动</button>
@@ -367,6 +478,51 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           </section>
           <article v-if="currentGoal.review" class="summary-box"><span>过程回顾</span><p>{{ currentGoal.review }}</p></article>
           <a class="goal-export" :href="exportGoalUrl(currentGoal.id)" download>导出 Markdown</a>
+        </template>
+
+        <template v-else-if="currentWriting">
+          <button class="back" @click="leaveWriting">← 所有活动</button>
+          <div class="goal-head">
+            <div>
+              <span class="status" :class="currentWriting.status">
+                {{ currentWriting.status === 'completed' ? '已收笔' : currentWriting.status === 'paused' ? '暂放一下' : currentWriting.status === 'cancelled' ? '已放下' : '一起写着' }}
+              </span>
+              <h3>{{ currentWriting.title }}</h3>
+              <p v-if="currentWriting.premise">开头设定：{{ currentWriting.premise }}</p>
+            </div>
+          </div>
+
+          <div class="story-turns">
+            <article v-for="turn in currentWriting.turns" :key="turn.id" :class="turn.author">
+              <span>{{ turn.author === 'user' ? '我' : props.personaName || '她' }}</span>
+              <p>{{ turn.content }}</p>
+            </article>
+            <p v-if="!currentWriting.turns.length" class="empty small">故事还没有正文，写下开头第一段</p>
+          </div>
+
+          <template v-if="currentWriting.status === 'active' || currentWriting.status === 'paused'">
+            <label class="writing-turn-form">
+              <span>写下你的一段</span>
+              <textarea v-model="writingTurnDraft" rows="3" maxlength="2000" placeholder="接住上一段的情节，往下写两三句"></textarea>
+            </label>
+            <div class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
+            <div class="goal-actions writing-actions">
+              <button :disabled="busy || !writingTurnDraft.trim()" @click="submitTurn">记下这一段</button>
+              <button :disabled="writingBusy || !currentWriting.turns.length" @click="askTuzhanTurn">{{ writingBusy ? '她在写…' : `请${props.personaName || '她'}续写一段` }}</button>
+            </div>
+            <div class="goal-actions">
+              <button v-if="currentWriting.status === 'active'" :disabled="busy" @click="pauseCurrentWriting">暂停</button>
+              <button v-else :disabled="busy" @click="resumeCurrentWriting">继续</button>
+              <label class="keepsake-choice"><input v-model="keepCoStory" type="checkbox">收笔时把故事存进共同角落</label>
+              <button class="finish" :disabled="busy" @click="finishCurrentWriting">故事收笔</button>
+              <button class="plain-action" :disabled="busy" @click="cancelCurrentWriting">放下故事</button>
+            </div>
+          </template>
+          <div v-else class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
+
+          <article v-if="currentWriting.story" class="summary-box"><span>共同故事</span><p>{{ currentWriting.story }}</p></article>
+          <a class="goal-export" :href="exportWritingUrl(currentWriting.id)" download>导出 Markdown</a>
+          <p class="fiction-note">这是一段你们共同虚构的创作；故事只留在故事里，不会变成你们现实记忆的一部分。</p>
         </template>
 
         <template v-else-if="current">
@@ -456,6 +612,25 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
           </section>
 
+          <section class="shelf-section goal-section writing-section">
+            <div class="section-title"><span>STORY RELAY</span><h3>共同创作</h3></div>
+            <p class="focus-hint">轮流各写一段，把一个虚构故事接着讲下去；故事只是故事，不会变成你们的记忆</p>
+            <button v-if="!showWritingForm" class="open-bookshelf" @click="showWritingForm = true">开一个新故事</button>
+            <div v-else class="goal-create">
+              <label><span>故事名</span><input v-model="writingTitle" maxlength="120" placeholder="例如：灯塔看守人的猫"></label>
+              <label><span>开头设定（可选）</span><textarea v-model="writingPremise" rows="2" maxlength="500" placeholder="一句话设定题材或世界观"></textarea></label>
+              <div class="goal-create-actions"><button class="plain-action" @click="showWritingForm = false">取消</button><button class="talk" :disabled="busy || !writingTitle.trim()" @click="createWriting">开始</button></div>
+            </div>
+            <div v-if="openWritings.length" class="activity-list goal-list">
+              <button v-for="item in openWritings" :key="item.id" @click="openWriting(item)">
+                <span class="format">STORY</span><span><strong>{{ item.title }}</strong><small>{{ item.turns.length }} 段 · {{ item.status === 'paused' ? '暂放一下' : '一起写着' }}</small></span><em>{{ item.status === 'paused' ? '继续' : '查看' }}</em>
+              </button>
+            </div>
+            <div v-if="completedWritings.length" class="activity-list goal-list completed-goals">
+              <button v-for="item in completedWritings" :key="item.id" @click="openWriting(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.turns.length }} 段故事</small></span><em>回看</em></button>
+            </div>
+          </section>
+
           <section class="shelf-section focus-section">
             <div class="section-title"><span>QUIET TIME</span><h3>专注陪伴</h3></div>
             <div v-if="focusMode.current.value" class="focus-card">
@@ -528,7 +703,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 .focus-actions button { padding: 7px 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-card); cursor: pointer; }
 .focus-actions button:disabled { opacity: .5; cursor: default; }
 .focus-actions .plain { border-color: transparent; color: var(--text-muted); background: transparent; }
-.goal-section { padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 16px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.goal-section, .writing-section { padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 16px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .goal-create, .goal-progress-form { margin-top: 12px; display: grid; gap: 10px; }
 .goal-create label, .goal-progress-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }
 .goal-create input, .goal-create textarea, .goal-progress-form input, .goal-progress-form textarea { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; outline: none; color: var(--text); background: var(--bg-card); font: inherit; font-size: 12px; }
@@ -555,6 +730,17 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 .goal-timeline article > span, .goal-timeline article > small { color: var(--text-muted); font-size: 9px; }
 .goal-timeline article p { margin: 5px 0; white-space: pre-wrap; font-size: 12px; }
 .goal-export { display: inline-block; margin-top: 12px; color: var(--accent); font-size: 11px; text-decoration: none; }
+.writing-turn-form { display: block; margin-top: 14px; }
+.writing-turn-form > span { color: var(--text-muted); font-size: 11px; }
+.writing-turn-form textarea { box-sizing: border-box; width: 100%; margin-top: 7px; padding: 12px 14px; resize: vertical; border: 1px solid var(--border); border-radius: 13px; outline: none; color: var(--text); background: color-mix(in srgb, var(--bg-card) 82%, transparent); font: inherit; font-size: 12px; line-height: 1.6; }
+.writing-turn-form textarea:focus { border-color: var(--accent); }
+.writing-actions { margin-top: 6px; }
+.story-turns { margin-top: 14px; display: grid; gap: 10px; }
+.story-turns article { padding: 11px 14px; border: 1px solid var(--border); border-radius: 13px; background: color-mix(in srgb, var(--bg-card) 84%, transparent); }
+.story-turns article.user { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.story-turns article > span { color: var(--accent); font-size: 9px; letter-spacing: .12em; }
+.story-turns article p { margin: 5px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.8; }
+.fiction-note { margin-top: 14px; color: var(--text-faint); font-size: 10px; line-height: 1.6; }
 .activity-mask { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgba(8,10,16,.64); backdrop-filter: blur(6px); }
 .activity-panel { width: min(720px, 97vw); height: 100%; padding: 26px 28px; overflow: hidden; display: flex; flex-direction: column; color: var(--text); background: radial-gradient(circle at 82% 3%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 34%), linear-gradient(155deg, var(--bg-card), var(--bg-main)); border-left: 1px solid var(--border); box-shadow: -24px 0 65px rgba(0,0,0,.3); }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-shrink: 0; }
