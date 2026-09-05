@@ -272,7 +272,16 @@
 
 ## 迭代记录
 
-### M3.2 · 专注陪伴（已完成，2026-09-05，Kimi 执行）
+### M3.3 · 共同目标（已完成，2026-09-06，Codex 执行）
+
+- 持久化与生命周期：schema v7 新增 `activity_goals` / `goal_progress`，复用 `activities(kind='goal')`；目标可开始、暂停、恢复、完成、取消，状态与聊天解耦，重启后可继续。
+- 真实过程：保存目标动机、眼前最小一步和逐条实际进展（日期、可选百分比、新下一步）；聊天仅在目标/计划相关语境注入，禁止虚构未记录进展和绩效评价。
+- 克制陪伴：companion 模式只在用户提起时陪做；reminder 模式到点只挂一条 `goal_checkin` 心事，表达继续走 Narrative Planner 与既有主动额度/冷却/勿扰链路，同一目标不连续催促，完成/取消后提醒作废。
+- 完成留痕：幂等记录 `goal_completed` 关系事件；用户可选择生成或不生成 `goal_review` 过程回顾，生成内容只汇总真实进展，并进入「我们的角落」；任意目标支持 Markdown 导出。
+- 前端：ActivityPanel 新增共同目标创建、陪伴方式选择、进展时间线、暂停/继续/完成/放下、回顾选择与导出入口；CornerPanel 识别目标回顾。
+- 验证：`tests/test_goals.py` 覆盖状态机、真实进展、语境门控、单次提醒、完成事件、可选 artifact 与导出；后端聚合 **52/52**、前端 Vitest **34/34**、`vue-tsc` + 生产构建、Playwright 关键路径 **5/5** 全绿。
+
+### M3.2 · 专注陪伴（已完成，2026-09-05，Codex 执行）
 
 - 状态机：复用 activities 表（kind='focus'，document_id=0 哨兵，schema v6 补 planned_minutes/remaining_seconds/ends_at），不新建生命周期表，reset/备份/迁移清单自动覆盖；active ↔ paused → completed / cancelled 全迁移与非法迁移拒绝。
 - 安静模式：专注进行中主动引擎三处仲裁点静默（_eligible_users / _tick_once 归档·约定·心事块 / poll_message_for）；前端 body.focus-mode 减少动画，头部计时徽章，ActivityPanel 新增「专注陪伴」区（25/50 分钟开始、倒计时、暂停/继续/结束/中断）。

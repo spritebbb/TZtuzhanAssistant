@@ -23,6 +23,7 @@ EVENT_TYPES: dict[str, str] = {
     "important_date": "一个特殊日子到来了（来源：important_dates）",
     "memory_corrected": "用户改写或确认了一条记忆（来源：facts）",
     "focus_finished": "一段专注陪伴完成（来源：activities）",
+    "goal_completed": "一个共同目标完成（来源：activities）",
 }
 
 _MAX_PAYLOAD_EVENTS = 2
@@ -30,6 +31,7 @@ _EVENT_HORIZON_DAYS = 60
 _DATE_EVENT_EXPIRY_DAYS = 7
 
 _PROMISE_CUE_RE = re.compile(r"约定|答应|说好|讲好|承诺|说定|上周说|上次说|上次聊|后来那件事")
+_GOAL_CUE_RE = re.compile(r"目标|计划|进展|做到|完成|下一步|坚持|一起做")
 
 
 class RelationshipEventError(ValueError):
@@ -246,8 +248,9 @@ def event_recall(user_id: str, query: str) -> dict:
     if not query:
         return empty
     promise_hit = bool(_PROMISE_CUE_RE.search(query))
+    goal_hit = bool(_GOAL_CUE_RE.search(query))
     date_events = active_events(user_id, event_type="important_date", limit=_MAX_PAYLOAD_EVENTS)
-    if not promise_hit and not date_events:
+    if not promise_hit and not goal_hit and not date_events:
         return empty
 
     lines: list[str] = []
@@ -259,6 +262,13 @@ def event_recall(user_id: str, query: str) -> dict:
             if content:
                 lines.append(f"- 你们完成过约定「{content}」（{event['occurred_at'][:10]}）")
                 sources.append(f"约定事件：{content}")
+    if goal_hit:
+        for event in active_events(user_id, event_type="goal_completed",
+                                   limit=_MAX_PAYLOAD_EVENTS, within_days=_EVENT_HORIZON_DAYS):
+            title = event["payload"].get("title") or event["object"]
+            if title:
+                lines.append(f"- 你们完成过共同目标「{title}」（{event['occurred_at'][:10]}）")
+                sources.append(f"共同目标事件：{title}")
     # 日期事件：通用日期词或直接点名某个日子，才算相关语境
     for event in date_events:
         label = event["payload"].get("label") or event["object"]

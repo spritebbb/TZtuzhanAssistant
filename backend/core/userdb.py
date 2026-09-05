@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -262,6 +262,30 @@ CREATE TABLE IF NOT EXISTS activity_viewpoints (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_viewpoints_activity
     ON activity_viewpoints(user_id, activity_id);
+-- M3.3 共同目标：活动壳负责生命周期，目标表保存动机、下一步与陪伴偏好。
+CREATE TABLE IF NOT EXISTS activity_goals (
+    activity_id  INTEGER PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    motivation   TEXT NOT NULL DEFAULT '',
+    next_step    TEXT NOT NULL DEFAULT '',
+    support_mode TEXT NOT NULL DEFAULT 'companion', -- companion / reminder
+    reminder_at  TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS goal_progress (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    percent     INTEGER,
+    next_step   TEXT NOT NULL DEFAULT '',
+    ts          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_goals_user
+    ON activity_goals(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_goal_progress_activity
+    ON goal_progress(user_id, activity_id, ts);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -569,6 +593,7 @@ class UserDB:
             "messages", "long_memory", "facts", "affection_log", "important_dates",
             "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
             "promises", "usage_log", "kb_documents", "kb_chunks", "activities", "activity_notes",
+            "activity_goals", "goal_progress",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -1301,7 +1326,7 @@ class UserDB:
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
-                "activity_viewpoints", "relationship_events", "artifacts",
+                "activity_viewpoints", "activity_goals", "goal_progress", "relationship_events", "artifacts",
                 "pending_thoughts",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
