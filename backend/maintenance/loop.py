@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import sqlite3
 import time
@@ -18,6 +19,7 @@ from ..core.log import logger
 _DATA = config.data_dir
 _SESSIONS_DB = _DATA / "sessions.db"
 _BOT_DB = _DATA / "bot.db"
+_AGENT_DB = _DATA / "agent_tasks.db"
 _IMGS = _DATA / "imgs"
 _SCREENSHOTS = _DATA / "screenshots"
 _BACKUPS = _DATA / "backups"
@@ -53,19 +55,19 @@ def _checkpoint_one(path: Path) -> None:
 
 
 def checkpoint_all() -> None:
-    for p in (_BOT_DB, _SESSIONS_DB):
+    for p in (_BOT_DB, _SESSIONS_DB, _AGENT_DB):
         if p.exists():
             _checkpoint_one(p)
 
 
 def backup() -> Path | None:
-    """快照 db + imgs 到 backups/<时间戳>/，并清理超龄备份。"""
+    """快照全部运行库 + imgs 到 backups/<时间戳>/，并清理超龄备份。"""
     try:
         _BACKUPS.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         dest = _BACKUPS / stamp
         dest.mkdir(parents=True, exist_ok=True)
-        for name in ("bot.db", "sessions.db"):
+        for name in ("bot.db", "sessions.db", "agent_tasks.db"):
             src = _DATA / name
             if src.exists():
                 # 用 SQLite 在线备份 API 替代直接拷贝：WAL 模式下能拿到
@@ -75,7 +77,12 @@ def backup() -> Path | None:
             shutil.copytree(_IMGS, dest / "imgs", dirs_exist_ok=True)
         if _SCREENSHOTS.exists():
             shutil.copytree(_SCREENSHOTS, dest / "screenshots", dirs_exist_ok=True)
-        snaps = sorted(p for p in _BACKUPS.iterdir() if p.is_dir())
+        # Schema-upgrade snapshots live beside periodic snapshots but must not be
+        # consumed by the seven-periodic-backup rotation window.
+        snaps = sorted(
+            p for p in _BACKUPS.iterdir()
+            if p.is_dir() and re.fullmatch(r"\d{8}-\d{6}", p.name)
+        )
         for old in snaps[:-BACKUP_KEEP]:
             shutil.rmtree(old, ignore_errors=True)
         logger.info(f"[维护] 备份完成: {dest.name}（共 {len(snaps)} 份，保留最近 {BACKUP_KEEP} 份）")
