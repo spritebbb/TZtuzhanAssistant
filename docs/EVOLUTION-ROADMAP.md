@@ -272,6 +272,17 @@
 
 ## 迭代记录
 
+### M3.2 · 专注陪伴（已完成，2026-09-05，Kimi 执行）
+
+- 状态机：复用 activities 表（kind='focus'，document_id=0 哨兵，schema v6 补 planned_minutes/remaining_seconds/ends_at），不新建生命周期表，reset/备份/迁移清单自动覆盖；active ↔ paused → completed / cancelled 全迁移与非法迁移拒绝。
+- 安静模式：专注进行中主动引擎三处仲裁点静默（_eligible_users / _tick_once 归档·约定·心事块 / poll_message_for）；前端 body.focus-mode 减少动画，头部计时徽章，ActivityPanel 新增「专注陪伴」区（25/50 分钟开始、倒计时、暂停/继续/结束/中断）。
+- 惰性到点结算：不依赖后台定时器，任意读取发现 ends_at 超时即自动完成并幂等记录 focus_finished 事件（EVENT_TYPES 注册第五类）；重启应用后按持久化 ends_at 继续，活动状态与聊天解耦。
+- 简短复盘（不绩效评判）：自然到点或实际专注 ≥5 分钟的手动结束 → 异步 LLM 一句收尾（明确禁止评价/打分/统计），走既有 enqueue_proactive 投递（SSE + 落库），不占每日主动额度；秒开秒关与中断取消不触发。
+- 互斥修正：activities 的「暂停所有活动」改为统一 pause_all_active_locked——共读/专注互相抢场时，focus 行先结算冻结剩余时间，恢复不按旧 ends_at 少算。
+- 复盘资格与计时结算两处 bug 在自测中修复（进行中 remaining 列不更新，完成时必须按 ends_at 实算剩余，否则 elapsed 错算导致复盘资格误判）。
+- 验证：新增 `tests/test_focus.py` 5 组确定性回归（状态机/互斥/惰性到点+静默/复盘资格/语境门控）；`tests/test_schema_backup.py` 契约随 v6 更新；前端 Vitest 32/32（新增 focusMode 4 例）、vue-tsc + 生产构建通过。
+- 配置：`FOCUS_ENABLED`（默认开，feature flag）；`.env.example` 同步。
+
 ### M6.1+M6.2 · 我们的角落与情绪声线（已完成，2026-09-05，GLM 执行）
 
 - 共同空间（低成本 CSS/2D 原型）：新增 `GET /api/artifacts` 与 CornerPanel「我们的角落」面板（主工具栏入口、Escape 关闭）——只陈列真实 artifact（首批：共读共同书摘，含版本徽章），空态如实说明"还空着"，不凭空生成共同历史；删源文档物件随源消失。

@@ -347,3 +347,11 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* M3.2 专注陪伴：安静模式——进行中减少动画与视觉刺激（与减动效同口径，保留过渡以保证可操作性） */
+body.focus-mode *,
+body.focus-mode *::before,
+body.focus-mode *::after {
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+}

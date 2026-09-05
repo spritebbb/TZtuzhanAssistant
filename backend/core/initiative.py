@@ -115,6 +115,14 @@ def _eligible_users() -> list[dict]:
         # 今天已经主动过 → 跳过
         if _proactive_done_today(uid):
             continue
+        # 专注陪伴进行中 → 静默（M3.2：安静模式不主动打扰）
+        try:
+            from .focus import focus_in_progress
+
+            if focus_in_progress(uid):
+                continue
+        except Exception:
+            pass
         # 没聊过或最近在聊 → 跳过（不骚扰正在聊天的人）
         last = _last_chat_ts(uid)
         if last is not None and now - last < config.proactive_idle_hours * 3600:
@@ -282,7 +290,9 @@ async def _tick_once() -> int:
         from .persona_profiles import active_user_id
 
         uid = active_user_id()
-        if db.get_user(uid):
+        from .focus import focus_in_progress
+
+        if db.get_user(uid) and not focus_in_progress(uid):
             await maybe_suggest_archive(uid)
             await maybe_follow_up_promise(uid)
             await maybe_express_pending_thoughts(uid)
@@ -506,6 +516,14 @@ async def poll_message_for(user_id: str) -> ProactiveMessage | None:
     # 今天已主动过
     if _proactive_done_today(user_id):
         return None
+    # 专注陪伴进行中 → 静默（M3.2）
+    try:
+        from .focus import focus_in_progress
+
+        if focus_in_progress(user_id):
+            return None
+    except Exception:
+        pass
     # 最近在聊则不打扰
     last = _last_chat_ts(user_id)
     if last is not None and time.time() - last < config.proactive_idle_hours * 3600:

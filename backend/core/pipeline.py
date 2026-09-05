@@ -735,6 +735,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 共读上下文读取失败，按无活动继续")
 
+    # 3.0.1b) M3.2 专注陪伴：只在用户明显谈到专注/计时时注入当前专注状态，
+    # 普通闲聊零注入；进行中的专注要求她回复简短安静。
+    focus_ctx = ""
+    try:
+        from .focus import focus_context
+
+        focus_ctx = await asyncio.to_thread(focus_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 专注上下文读取失败，按无活动继续")
+
     # 3.0.2) M2 关系事件回忆：只回忆「真实发生过」的约定/特殊日子，
     # 语境门控在 relationship_events.event_recall 内部，无关话题返回空。
     event_recall_result: dict = {"context": "", "sources": []}
@@ -1105,6 +1115,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": reading_context,
+            }
+        )
+
+    # M3.2 专注陪伴：语境门控在 focus.focus_context 内部，无关话题为空。
+    if focus_ctx:
+        messages.append(
+            {
+                "role": "system",
+                "content": focus_ctx,
             }
         )
 
