@@ -6,6 +6,7 @@ import {
   listReadingActivities,
   resumeReading,
   saveReadingNote,
+  saveReadingViewpoint,
   setReadingPosition,
   startReading,
   type ReadingActivity,
@@ -18,6 +19,7 @@ vi.mock('../../api/activities', () => ({
   listReadingActivities: vi.fn(),
   resumeReading: vi.fn(),
   saveReadingNote: vi.fn(),
+  saveReadingViewpoint: vi.fn(),
   setReadingPosition: vi.fn(),
   startReading: vi.fn(),
 }))
@@ -29,6 +31,7 @@ const mockedStart = vi.mocked(startReading)
 const mockedResume = vi.mocked(resumeReading)
 const mockedPosition = vi.mocked(setReadingPosition)
 const mockedNote = vi.mocked(saveReadingNote)
+const mockedViewpoint = vi.mocked(saveReadingViewpoint)
 const mockedComplete = vi.mocked(completeReading)
 
 function activity(overrides: Partial<ReadingActivity> = {}): ReadingActivity {
@@ -50,6 +53,8 @@ function activity(overrides: Partial<ReadingActivity> = {}): ReadingActivity {
     excerpt: '第一段讲菟丝子的生长。',
     note: '',
     note_count: 0,
+    viewpoints: [],
+    summary: '',
     ...overrides,
   }
 }
@@ -74,7 +79,10 @@ describe('ActivityPanel', () => {
       excerpt: '第二段讲它如何寻找宿主。',
     }))
     mockedNote.mockImplementation(async (_id, content) => activity({ note: content, note_count: content ? 1 : 0 }))
-    mockedComplete.mockResolvedValue(activity({ status: 'completed', completed_at: '2026-09-04T13:00:00' }))
+    mockedViewpoint.mockImplementation(async (_id, role, content) => activity({
+      viewpoints: [{ role, position: 0, content, ts: '2026-09-04T12:00:00' }],
+    }))
+    mockedComplete.mockResolvedValue(activity({ status: 'completed', completed_at: '2026-09-04T13:00:00', summary: '《藤本植物.txt》读完时留下的东西：' }))
   })
 
   it('starts a reading activity from a bookshelf document', async () => {
@@ -96,8 +104,8 @@ describe('ActivityPanel', () => {
     const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
     await flushPromises()
 
-    await wrapper.get('textarea').setValue('这里像是一种主动的寻找')
-    await wrapper.get('.secondary').trigger('click')
+    await wrapper.get('.note-box textarea').setValue('这里像是一种主动的寻找')
+    await wrapper.get('.notice-line .secondary').trigger('click')
     await flushPromises()
     expect(mockedNote).toHaveBeenCalledWith(8, '这里像是一种主动的寻找')
 
@@ -110,5 +118,36 @@ describe('ActivityPanel', () => {
     await wrapper.get('.talk').trigger('click')
     await flushPromises()
     expect(wrapper.emitted('discuss')?.[0]?.[0]).toContain('我们继续共读《藤本植物.txt》')
+  })
+
+  it('saves role-labeled viewpoints per segment', async () => {
+    mockedList.mockResolvedValue([activity()])
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const boxes = wrapper.findAll('.viewpoints textarea')
+    expect(boxes.length).toBe(3)
+    await boxes[0].setValue('我觉得菟丝子是在装弱')
+    await wrapper.get('.viewpoints .secondary').trigger('click')
+    await flushPromises()
+
+    expect(mockedViewpoint).toHaveBeenCalledWith(8, 'user', '我觉得菟丝子是在装弱')
+  })
+
+  it('shows the shared book summary from the finished list', async () => {
+    mockedList.mockResolvedValue([activity({
+      status: 'completed',
+      completed_at: '2026-09-04T13:00:00',
+      summary: '《藤本植物.txt》读完时留下的东西：\n- 第 1 段的书签：这里像是一种主动的寻找',
+    })])
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('有书摘')
+    await wrapper.get('.history-row').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('共同书摘')
+    expect(wrapper.text()).toContain('这里像是一种主动的寻找')
   })
 })

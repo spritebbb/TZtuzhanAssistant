@@ -64,7 +64,7 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        versions = {"bot.db": 3, "sessions.db": 1, "agent_tasks.db": 1}
+        versions = {"bot.db": 4, "sessions.db": 1, "agent_tasks.db": 1}
         for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")
@@ -89,6 +89,13 @@ def main() -> None:
                     "expires_at", "pinned", "surface_policy",
                     "status", "conflicts_with_fact_id",
                 } <= fact_columns
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                assert {"activity_viewpoints", "relationship_events", "artifacts"} <= tables
             conn.close()
             matches = list((runtime / "backups").glob(
                 f"schema-{Path(name).stem}-v0-to-v{expected_version}-*/{name}"

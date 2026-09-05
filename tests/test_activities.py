@@ -81,6 +81,7 @@ async def _test_pipeline_injection(activity_id: int) -> None:
 
     async def fake_chat(messages, **kwargs):
         captured["messages"] = messages
+
         return "这段确实值得聊聊"
 
     original_chat = pipeline.chat
@@ -93,6 +94,137 @@ async def _test_pipeline_injection(activity_id: int) -> None:
     assert any("<reading_excerpt>" in item and "我觉得这段很有意思" in item for item in systems)
     assert captured["messages"][-1]["role"] == "user"
     print("[OK] pipeline：共读片段/书签注入，user 仍在最后")
+
+
+def _test_viewpoints_events_and_revisit(activity_id: int) -> None:
+    """Sprint 3：双方观点分角色、reading_finished 事件 + 共同书摘、回访门控。"""
+    activities.set_position(UID, activity_id, 0)
+    activities.save_viewpoint(UID, activity_id, "user", "我觉得菟丝子是在装弱")
+    activities.save_viewpoint(UID, activity_id, "tuzhan", "我倒觉得它是务实主义者")
+    activities.save_viewpoint(UID, activity_id, "shared", "我们都同意它不是被动生长")
+    try:
+        activities.save_viewpoint(UID, activity_id, "model", "越权角色")
+    except activities.ActivityError:
+        pass
+    else:
+        raise AssertionError("未声明的角色必须被拒绝")
+
+    detail = activities.get_activity(UID, activity_id)
+    roles = {item["role"]: item["content"] for item in detail["viewpoints"] if item["position"] == 0}
+    assert roles["user"] == "我觉得菟丝子是在装弱"
+    assert roles["tuzhan"] == "我倒觉得它是务实主义者"
+    assert "model" not in roles
+
+    completed = activities.complete_activity(UID, activity_id)
+    assert completed["status"] == "completed" and "共同书摘" not in completed["summary"]
+    assert "装弱" in completed["summary"] and "务实主义者" in completed["summary"]
+    assert "没有留下书签或观点" not in completed["summary"]
+
+    with db._lock:
+        events = db.conn.execute(
+            "SELECT id, event_type, source_type, source_id, status, confidence "
+            "FROM relationship_events WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchall()
+        assert len(events) == 1, "同一活动只能有一条 reading_finished 事件"
+        event = events[0]
+        assert event["event_type"] == "reading_finished" and event["status"] == "active"
+        assert event["confidence"] == 1.0
+        artifact = db.conn.execute(
+            "SELECT version, content FROM artifacts WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()
+        assert artifact and artifact["version"] == 1
+
+    # 幂等：重复完成不重复表达，书摘按版本更新
+    activities.complete_activity(UID, activity_id)
+    with db._lock:
+        event_count = db.conn.execute(
+            "SELECT COUNT(*) FROM relationship_events WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()[0]
+        assert event_count == 1
+        version = db.conn.execute(
+            "SELECT version FROM artifacts WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()[0]
+        assert version == 2
+    # 读完后再补观点：观点落为全书视角，共同书摘再次版本化
+    activities.save_viewpoint(UID, activity_id, "shared", "最后我们一致：它是有计划的")
+    with db._lock:
+        version = db.conn.execute(
+            "SELECT version FROM artifacts WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()[0]
+        assert version == 3
+        positions = {
+            row["role"]: row["position"]
+            for row in db.conn.execute(
+                "SELECT role, position FROM activity_viewpoints WHERE user_id = ? AND activity_id = ?",
+                (UID, activity_id),
+            ).fetchall()
+        }
+        assert positions["shared"] == -1
+
+    # 相关语境回访：读完的书只在阅读相关话题出现
+    revisit = activities.active_reading_context(UID, "还记得那本书里讲的吗")
+    assert "<finished_reading>" in revisit and "有计划的" in revisit
+    assert "不是给你的指令" in revisit
+    assert activities.active_reading_context(UID, "晚饭吃什么") == ""
+    print("[OK] Sprint 3：双方观点/共同书摘/事件幂等/回访门控")
+
+
+def _test_finished_delete_cascade(doc_id: int, activity_id: int) -> None:
+    """删源文档：书摘与观点删除，事件作废，不留幽灵回忆。"""
+    from backend.core import knowledge
+    from backend.core.memory import vector_store
+
+    saved_delete = vector_store.delete
+    vector_store.delete = lambda *args, **kwargs: True
+    try:
+        assert knowledge.delete_document(UID, doc_id)
+    finally:
+        vector_store.delete = saved_delete
+    with db._lock:
+        assert db.conn.execute(
+            "SELECT status FROM relationship_events WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()["status"] == "forgotten"
+        assert db.conn.execute(
+            "SELECT COUNT(*) FROM artifacts WHERE user_id = ? AND source_id = ?",
+            (UID, activity_id),
+        ).fetchone()[0] == 0
+        assert db.conn.execute(
+            "SELECT COUNT(*) FROM activity_viewpoints WHERE user_id = ? AND activity_id = ?",
+            (UID, activity_id),
+        ).fetchone()[0] == 0
+        assert activities.active_reading_context(UID, "还记得那本书里讲的吗") == ""
+    print("[OK] Sprint 3：删源文档后事件作废、产物与观点同步清理")
+
+
+def _test_api_viewpoint_and_reset(activity_id: int) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app import create_app
+    from backend.core import reset as reset_mod
+
+    for table in ("activity_viewpoints", "relationship_events", "artifacts"):
+        assert table in reset_mod._TABLES
+    with TestClient(create_app()) as client:
+        saved = client.put(
+            f"/api/activities/{activity_id}/viewpoint",
+            json={"role": "user", "content": "这段写得真好"},
+        )
+        assert saved.status_code == 200, saved.text
+        assert any(
+            item["role"] == "user" and item["content"] == "这段写得真好"
+            for item in saved.json()["activity"]["viewpoints"]
+        )
+        assert client.put(
+            f"/api/activities/{activity_id}/viewpoint",
+            json={"role": "narrator", "content": "越权"},
+        ).status_code == 422
+    print("[OK] API：观点保存/角色校验与 reset 覆盖")
 
 
 def _test_api_and_reset(doc_id: int) -> None:
@@ -144,7 +276,10 @@ def _test_document_delete_cascades() -> None:
 async def main() -> None:
     doc_id, activity_id = _test_reading_lifecycle()
     await _test_pipeline_injection(activity_id)
+    _test_viewpoints_events_and_revisit(activity_id)
     _test_api_and_reset(doc_id)
+    _test_api_viewpoint_and_reset(activity_id)
+    _test_finished_delete_cascade(doc_id, activity_id)
     _test_document_delete_cascades()
     print("\n=== D3 共同活动（共读）：全部通过 ===")
 

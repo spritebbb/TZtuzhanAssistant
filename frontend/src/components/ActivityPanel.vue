@@ -5,9 +5,11 @@ import {
   listReadingActivities,
   resumeReading,
   saveReadingNote,
+  saveReadingViewpoint,
   setReadingPosition,
   startReading,
   type ReadingActivity,
+  type ViewpointRole,
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
 
@@ -22,13 +24,46 @@ const activities = ref<ReadingActivity[]>([])
 const documents = ref<KnowledgeDocument[]>([])
 const current = ref<ReadingActivity | null>(null)
 const noteDraft = ref('')
+const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 
+const viewpointRoles = computed(() => [
+  { role: 'user' as const, label: '我的看法', placeholder: '这一段你自己怎么看，记下来就是你的' },
+  { role: 'tuzhan' as const, label: `${props.personaName || '她'}的看法`, placeholder: '她刚才聊到的角度，用她的话记一句' },
+  { role: 'shared' as const, label: '共同结论', placeholder: '你们都点头的那一句' },
+])
+
 const unfinished = computed(() => activities.value.filter(item => item.status !== 'completed'))
 const completed = computed(() => activities.value.filter(item => item.status === 'completed').slice(0, 4))
+
+function serverViewpoint(role: ViewpointRole): string {
+  if (!current.value) return ''
+  const position = current.value.status === 'completed' ? -1 : current.value.position
+  const viewpoints = current.value.viewpoints ?? []
+  return (
+    viewpoints.find(
+      item => item.role === role && item.position === position,
+    )?.content ?? ''
+  )
+}
+
+function syncViewpointDrafts() {
+  for (const role of ['user', 'tuzhan', 'shared'] as ViewpointRole[]) {
+    viewpointDrafts.value[role] = serverViewpoint(role)
+  }
+}
+
+watch(
+  () => [
+    current.value?.id,
+    current.value && current.value.status !== 'completed' ? current.value.position : -1,
+  ],
+  () => syncViewpointDrafts(),
+  { immediate: true },
+)
 
 function applyCurrent(value: ReadingActivity) {
   current.value = value
@@ -92,6 +127,29 @@ function saveNote() {
   void run(() => saveReadingNote(current.value!.id, noteDraft.value), '这张书签夹好了')
 }
 
+async function saveViewpoints() {
+  if (!current.value || busy.value) return
+  const id = current.value.id
+  const changed = viewpointRoles.value.filter(
+    vp => viewpointDrafts.value[vp.role].trim() !== serverViewpoint(vp.role),
+  )
+  if (!changed.length) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    for (const vp of changed) {
+      current.value = await saveReadingViewpoint(id, vp.role, viewpointDrafts.value[vp.role])
+    }
+    activities.value = [current.value, ...activities.value.filter(item => item.id !== id)]
+    notice.value = '这段的看法记下了'
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
+  } finally {
+    busy.value = false
+  }
+}
+
 async function discuss() {
   if (!current.value || busy.value) return
   if (noteDraft.value.trim() !== current.value.note) {
@@ -99,9 +157,11 @@ async function discuss() {
     if (error.value) return
   }
   const item = current.value
+  const myTake = viewpointDrafts.value.user.trim()
+  const intro = myTake ? `我的看法是：${myTake}。` : ''
   emit(
     'discuss',
-    `我们继续共读《${item.filename}》吧。现在这一段，你怎么看？`,
+    `我们继续共读《${item.filename}》吧。${intro}现在这一段，你怎么看？`,
   )
 }
 
@@ -164,6 +224,18 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
               <span>这一段的书签</span>
               <textarea v-model="noteDraft" rows="3" maxlength="2000" placeholder="写下一句想法，下次回来还在这里"></textarea>
             </label>
+
+            <div class="viewpoints">
+              <span class="vp-title">这一段，各自的看法</span>
+              <label v-for="vp in viewpointRoles" :key="vp.role">
+                <span>{{ vp.label }}</span>
+                <textarea
+                  v-model="viewpointDrafts[vp.role]"
+                  rows="2" maxlength="2000" :placeholder="vp.placeholder"
+                ></textarea>
+              </label>
+              <button class="secondary" :disabled="busy" @click="saveViewpoints">记下我们的看法</button>
+            </div>
             <div class="notice-line">
               <span :class="{ error: !!error }">{{ error || notice }}</span>
               <button class="secondary" :disabled="busy" @click="saveNote">收进书签</button>
@@ -179,6 +251,10 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             <div><strong>一起读到了最后</strong><p>{{ notice || '这些书签会留在这里' }}</p></div>
             <button @click="begin(current.document_id)">再读一遍</button>
           </div>
+          <article v-if="current.summary" class="summary-box">
+            <span>共同书摘</span>
+            <p>{{ current.summary }}</p>
+          </article>
         </template>
 
         <template v-else>
@@ -208,8 +284,10 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 
           <section v-if="completed.length" class="shelf-section history">
             <div class="section-title"><span>FINISHED</span><h3>一起读过</h3></div>
-            <div v-for="item in completed" :key="item.id" class="history-row">
-              <span>✓</span><strong>{{ item.filename }}</strong><small>{{ item.note_count }} 张书签</small>
+            <div class="activity-list">
+              <button v-for="item in completed" :key="item.id" class="history-row" :title="item.summary ? '回看共同书摘' : '已读完'" @click="current = item">
+                <span>✓</span><strong>{{ item.filename }}</strong><small>{{ item.summary ? '有书摘 · ' : '' }}{{ item.note_count }} 张书签</small>
+              </button>
             </div>
           </section>
         </template>
@@ -258,10 +336,20 @@ header p, .reading-head p { margin: 0; color: var(--text-muted); font-size: 12px
 .completed-card div { flex: 1; }
 .completed-card p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; }
 .completed-card button { border: 0; color: var(--accent); background: transparent; cursor: pointer; }
+.viewpoints { margin-top: 17px; padding: 13px; display: grid; gap: 9px; border: 1px dashed var(--border); border-radius: 14px; }
+.vp-title { color: var(--text-muted); font-size: 11px; }
+.viewpoints label { display: grid; gap: 5px; }
+.viewpoints label > span { color: var(--text-faint); font-size: 10px; }
+.viewpoints textarea { box-sizing: border-box; width: 100%; padding: 9px 12px; resize: vertical; border: 1px solid var(--border); border-radius: 11px; outline: none; color: var(--text); background: color-mix(in srgb, var(--bg-card) 82%, transparent); font: inherit; font-size: 12px; line-height: 1.6; }
+.viewpoints textarea:focus { border-color: var(--accent); }
+.viewpoints .secondary { justify-self: end; }
+.summary-box { margin-top: 14px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--bg-card) 86%, transparent); }
+.summary-box > span { color: var(--accent); font-size: 10px; letter-spacing: .14em; }
+.summary-box p { margin: 8px 0 0; white-space: pre-wrap; color: var(--text); font-size: 12px; line-height: 1.8; }
 .shelf-section { margin-bottom: 22px; }
 .section-title h3 { margin: 3px 0 10px; font-size: 15px; font-weight: 550; }
 .activity-list { display: grid; gap: 7px; }
-.activity-list button { padding: 11px 13px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--border); border-radius: 13px; color: var(--text); background: color-mix(in srgb, var(--bg-card) 84%, transparent); text-align: left; cursor: pointer; }
+.activity-list button, .history-row { padding: 11px 13px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--border); border-radius: 13px; color: var(--text); background: color-mix(in srgb, var(--bg-card) 84%, transparent); text-align: left; cursor: pointer; width: 100%; }
 .activity-list .format { width: 36px; padding: 4px 0; flex-shrink: 0; border-radius: 7px; color: var(--accent); background: var(--bg-hover); text-align: center; font-size: 9px; text-transform: uppercase; }
 .activity-list button > span:nth-child(2) { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .activity-list strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 500; }
@@ -273,7 +361,8 @@ header p, .reading-head p { margin: 0; color: var(--text-muted); font-size: 12px
 .document-grid strong { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 550; }
 .document-grid small { color: var(--text-muted); font-size: 10px; }
 .open-bookshelf { display: block; margin: 0 auto; border: 0; border-radius: 11px; padding: 9px 15px; color: var(--bg-main); background: var(--accent); cursor: pointer; }
-.history-row { padding: 7px 2px; display: flex; align-items: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
+.history-row { padding: 7px 11px; margin-bottom: 6px; font-size: 11px; }
+.history-row:hover { border-color: var(--accent); }
 .history-row > span { color: #74b997; }
 .history-row strong { flex: 1; color: var(--text); font-weight: 500; }
 .empty { padding: 60px 0; color: var(--text-muted); text-align: center; }
