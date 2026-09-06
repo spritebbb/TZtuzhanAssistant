@@ -29,6 +29,7 @@ import {
   type SharedGoal,
 } from '../api/goals'
 import { exportFocusUrl } from '../api/focus'
+import ViewpointBlock from './ViewpointBlock.vue'
 import { useFocusMode } from '../utils/focusMode'
 import {
   addWritingTurn,
@@ -615,6 +616,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           </section>
           <article v-if="currentGoal.review" class="summary-box"><span>过程回顾</span><p>{{ currentGoal.review }}</p></article>
           <a class="goal-export" :href="exportGoalUrl(currentGoal.id)" download>导出 Markdown</a>
+          <ViewpointBlock :activity-id="currentGoal.id" :persona-name="personaName" />
         </template>
 
         <template v-else-if="currentWriting">
@@ -660,6 +662,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           <article v-if="currentWriting.story" class="summary-box"><span>共同故事</span><p>{{ currentWriting.story }}</p></article>
           <a class="goal-export" :href="exportWritingUrl(currentWriting.id)" download>导出 Markdown</a>
           <p class="fiction-note">这是一段你们共同虚构的创作；故事只留在故事里，不会变成你们现实记忆的一部分。</p>
+          <ViewpointBlock :activity-id="currentWriting.id" :persona-name="personaName" />
         </template>
 
         <template v-else-if="currentList">
@@ -708,6 +711,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 
           <article v-if="currentList.compiled" class="summary-box"><span>共同清单</span><p>{{ currentList.compiled }}</p></article>
           <a class="goal-export" :href="exportListUrl(currentList.id)" download>导出 Markdown</a>
+          <ViewpointBlock :activity-id="currentList.id" :persona-name="personaName" />
         </template>
 
         <template v-else-if="current">

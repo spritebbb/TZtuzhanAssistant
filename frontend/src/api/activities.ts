@@ -118,3 +118,48 @@ export async function proposeReadingQuestion(
 export function exportReadingUrl(activityId: number): string {
   return `/api/activities/${activityId}/export?format=md`
 }
+
+// ---- M8-B 全活动感想栏：任意活动壳类型的双方感想 ----
+
+export async function getActivityViewpoints(activityId: number): Promise<{
+  activity_id: number
+  kind: string
+  title: string
+  status: string
+  viewpoints: ActivityViewpoint[]
+}> {
+  const response = await apiFetch(`/api/activities/${activityId}/viewpoints`)
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '感想读取失败')
+  return {
+    activity_id: Number(data.activity_id),
+    kind: String(data.kind ?? ''),
+    title: String(data.title ?? ''),
+    status: String(data.status ?? ''),
+    viewpoints: Array.isArray(data.viewpoints) ? data.viewpoints : [],
+  }
+}
+
+export async function saveActivityViewpoint(
+  activityId: number,
+  role: ViewpointRole,
+  content: string,
+): Promise<ActivityViewpoint[]> {
+  const response = await apiFetch(`/api/activities/${activityId}/viewpoint`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, content }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '感想保存失败')
+  // 非共读活动返回观点集合；共读返回活动详情（含 viewpoints）
+  const viewpoints = data.viewpoints ?? data.activity?.viewpoints
+  return Array.isArray(viewpoints) ? viewpoints : []
+}
+
+export async function generateActivityViewpointDraft(activityId: number): Promise<string> {
+  const response = await apiFetch(`/api/activities/${activityId}/viewpoint-draft`, { method: 'POST' })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '草稿没有生成，稍后再试或代她写下这一段')
+  return String(data.draft ?? '')
+}
