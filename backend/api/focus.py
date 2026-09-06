@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from ..core import focus
@@ -106,3 +107,21 @@ async def api_cancel_focus(activity_id: int):
     except ActivityError as exc:
         return _error(exc, 404)
     return {"ok": True, "focus": detail}
+
+
+@router.get("/{activity_id}/export")
+async def api_export_focus(
+    activity_id: int,
+    format: str = Query("md", pattern="^md$"),
+):
+    try:
+        detail = await asyncio.to_thread(focus.get_focus, _active_user_id(), activity_id)
+        content = await asyncio.to_thread(focus.export_markdown, _active_user_id(), activity_id)
+    except ActivityError as exc:
+        return _error(exc, 404)
+    filename = quote(f"{detail['title'] if detail else '专注记录'}.md")
+    return Response(
+        content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )

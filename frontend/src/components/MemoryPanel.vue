@@ -9,6 +9,7 @@ import {
   resetInteractionStyle,
   resolveFactConflict,
   updateFact,
+  updateFactPinned,
   updateFactSurfacePolicy,
   type FactItem,
   type HerProfileSection,
@@ -208,6 +209,21 @@ async function toggleProactive(fact: FactItem) {
   }
 }
 
+async function togglePinned(fact: FactItem) {
+  const previous = fact.pinned
+  const next = previous ? 0 : 1
+  fact.pinned = next
+  busyId.value = fact.id
+  try {
+    await updateFactPinned(fact.id, Boolean(next))
+  } catch {
+    fact.pinned = previous
+    error.value = '固定设置失败，稍后再试'
+  } finally {
+    busyId.value = null
+  }
+}
+
 async function resolveConflict(fact: FactItem, action: 'accept_new' | 'keep_existing') {
   busyId.value = fact.id
   error.value = ''
@@ -322,17 +338,30 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle() } 
                 <span>{{ sourceLabel(fact) }}</span>
                 <span>置信度 {{ Math.round(fact.confidence * 100) }}%</span>
                 <time>{{ fact.verified_at ? `确认于 ${fact.verified_at.slice(0, 10)}` : fact.ts.slice(0, 10) }}</time>
+                <span v-if="fact.pinned">长期保留</span>
+                <span v-else-if="fact.expires_at">预计保留至 {{ fact.expires_at.slice(0, 10) }}</span>
               </div>
               <div class="meta">
-                <label class="surface-toggle">
-                  <input
-                    type="checkbox"
-                    :checked="fact.surface_policy === 'do_not_proactively_surface'"
-                    :disabled="busyId === fact.id"
-                    @change="toggleProactive(fact)"
-                  />
-                  不主动提起
-                </label>
+                <span class="fact-toggles">
+                  <label class="pin-toggle" title="固定后不会随时间自动淡忘">
+                    <input
+                      type="checkbox"
+                      :checked="Boolean(fact.pinned)"
+                      :disabled="busyId === fact.id"
+                      @change="togglePinned(fact)"
+                    />
+                    长期保留
+                  </label>
+                  <label class="surface-toggle">
+                    <input
+                      type="checkbox"
+                      :checked="fact.surface_policy === 'do_not_proactively_surface'"
+                      :disabled="busyId === fact.id"
+                      @change="toggleProactive(fact)"
+                    />
+                    不主动提起
+                  </label>
+                </span>
                 <span class="actions">
                   <button :disabled="busyId === fact.id" @click="startEdit(fact)">改写</button>
                   <button class="danger" :disabled="busyId === fact.id" @click="remove(fact.id)">忘掉</button>
@@ -371,8 +400,9 @@ article.conflict { border-color: color-mix(in srgb, var(--accent) 52%, var(--bor
 .meta { display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 12px; }
 .provenance { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: -2px 0 10px; color: var(--text-muted); font-size: 11px; }
 .provenance span:first-child { color: var(--accent); }
-.surface-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.surface-toggle input { accent-color: var(--accent); }
+.fact-toggles { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; }
+.surface-toggle, .pin-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.surface-toggle input, .pin-toggle input { accent-color: var(--accent); }
 .actions { display: flex; gap: 8px; }
 .actions button { padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: transparent; font-size: 12px; cursor: pointer; }
 .actions button:hover { border-color: var(--accent); }

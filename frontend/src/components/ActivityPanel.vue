@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
+  cancelReading,
   completeReading,
+  exportReadingUrl,
   listReadingActivities,
+  pauseReading,
+  proposeReadingQuestion,
   resumeReading,
   saveReadingNote,
   saveReadingViewpoint,
@@ -24,6 +28,7 @@ import {
   type GoalSupportMode,
   type SharedGoal,
 } from '../api/goals'
+import { exportFocusUrl } from '../api/focus'
 import { useFocusMode } from '../utils/focusMode'
 import {
   addWritingTurn,
@@ -111,8 +116,12 @@ const viewpointRoles = computed(() => [
   { role: 'shared' as const, label: '共同结论', placeholder: '你们都点头的那一句' },
 ])
 
-const unfinished = computed(() => activities.value.filter(item => item.status !== 'completed'))
-const completed = computed(() => activities.value.filter(item => item.status === 'completed').slice(0, 4))
+const unfinished = computed(() => activities.value.filter(
+  item => item.status === 'active' || item.status === 'paused',
+))
+const completed = computed(() => activities.value.filter(
+  item => item.status === 'completed' || item.status === 'cancelled',
+).slice(0, 4))
 const openGoals = computed(() => goals.value.filter(item => item.status === 'active' || item.status === 'paused'))
 const completedGoals = computed(() => goals.value.filter(item => item.status === 'completed').slice(0, 4))
 const openWritings = computed(() => writings.value.filter(item => item.status === 'active' || item.status === 'paused'))
@@ -332,16 +341,37 @@ async function discuss() {
   }
   const item = current.value
   const myTake = viewpointDrafts.value.user.trim()
-  const intro = myTake ? `我的看法是：${myTake}。` : ''
-  emit(
-    'discuss',
-    `我们继续共读《${item.filename}》吧。${intro}现在这一段，你怎么看？`,
-  )
+  busy.value = true
+  error.value = ''
+  try {
+    const question = await proposeReadingQuestion(item.id, myTake)
+    const answerLead = myTake ? `我的看法是：${myTake}` : '我的想法是：'
+    emit('discuss', `关于《${item.filename}》第 ${item.position + 1} 段，你问我：“${question}”\n${answerLead}`)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '这一段的问题暂时没想出来'
+  } finally {
+    busy.value = false
+  }
 }
 
 function finish() {
   if (!current.value) return
   void run(() => completeReading(current.value!.id), '这本书读完了，但话还没聊完')
+}
+
+function pauseCurrentReading() {
+  if (!current.value) return
+  void run(() => pauseReading(current.value!.id), '书签夹在这里，回来接着读')
+}
+
+function resumeCurrentReading() {
+  if (!current.value) return
+  void run(() => resumeReading(current.value!.id), '又回到上次停下的地方')
+}
+
+function cancelCurrentReading() {
+  if (!current.value) return
+  void run(() => cancelReading(current.value!.id), '这场共读已经放下，记录还留着')
 }
 
 function applyWriting(value: CoWriting) {
@@ -684,7 +714,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           <button class="back" @click="leaveCurrent">← 共读书架</button>
           <div class="reading-head">
             <div>
-              <span class="status" :class="current.status">{{ current.status === 'completed' ? '已读完' : '共读中' }}</span>
+              <span class="status" :class="current.status">{{ current.status === 'completed' ? '已读完' : current.status === 'paused' ? '已暂停' : current.status === 'cancelled' ? '已放下' : '共读中' }}</span>
               <h3>{{ current.filename }}</h3>
               <p>第 {{ current.position + 1 }} / {{ current.total }} 段 · 已留 {{ current.note_count }} 张书签</p>
             </div>
@@ -697,7 +727,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             <p>{{ current.excerpt || '这一段暂时没有可读文字' }}</p>
           </article>
 
-          <template v-if="current.status !== 'completed'">
+          <template v-if="current.status === 'active' || current.status === 'paused'">
             <div class="page-actions">
               <button :disabled="busy || current.position === 0" @click="move(-1)">上一段</button>
               <span>慢慢读，不赶进度</span>
@@ -726,19 +756,23 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
 
             <div class="primary-actions">
-              <button class="talk" :disabled="busy" @click="discuss">去和{{ props.personaName || '助手' }}聊这一段</button>
+              <button v-if="current.status === 'active'" class="talk" :disabled="busy" @click="discuss">让{{ props.personaName || '助手' }}问个具体问题</button>
+              <button v-if="current.status === 'active'" :disabled="busy" @click="pauseCurrentReading">暂停</button>
+              <button v-else :disabled="busy" @click="resumeCurrentReading">继续</button>
               <button class="finish" :disabled="busy" @click="finish">这本读完了</button>
+              <button class="plain-action" :disabled="busy" @click="cancelCurrentReading">放下这本</button>
             </div>
           </template>
           <div v-else class="completed-card">
             <span>✶</span>
-            <div><strong>一起读到了最后</strong><p>{{ notice || '这些书签会留在这里' }}</p></div>
+            <div><strong>{{ current.status === 'completed' ? '一起读到了最后' : '这场共读已经放下' }}</strong><p>{{ notice || '书签和双方看法仍会留在这里' }}</p></div>
             <button @click="begin(current.document_id)">再读一遍</button>
           </div>
           <article v-if="current.summary" class="summary-box">
             <span>共同书摘</span>
             <p>{{ current.summary }}</p>
           </article>
+          <a class="goal-export" :href="exportReadingUrl(current.id)" download>导出 Markdown</a>
         </template>
 
         <template v-else>
@@ -822,6 +856,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
                 <button :disabled="focusMode.busy.value" @click="focusMode.completeSession()">结束</button>
                 <button class="plain" :disabled="focusMode.busy.value" @click="focusMode.cancelSession()">中断</button>
               </div>
+              <a class="goal-export" :href="exportFocusUrl(focusMode.current.value.id)" download>导出计时记录</a>
             </div>
             <div v-else class="focus-card">
               <p class="focus-hint">定一段安静的时间，她陪你各做各的事，结束了她叫你</p>
@@ -857,10 +892,10 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           </section>
 
           <section v-if="completed.length" class="shelf-section history">
-            <div class="section-title"><span>FINISHED</span><h3>一起读过</h3></div>
+            <div class="section-title"><span>HISTORY</span><h3>一起读过</h3></div>
             <div class="activity-list">
-              <button v-for="item in completed" :key="item.id" class="history-row" :title="item.summary ? '回看共同书摘' : '已读完'" @click="current = item">
-                <span>✓</span><strong>{{ item.filename }}</strong><small>{{ item.summary ? '有书摘 · ' : '' }}{{ item.note_count }} 张书签</small>
+              <button v-for="item in completed" :key="item.id" class="history-row" :title="item.summary ? '回看共同书摘' : item.status === 'cancelled' ? '回看已放下的记录' : '已读完'" @click="current = item">
+                <span>{{ item.status === 'cancelled' ? '—' : '✓' }}</span><strong>{{ item.filename }}</strong><small>{{ item.status === 'cancelled' ? '已放下 · ' : item.summary ? '有书摘 · ' : '' }}{{ item.note_count }} 张书签</small>
               </button>
             </div>
           </section>

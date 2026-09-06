@@ -26,6 +26,9 @@ EVENT_TYPES: dict[str, str] = {
     "goal_completed": "一个共同目标完成（来源：activities）",
     "story_finished": "一个共同创作的故事收笔（来源：activities；payload 只含标题与轮数，不带虚构正文）",
     "list_completed": "一份共同清单（歌单/书单）收列完成（来源：activities）",
+    # 注意：故意不注册 future_letter_opened——事件 source→信、信的
+    # unlocked_by_event_id→事件会形成导出恢复不支持的跨表引用环；
+    # 拆信可追溯性由 future_letter artifact + opened_at 承担。
 }
 
 _MAX_PAYLOAD_EVENTS = 2

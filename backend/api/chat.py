@@ -45,11 +45,15 @@ async def api_chat(
     mock: bool = Form(False),
     image: str = Form(""),
     request_id: str = Form(""),
+    ephemeral: bool = Form(False),
 ):
     """SSE 流式对话：逐字推送 data: {"piece": "..."}，结束时发 {"done": "完整回复"}。
 
     单一会话模式：session_id 固定为 'current'。不传则自动使用固定会话；
     传了则校验是否为 'current'，其余 id 一律视为不存在。
+
+    ephemeral=true 或文本明确表达“陪我说完但别记住”时，本轮只通过 SSE 暂时展示，
+    不写 sessions、对话记忆、画像、日记或关系状态。
 
     可选 image：识图等场景下 user 消息附带的图片 URL（已落盘的 /api/images/...），
     会随 user 消息一起持久化，保证刷新/归档后仍能看到原图。
@@ -61,6 +65,9 @@ async def api_chat(
         return JSONResponse({"ok": False, "error": "消息过长"}, status_code=413)
     if len(image) > _MAX_IMAGE_REF_LENGTH:
         return JSONResponse({"ok": False, "error": "图片引用过长"}, status_code=413)
+    from ..core.privacy import is_ephemeral_request
+
+    ephemeral = is_ephemeral_request(text, explicit=ephemeral)
     from ..core.reset import ResetSuperseded, reset_epoch, reset_in_progress, user_write_guard
     if reset_in_progress():
         return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
@@ -74,21 +81,22 @@ async def api_chat(
     if msgs is None:
         return JSONResponse({"ok": False, "error": "会话不存在，请刷新页面"}, status_code=404)
 
-    # 记录用户消息（立即持久化；识图场景附带 image）
-    user_msg = {"role": "user", "content": text, "ts": time.time()}
-    if image:
-        user_msg["image"] = image
-    try:
-        async with user_write_guard(request_epoch):
-            saved = await append_messages(session_id, [user_msg])
-    except ResetSuperseded:
-        return JSONResponse({"ok": False, "error": "请求因重置而取消"}, status_code=409)
-    if not saved:
-        # 会话可能在校验后被删除：用户消息不落库会静默丢失，这里明确报错
-        from ..core.log import logger as _lg
+    if not ephemeral:
+        # 普通对话立即持久化；临时对话只存在于当前浏览器内存。
+        user_msg = {"role": "user", "content": text, "ts": time.time()}
+        if image:
+            user_msg["image"] = image
+        try:
+            async with user_write_guard(request_epoch):
+                saved = await append_messages(session_id, [user_msg])
+        except ResetSuperseded:
+            return JSONResponse({"ok": False, "error": "请求因重置而取消"}, status_code=409)
+        if not saved:
+            # 会话可能在校验后被删除：用户消息不落库会静默丢失，这里明确报错
+            from ..core.log import logger as _lg
 
-        _lg.warning("[chat] 用户消息持久化失败（会话 {} 可能已不存在）", session_id)
-        return JSONResponse({"ok": False, "error": "会话不存在或已删除，请刷新页面"}, status_code=410)
+            _lg.warning("[chat] 用户消息持久化失败（会话 {} 可能已不存在）", session_id)
+            return JSONResponse({"ok": False, "error": "会话不存在或已删除，请刷新页面"}, status_code=410)
 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
@@ -142,7 +150,7 @@ async def api_chat(
                 return
             reply = await asyncio.wait_for(
                 process(
-                    _user_id(session_id), text, mock=mock, stream_cb=_cb,
+                    _user_id(session_id), text, mock=mock, ephemeral=ephemeral, stream_cb=_cb,
                     image_cb=_image_cb, progress_cb=_progress_cb, explain_cb=_explain_cb,
                 ),
                 timeout=_PROCESS_TOTAL_TIMEOUT,
@@ -150,14 +158,15 @@ async def api_chat(
             if not epoch_is_current(request_epoch):
                 await q.put(("__error__", "请求因重置而取消"))
                 return
-            # 后台完成：持久化 bot 消息到原会话（即使客户端已断开）
-            bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
-            if _state.get("pending_img"):
-                bot_msg["image"] = _state["pending_img"]
-            if _state.get("explanation"):
-                bot_msg["explanation"] = _state["explanation"]
-            async with user_write_guard(request_epoch):
-                await append_messages(session_id, [bot_msg])
+            if not ephemeral:
+                # 后台完成：持久化 bot 消息到原会话（即使客户端已断开）
+                bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
+                if _state.get("pending_img"):
+                    bot_msg["image"] = _state["pending_img"]
+                if _state.get("explanation"):
+                    bot_msg["explanation"] = _state["explanation"]
+                async with user_write_guard(request_epoch):
+                    await append_messages(session_id, [bot_msg])
             await q.put(("__done__", reply))
         except ResetSuperseded:
             # reset 可在 epoch 检查和落库之间开始。无论发生在哪个写入点，
@@ -167,35 +176,43 @@ async def api_chat(
             from ..core.reset import epoch_is_current
             if epoch_is_current(request_epoch):
                 note = "（已停止）"
+                if not ephemeral:
+                    try:
+                        async with user_write_guard(request_epoch):
+                            await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+                    except ResetSuperseded:
+                        await q.put(("__error__", "请求因重置而取消"))
+                        raise
+                await q.put(("__error__", note))
+            raise
+        except asyncio.TimeoutError:
+            if ephemeral:
+                logger.warning(
+                    "[chat] 临时对话处理超时（{}s），会话 {} 已中止；本轮未持久化",
+                    _PROCESS_TOTAL_TIMEOUT, session_id,
+                )
+            else:
+                logger.warning(
+                    "[chat] 处理超时（{}s），会话 {} 已中止。副作用核对：sessions 已存用户消息；"
+                    "userdb 已存用户消息（assistant 回复与长期记忆未写入，后台向量任务未调度）",
+                    _PROCESS_TOTAL_TIMEOUT, session_id,
+                )
+            note = f"处理超时（>{_PROCESS_TOTAL_TIMEOUT}s），请重试或换个说法"
+            # 失败也补存一条 bot 消息：避免会话历史出现"只有用户消息、没有回复"的残缺回合
+            if not ephemeral:
                 try:
                     async with user_write_guard(request_epoch):
                         await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
                 except ResetSuperseded:
                     await q.put(("__error__", "请求因重置而取消"))
-                else:
-                    await q.put(("__error__", note))
-            raise
-        except asyncio.TimeoutError:
-            logger.warning(
-                "[chat] 处理超时（{}s），会话 {} 已中止。副作用核对：sessions 已存用户消息；"
-                "userdb 已存用户消息（assistant 回复与长期记忆未写入，后台向量任务未调度）",
-                _PROCESS_TOTAL_TIMEOUT, session_id,
-            )
-            note = f"处理超时（>{_PROCESS_TOTAL_TIMEOUT}s），请重试或换个说法"
-            # 失败也补存一条 bot 消息：避免会话历史出现"只有用户消息、没有回复"的残缺回合
-            try:
-                async with user_write_guard(request_epoch):
-                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
-            except ResetSuperseded:
-                await q.put(("__error__", "请求因重置而取消"))
-                return
+                    return
             await q.put(("__error__", note))
         except Exception as e:
             logger.exception("[chat] 处理用户消息失败（会话 {}）", session_id)
             # 流式中途失败：把已流式输出、但 process 未成功返回完整回复的「部分文本」
             # 落库，保证刷新/归档后这段已生成的回复不丢失；内部异常细节只写日志、不外泄。
             partial = "".join(_partial).strip()
-            if partial:
+            if partial and not ephemeral:
                 bot_msg = {"role": "bot", "content": partial, "ts": time.time()}
                 if _state.get("pending_img"):
                     bot_msg["image"] = _state["pending_img"]
@@ -207,12 +224,13 @@ async def api_chat(
                     return
             # 面向用户的通用错误提示（不泄露内部异常原文），并作为 error 帧回传。
             note = "回复生成中断，请重试"
-            try:
-                async with user_write_guard(request_epoch):
-                    await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
-            except ResetSuperseded:
-                await q.put(("__error__", "请求因重置而取消"))
-                return
+            if not ephemeral:
+                try:
+                    async with user_write_guard(request_epoch):
+                        await append_messages(session_id, [{"role": "bot", "content": note, "ts": time.time()}])
+                except ResetSuperseded:
+                    await q.put(("__error__", "请求因重置而取消"))
+                    return
             await q.put(("__error__", note))
         finally:
             current_sse_push.set(None)

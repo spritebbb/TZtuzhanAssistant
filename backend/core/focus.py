@@ -239,7 +239,33 @@ def cancel_focus(user_id: str, activity_id: int) -> dict:
     return _row_to_detail(row)
 
 
-def current_focus(user_id: str) -> tuple[dict | None, bool]:
+def export_markdown(user_id: str, activity_id: int) -> str:
+    """导出专注记录；只陈述计时事实，不做绩效评价。"""
+    detail = get_focus(user_id, activity_id)
+    if detail is None:
+        raise ActivityError("这段专注不存在")
+    status_label = {
+        "active": "进行中",
+        "paused": "已暂停",
+        "completed": "已结束",
+        "cancelled": "已中断",
+    }.get(detail["status"], str(detail["status"]))
+    elapsed_minutes = max(0, round(detail["elapsed_seconds"] / 60))
+    lines = [
+        f"# {detail['title']}",
+        "",
+        f"- 状态：{status_label}",
+        f"- 计划时长：{detail['planned_minutes']} 分钟",
+        f"- 已经过：约 {elapsed_minutes} 分钟",
+        f"- 开始：{detail['created_at']}",
+    ]
+    if detail["completed_at"]:
+        lines.append(f"- 结束：{detail['completed_at']}")
+    lines.extend(["", "> 这是一段计时记录，不包含完成度、评分或绩效判断。", ""])
+    return "\n".join(lines)
+
+
+def current_focus(user_id: str, *, settle: bool = True) -> tuple[dict | None, bool]:
     """最近一段未结束的专注；超时未结算的在此惰性完成。
 
     返回 (detail, just_finished)：just_finished=True 表示本次读取触发了
@@ -259,6 +285,16 @@ def current_focus(user_id: str) -> tuple[dict | None, bool]:
             and row["ends_at"]
             and _parse_ts(row["ends_at"]) <= datetime.now()
         ):
+            if not settle:
+                # 临时对话等只读调用：展示“已结束”的事实，但不在读取时完成结算、
+                # 创建 artifact 或关系事件。下一次普通读取仍会走权威结算路径。
+                detail = _row_to_detail(row)
+                detail.update({
+                    "status": "completed",
+                    "remaining_seconds": 0,
+                    "elapsed_seconds": int(detail["planned_minutes"]) * 60,
+                })
+                return detail, False
             # 自然到点：惰性完成（不依赖后台定时器，重启后也能正确结算）。
             # 时间已跑完，剩余结算为 0，elapsed 才等于计划时长。
             now = _now()
@@ -295,12 +331,12 @@ def focus_in_progress(user_id: str) -> bool:
     return _parse_ts(row["ends_at"]) > datetime.now()
 
 
-def focus_context(user_id: str, query: str) -> str:
+def focus_context(user_id: str, query: str, *, settle: bool = True) -> str:
     """仅在用户明显谈到专注/计时时注入当前专注状态，普通闲聊零注入。"""
     if not query or not _FOCUS_CUE_RE.search(query):
         return ""
     try:
-        detail, just_finished = current_focus(user_id)
+        detail, just_finished = current_focus(user_id, settle=settle)
     except Exception:
         return ""
     if detail is None:

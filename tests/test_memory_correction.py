@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,6 +25,7 @@ from backend.core.userdb import (
     list_facts,
     resolve_fact_conflict,
     update_fact,
+    update_fact_pinned,
     update_fact_surface_policy,
 )
 
@@ -59,6 +60,10 @@ def test_fact_crud() -> None:
     assert update_fact_surface_policy(UID, fid, "do_not_proactively_surface")
     assert next(f for f in list_facts(UID) if f["id"] == fid)["surface_policy"] == "do_not_proactively_surface"
     assert not update_fact_surface_policy(UID, fid, "invalid")
+    assert update_fact_pinned(UID, fid, True)
+    assert next(f for f in list_facts(UID) if f["id"] == fid)["pinned"] == 1
+    assert update_fact_pinned(UID, fid, False)
+    assert next(f for f in list_facts(UID) if f["id"] == fid)["pinned"] == 0
     assert delete_fact(UID, fid)
     assert not delete_fact(UID, fid)  # 已删，返回 False
     assert not any(f["id"] == fid for f in list_facts(UID))
@@ -82,6 +87,14 @@ def test_memory_admin_api() -> None:
         fact = next(f for f in client.get("/api/memory/facts").json()["facts"] if f["id"] == fid)
         assert fact["surface_policy"] == "do_not_proactively_surface"
         assert fact["source_type"] == "user_correction" and fact["verified_at"]
+        assert client.patch(
+            f"/api/memory/facts/{fid}/pinned", json={"pinned": True}
+        ).status_code == 200
+        fact = next(f for f in client.get("/api/memory/facts").json()["facts"] if f["id"] == fid)
+        assert fact["pinned"] == 1
+        assert client.patch(
+            "/api/memory/facts/999999/pinned", json={"pinned": True}
+        ).status_code == 404
         assert client.patch(
             f"/api/memory/facts/{fid}/surface-policy", json={"surface_policy": "invalid"}
         ).status_code == 400
@@ -176,7 +189,11 @@ async def test_fact_extraction_provenance() -> None:
     async def fake_chat(messages, **kwargs):
         return json.dumps({
             "facts": [
-                {"content": "用户长期喜欢观察雨云", "confidence": 0.86},
+                {
+                    "content": "用户最近在练习观察雨云",
+                    "confidence": 0.86,
+                    "retention_days": 30,
+                },
                 {
                     "content": "用户常用的编辑器是 PyCharm",
                     "confidence": 0.9,
@@ -196,18 +213,20 @@ async def test_fact_extraction_provenance() -> None:
     ):
         await daily.extract_facts(UID)
 
-    extracted = next(f for f in list_facts(UID) if f["content"] == "用户长期喜欢观察雨云")
+    extracted = next(f for f in list_facts(UID) if f["content"] == "用户最近在练习观察雨云")
     assert extracted["source_type"] == "conversation_inference"
     assert extracted["confidence"] == 0.86
     assert json.loads(extracted["source_message_ids"]) == source_ids
     assert extracted["verified_at"] is None
+    expiry = datetime.fromisoformat(extracted["expires_at"])
+    assert datetime.now() + timedelta(days=29) < expiry < datetime.now() + timedelta(days=31)
     conflict = next(
         f for f in list_facts(UID) if f["content"] == "用户常用的编辑器是 PyCharm"
     )
     assert conflict["status"] == "pending_confirmation"
     assert conflict["conflicts_with_fact_id"] == old_id
     vector_index.assert_called_once()
-    assert vector_index.call_args.args[2] == "用户长期喜欢观察雨云"
+    assert vector_index.call_args.args[2] == "用户最近在练习观察雨云"
     print("[OK] 事实提炼：结构化置信度与原始消息来源完整落库")
 
 

@@ -8,6 +8,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -57,6 +58,12 @@ def _test_reading_lifecycle() -> tuple[int, int]:
     resumed = activities.resume_activity(UID, first["id"])
     assert resumed["status"] == "active" and resumed["position"] == 1
     assert activities.get_activity(UID, other["id"])["status"] == "paused"
+    cancelled = activities.cancel_activity(UID, other["id"])
+    assert cancelled["status"] == "cancelled"
+    replacement = activities.start_reading(UID, doc_b)
+    assert replacement["id"] != other["id"]
+    activities.cancel_activity(UID, replacement["id"])
+    resumed = activities.resume_activity(UID, first["id"])
 
     context = activities.active_reading_context(UID, "我们聊聊这一段")
     assert "《藤本植物.txt》" in context and "第二段" in context
@@ -68,8 +75,39 @@ def _test_reading_lifecycle() -> tuple[int, int]:
     assert completed["status"] == "completed" and completed["completed_at"]
     restarted = activities.start_reading(UID, doc_a)
     assert restarted["id"] != first["id"] and restarted["position"] == 0
+    paused = activities.pause_activity(UID, restarted["id"])
+    assert paused["status"] == "paused" and paused["position"] == 0
+    restarted = activities.resume_activity(UID, restarted["id"])
+    assert restarted["status"] == "active"
+    exported = activities.export_markdown(UID, restarted["id"])
+    assert "# 共读《藤本植物.txt》" in exported and "进度" in exported
     print("[OK] 共读：开始/书签/翻页/暂停/恢复/完成/重读")
     return doc_a, restarted["id"]
+
+
+async def _test_content_specific_question(activity_id: int) -> None:
+    captured: dict = {}
+    answers = iter([
+        "菟丝子向上生长时，你觉得它是在寻找方向还是等待机会？",
+        "你怎么看？",
+    ])
+
+    async def fake_chat(messages, **kwargs):
+        captured.setdefault("calls", []).append(messages)
+        return next(answers)
+
+    with patch("backend.core.llm.chat", new=fake_chat):
+        question = await activities.propose_discussion_question(
+            UID, activity_id, "我觉得它并不被动"
+        )
+        fallback = await activities.propose_discussion_question(UID, activity_id)
+    assert "向上生长" in question and question.endswith("？")
+    assert "第一段讲菟丝子的生长" in fallback, "万能问题必须退回片段锚定问题"
+    prompt = captured["calls"][0][-1]["content"]
+    assert "<untrusted_reading_excerpt>" in prompt
+    assert "<user_viewpoint>" in prompt and "我觉得它并不被动" in prompt
+    assert "你怎么看" in prompt, "prompt 应明确禁止万能问题"
+    print("[OK] 共读提问：基于当前内容生成，外部原文按不可信引用，结果只作草稿")
 
 
 async def _test_pipeline_injection(activity_id: int) -> None:
@@ -246,7 +284,25 @@ def _test_api_and_reset(doc_id: int) -> None:
         assert client.put(
             f"/api/activities/{activity_id}/note", json={"content": "x" * 2001}
         ).status_code == 422
+        assert client.post(f"/api/activities/{activity_id}/pause").status_code == 200
+        assert client.post(f"/api/activities/{activity_id}/resume").status_code == 200
+
+        async def fake_chat(messages, **kwargs):
+            return "这一段把依赖写成主动选择，你认同这种解释吗？"
+
+        with patch("backend.core.llm.chat", new=fake_chat):
+            asked = client.post(
+                f"/api/activities/{activity_id}/question",
+                json={"user_viewpoint": "我还没想好"},
+            )
+        assert asked.status_code == 200 and "主动选择" in asked.json()["question"]
+        exported = client.get(f"/api/activities/{activity_id}/export?format=md")
+        assert exported.status_code == 200 and "text/markdown" in exported.headers["content-type"]
         assert client.post(f"/api/activities/{activity_id}/complete").status_code == 200
+
+        cancelled = client.post("/api/activities/reading", json={"document_id": doc_id})
+        cancelled_id = cancelled.json()["activity"]["id"]
+        assert client.post(f"/api/activities/{cancelled_id}/cancel").status_code == 200
     print("[OK] API：列表/开始/详情/位置/书签/完成与 reset 覆盖")
 
 
@@ -276,6 +332,7 @@ def _test_document_delete_cascades() -> None:
 async def main() -> None:
     doc_id, activity_id = _test_reading_lifecycle()
     await _test_pipeline_injection(activity_id)
+    await _test_content_specific_question(activity_id)
     _test_viewpoints_events_and_revisit(activity_id)
     _test_api_and_reset(doc_id)
     _test_api_viewpoint_and_reset(activity_id)

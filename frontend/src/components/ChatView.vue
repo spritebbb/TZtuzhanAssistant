@@ -80,6 +80,7 @@ async function checkGreeting(sessionId: string | null) {
 
 const messages = ref<Message[]>([])
 const input = ref('')
+const ephemeralMode = ref(false)
 const busy = ref(false)
 const initializing = ref(true)
 const streaming = ref(false)
@@ -104,7 +105,9 @@ const hasManyMessages = computed(() => messages.value.length > 8)
 
 // 归档提示条：消息数达到阈值时，在对话上方轻量提示可归档
 const dismissArchiveHint = ref(false)
-const showArchiveHint = computed(() => !dismissArchiveHint.value && messages.value.length >= 40)
+const showArchiveHint = computed(() => (
+  !dismissArchiveHint.value && messages.value.filter(message => !message.ephemeral).length >= 40
+))
 
 // 当前活跃流的 AbortController（send 与 handleImageFile 共用同一引用，
 // stop()/切会话统一 abort 它）。每个流在 finally 用「controller === ctrl」
@@ -180,13 +183,15 @@ async function send() {
   pendingConfirm.value = []
   busy.value = true
   input.value = ''
+  const sendEphemeral = ephemeralMode.value
+  ephemeralMode.value = false
 
   // 追加用户消息
-  const userMsg: Message = { role: 'user', content: text, ts: Date.now() / 1000 }
+  const userMsg: Message = { role: 'user', content: text, ephemeral: sendEphemeral, ts: Date.now() / 1000 }
   messages.value.push(userMsg)
 
   // 追加空的 bot 消息占位
-  const botMsg: Message = { role: 'bot', content: '', ts: Date.now() / 1000 }
+  const botMsg: Message = { role: 'bot', content: '', ephemeral: sendEphemeral, ts: Date.now() / 1000 }
   messages.value.push(botMsg)
 
   const botIndex = messages.value.length - 1
@@ -252,7 +257,7 @@ async function send() {
       onConfirmRequest: (req) => {
         pendingConfirm.value.push(req)
       },
-    }, null, requestId)
+    }, null, requestId, sendEphemeral)
   } catch (e: unknown) {
     if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
       messages.value[botIndex].content = '（已停止）'
@@ -266,7 +271,7 @@ async function send() {
     if (controller === ctrl) controller = null
     if (currentRequestId === requestId) currentRequestId = null
     flushPendingProactive()
-    schedulePortraitRefresh()
+    if (!sendEphemeral) schedulePortraitRefresh()
   }
 }
 
@@ -647,7 +652,7 @@ function isActive(i: number): boolean {
       />
     </div>
     <ConfirmPanel :pending="pendingConfirm" @resolve="resolveConfirm" />
-    <ChatInput v-model:input="input" :busy="busy || initializing" :streaming="streaming" :persona-name="props.personaName" @send="send" @stop="stop" @file="handleImageFile" />
+    <ChatInput v-model:input="input" v-model:ephemeral="ephemeralMode" :busy="busy || initializing" :streaming="streaming" :persona-name="props.personaName" @send="send" @stop="stop" @file="handleImageFile" />
   </div>
 </template>
 

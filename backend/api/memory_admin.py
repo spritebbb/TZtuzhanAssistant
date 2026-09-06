@@ -23,6 +23,7 @@ from ..core import pending_thoughts
 from ..core.userdb import (
     db,
     list_facts,
+    update_fact_pinned,
     update_fact_surface_policy,
 )
 from ..core.persona_profiles import active_user_id
@@ -125,6 +126,18 @@ async def api_update_fact_surface_policy(
     if not update_fact_surface_policy(uid, fact_id, surface_policy):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
     logger.info("[记忆管理] 修改事实 #{} 呈现策略: {}", fact_id, surface_policy)
+    return {"ok": True}
+
+
+@router.patch("/facts/{fact_id}/pinned")
+async def api_update_fact_pinned(
+    fact_id: int,
+    pinned: bool = Body(..., embed=True),
+):
+    uid = active_user_id()
+    if not await asyncio.to_thread(update_fact_pinned, uid, fact_id, pinned):
+        return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
+    logger.info("[记忆管理] {}事实 #{}", "固定" if pinned else "取消固定", fact_id)
     return {"ok": True}
 
 

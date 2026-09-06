@@ -49,6 +49,15 @@ export async function updateFactSurfacePolicy(
   if (!response.ok) throw new Error('呈现策略更新失败')
 }
 
+export async function updateFactPinned(id: number, pinned: boolean): Promise<void> {
+  const response = await apiFetch(`/api/memory/facts/${id}/pinned`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  })
+  if (!response.ok) throw new Error('固定设置更新失败')
+}
+
 export async function resolveFactConflict(
   id: number,
   action: 'accept_new' | 'keep_existing',

@@ -2,8 +2,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  cancelReading,
   completeReading,
+  exportReadingUrl,
   listReadingActivities,
+  pauseReading,
+  proposeReadingQuestion,
   resumeReading,
   saveReadingNote,
   saveReadingViewpoint,
@@ -24,8 +28,12 @@ import { listLists, startList, addListItem, type SharedList } from '../../api/li
 import ActivityPanel from '../ActivityPanel.vue'
 
 vi.mock('../../api/activities', () => ({
+  cancelReading: vi.fn(),
   completeReading: vi.fn(),
+  exportReadingUrl: vi.fn((id: number) => `/api/activities/${id}/export?format=md`),
   listReadingActivities: vi.fn(),
+  pauseReading: vi.fn(),
+  proposeReadingQuestion: vi.fn(),
   resumeReading: vi.fn(),
   saveReadingNote: vi.fn(),
   saveReadingViewpoint: vi.fn(),
@@ -69,6 +77,9 @@ vi.mock('../../api/writings', () => ({
 const mockedList = vi.mocked(listReadingActivities)
 const mockedDocuments = vi.mocked(listKnowledgeDocuments)
 const mockedStart = vi.mocked(startReading)
+const mockedPause = vi.mocked(pauseReading)
+const mockedCancel = vi.mocked(cancelReading)
+const mockedQuestion = vi.mocked(proposeReadingQuestion)
 const mockedResume = vi.mocked(resumeReading)
 const mockedPosition = vi.mocked(setReadingPosition)
 const mockedNote = vi.mocked(saveReadingNote)
@@ -158,6 +169,9 @@ describe('ActivityPanel', () => {
       ts: '2026-09-04T12:00:00',
     }])
     mockedStart.mockResolvedValue(activity())
+    mockedPause.mockResolvedValue(activity({ status: 'paused' }))
+    mockedCancel.mockResolvedValue(activity({ status: 'cancelled', completed_at: '2026-09-04T12:30:00' }))
+    mockedQuestion.mockResolvedValue('它主动寻找宿主时，你觉得这更像依赖还是生存策略？')
     mockedResume.mockResolvedValue(activity())
     mockedPosition.mockResolvedValue(activity({
       position: 1,
@@ -238,7 +252,32 @@ describe('ActivityPanel', () => {
 
     await wrapper.get('.talk').trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('discuss')?.[0]?.[0]).toContain('我们继续共读《藤本植物.txt》')
+    expect(mockedQuestion).toHaveBeenCalledWith(8, '')
+    expect(wrapper.emitted('discuss')?.[0]?.[0]).toContain('更像依赖还是生存策略')
+    expect(wrapper.emitted('discuss')?.[0]?.[0]).toContain('我的想法是：')
+  })
+
+  it('pauses and cancels a reading while keeping an export entry', async () => {
+    mockedList.mockResolvedValue([activity()])
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const actionButtons = wrapper.findAll('.primary-actions button')
+    await actionButtons.find(button => button.text() === '暂停')!.trigger('click')
+    await flushPromises()
+    expect(mockedPause).toHaveBeenCalledWith(8)
+    expect(wrapper.text()).toContain('已暂停')
+    expect(exportReadingUrl).toHaveBeenCalledWith(8)
+
+    await wrapper.findAll('.primary-actions button').find(button => button.text() === '放下这本')!.trigger('click')
+    await flushPromises()
+    expect(mockedCancel).toHaveBeenCalledWith(8)
+    expect(wrapper.text()).toContain('这场共读已经放下')
+
+    await wrapper.get('.back').trigger('click')
+    expect(wrapper.text()).toContain('已放下 · 0 张书签')
+    await wrapper.get('.history-row').trigger('click')
+    expect(wrapper.text()).toContain('这场共读已经放下')
   })
 
   it('saves role-labeled viewpoints per segment', async () => {

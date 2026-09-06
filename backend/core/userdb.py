@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 11
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -326,6 +326,26 @@ CREATE TABLE IF NOT EXISTS list_items (
 );
 CREATE INDEX IF NOT EXISTS idx_list_items_activity
     ON list_items(user_id, activity_id, id);
+-- M8「写给未来的我们」：用户亲手写的未来信件。正文是唯一的私密内容，
+-- 锁定态（sealed 且条件未达成）绝不离开后端；ready 由查询时按条件确定性计算。
+CREATE TABLE IF NOT EXISTS future_letters (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,
+    title         TEXT NOT NULL DEFAULT '',
+    body          TEXT NOT NULL,                   -- 正文：锁定态任何接口都不返回
+    unlock_type   TEXT NOT NULL,                   -- date / goal / event
+    unlock_at     TEXT,                            -- date：到达时刻（必须晚于创建时间）
+    goal_id       INTEGER,                         -- goal：activities.id（kind='goal'）
+    event_type    TEXT,                            -- event：完成/修复类事件白名单
+    status        TEXT NOT NULL DEFAULT 'sealed',  -- sealed / opened（ready 是计算态不落状态列）
+    unlocked_at   TEXT,                            -- 条件达成落账时间（惰性写、幂等）
+    unlocked_by_event_id INTEGER,                  -- event 类型首次匹配的关系事件 id
+    opened_at     TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_future_letters_user
+    ON future_letters(user_id, status, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -346,6 +366,24 @@ CREATE TABLE IF NOT EXISTS relationship_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_events_idem
     ON relationship_events(user_id, event_type, source_id) WHERE status = 'active';
+-- M8 第二垂直切片：30/100/365 天关系快照。确定性汇编真实持久数据（不调用
+-- LLM），用户显式创建/删除、绝不自动再生；UNIQUE(user_id, snapshot_days)
+-- 保证每个里程碑至多一页。
+CREATE TABLE IF NOT EXISTS relationship_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             TEXT NOT NULL,
+    snapshot_days       INTEGER NOT NULL,              -- 30 / 100 / 365
+    start_date          TEXT NOT NULL,                 -- 关系起点（最早 user 消息的本地日期）
+    cutoff_date         TEXT NOT NULL,                 -- start_date + snapshot_days - 1
+    generated_at        TEXT NOT NULL,                 -- 快照整理时刻
+    source_manifest_json TEXT NOT NULL DEFAULT '{}',   -- 来源清单（type/id/date + counts/omitted）
+    rendered_markdown   TEXT NOT NULL,                 -- 模板化正文（只来自真实行）
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE(user_id, snapshot_days)
+);
+CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_user
+    ON relationship_snapshots(user_id, snapshot_days);
 -- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
 CREATE TABLE IF NOT EXISTS pending_thoughts (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1369,7 +1407,7 @@ class UserDB:
                 "activity_viewpoints", "activity_goals", "goal_progress",
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts",
-                "pending_thoughts",
+                "pending_thoughts", "future_letters", "relationship_snapshots",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
@@ -1602,6 +1640,17 @@ def update_fact_surface_policy(user_id: str, fact_id: int, surface_policy: str) 
         cur = db.conn.execute(
             "UPDATE facts SET surface_policy = ? WHERE id = ? AND user_id = ?",
             (surface_policy, fact_id, user_id),
+        )
+        db.conn.commit()
+        return cur.rowcount > 0
+
+
+def update_fact_pinned(user_id: str, fact_id: int, pinned: bool) -> bool:
+    """固定或取消固定一条有效事实；固定事实不会被自然衰减清理。"""
+    with db._lock:
+        cur = db.conn.execute(
+            "UPDATE facts SET pinned = ? WHERE id = ? AND user_id = ? AND status = 'active'",
+            (1 if pinned else 0, fact_id, user_id),
         )
         db.conn.commit()
         return cur.rowcount > 0

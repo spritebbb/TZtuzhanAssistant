@@ -59,6 +59,29 @@ test('opens and closes the shared-activity panel', async ({ page }) => {
   await expect(page.getByRole('dialog', { name: '一起做点什么' })).toBeHidden()
 })
 
+test('shows a sealed future letter without exposing its body', async ({ page, request }) => {
+  const secret = 'E2E 密封正文：在未来到来前不该出现在页面里'
+  const created = await request.post('/api/future-letters', {
+    data: {
+      title: '给 2099 年的我们',
+      body: secret,
+      unlock_type: 'date',
+      unlock_at: '2099-01-01T00:00:00',
+    },
+  })
+  expect(created.ok()).toBeTruthy()
+  const letterId = (await created.json()).letter.id as number
+
+  await openApp(page)
+  await page.getByTitle('我们的角落（一起留下的东西）').click()
+  const dialog = page.getByRole('dialog', { name: '我们的角落' })
+  await expect(dialog.getByText('给 2099 年的我们')).toBeVisible()
+  await expect(dialog.getByText('封存中')).toBeVisible()
+  await expect(dialog.getByText(secret)).toHaveCount(0)
+
+  expect((await request.delete(`/api/future-letters/${letterId}`)).ok()).toBeTruthy()
+})
+
 test('imports and activates an isolated persona through the real API', async ({ page, request }) => {
   const imported = await request.post('/api/personas/import', {
     multipart: {
@@ -79,6 +102,17 @@ test('imports and activates an isolated persona through the real API', async ({ 
 })
 
 test('starts co-reading, saves a bookmark, and returns discussion text to chat', async ({ page, request }) => {
+  await page.route('**/api/activities/*/question', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        question: '第一段说“一起读书”，你觉得两个人一起读和自己读最大的不同是什么？',
+      }),
+    })
+  })
+
   const upload = await request.post('/api/knowledge/upload', {
     multipart: {
       file: {
@@ -99,6 +133,8 @@ test('starts co-reading, saves a bookmark, and returns discussion text to chat',
   await page.getByRole('button', { name: '收进书签' }).click()
   await expect(page.getByText('这张书签夹好了')).toBeVisible()
 
-  await page.getByRole('button', { name: /去和.*聊这一段/ }).click()
-  await expect(page.getByPlaceholder(/和.*说点什么/)).toHaveValue(/我们继续共读《一起读的测试\.txt》吧/)
+  await page.getByRole('button', { name: /让.*问个具体问题/ }).click()
+  await expect(page.getByPlaceholder(/和.*说点什么/)).toHaveValue(
+    /关于《一起读的测试\.txt》第 1 段，你问我：“第一段说“一起读书”/,
+  )
 })
