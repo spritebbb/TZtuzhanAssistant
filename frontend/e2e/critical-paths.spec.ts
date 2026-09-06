@@ -82,6 +82,29 @@ test('shows a sealed future letter without exposing its body', async ({ page, re
   expect((await request.delete(`/api/future-letters/${letterId}`)).ok()).toBeTruthy()
 })
 
+test('shows a dual perspective page with both sides visible', async ({ page, request }) => {
+  const created = await request.post('/api/dual-perspectives', {
+    data: {
+      title: 'E2E 双视角：那场雨',
+      source_type: 'free',
+      user_view: 'E2E 用户版本：雨里我们只走了五十米。',
+      tuzhan_view: 'E2E 菟菚版本：可那五十米我记到现在。',
+      tuzhan_view_origin: 'llm',
+    },
+  })
+  expect(created.ok()).toBeTruthy()
+  const pageId = (await created.json()).item.id as number
+
+  await openApp(page)
+  await page.getByTitle('我们的角落（一起留下的东西）').click()
+  const dialog = page.getByRole('dialog', { name: '我们的角落' })
+  await expect(dialog.getByText('E2E 双视角：那场雨')).toBeVisible()
+  await expect(dialog.getByText('E2E 用户版本：雨里我们只走了五十米。')).toBeVisible()
+  await expect(dialog.getByText('E2E 菟菚版本：可那五十米我记到现在。')).toBeVisible()
+
+  expect((await request.delete(`/api/dual-perspectives/${pageId}`)).ok()).toBeTruthy()
+})
+
 test('imports and activates an isolated persona through the real API', async ({ page, request }) => {
   const imported = await request.post('/api/personas/import', {
     multipart: {

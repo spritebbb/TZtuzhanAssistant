@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 11
+_SCHEMA_VERSION = 12
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -384,6 +384,26 @@ CREATE TABLE IF NOT EXISTS relationship_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_user
     ON relationship_snapshots(user_id, snapshot_days);
+-- M8 第三垂直切片：双视角叙事。同一件真实经历，用户与菟菚各自保留一段解释，
+-- 并存不合并；菟菚视角默认由 LLM 基于锚点真实记录生成草稿、经用户确认落库，
+-- 也可由用户代填（origin 标记来源）。锚点可空（自由主题）；有锚点时取其
+-- 真实记录作生成素材并用于展示跳转，锚点 id 属展示性快照，不参与导出重映射。
+CREATE TABLE IF NOT EXISTS dual_perspectives (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            TEXT NOT NULL,
+    title              TEXT NOT NULL,               -- 经历标题（用户起名）
+    source_type        TEXT,                        -- event / diary / activity / artifact / free
+    source_id          INTEGER,                     -- 锚点 id（free 为 NULL）
+    source_date        TEXT,                        -- 锚点日期快照（展示用）
+    source_label       TEXT NOT NULL DEFAULT '',    -- 锚点摘要快照（展示与取材说明）
+    user_view          TEXT NOT NULL DEFAULT '',
+    tuzhan_view        TEXT NOT NULL DEFAULT '',
+    tuzhan_view_origin TEXT NOT NULL DEFAULT 'user',  -- llm / user
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dual_perspectives_user
+    ON dual_perspectives(user_id, id);
 -- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
 CREATE TABLE IF NOT EXISTS pending_thoughts (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1407,7 +1427,7 @@ class UserDB:
                 "activity_viewpoints", "activity_goals", "goal_progress",
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts",
-                "pending_thoughts", "future_letters", "relationship_snapshots",
+                "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")

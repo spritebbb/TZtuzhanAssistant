@@ -15,6 +15,15 @@ import {
   listRelationshipSnapshots,
   type RelationshipSnapshotsBoard,
 } from '../../api/relationshipSnapshots'
+import {
+  createDualPerspective,
+  deleteDualPerspective,
+  generateTuzhanDraft,
+  listDualAnchorCandidates,
+  listDualPerspectives,
+  saveDualPerspectiveView,
+  type DualPerspective,
+} from '../../api/dualPerspectives'
 import CornerPanel from '../CornerPanel.vue'
 
 vi.mock('../../api/artifacts', () => ({ listArtifacts: vi.fn() }))
@@ -29,6 +38,14 @@ vi.mock('../../api/relationshipSnapshots', () => ({
   createRelationshipSnapshot: vi.fn(),
   deleteRelationshipSnapshot: vi.fn(),
 }))
+vi.mock('../../api/dualPerspectives', () => ({
+  listDualPerspectives: vi.fn(),
+  listDualAnchorCandidates: vi.fn(),
+  createDualPerspective: vi.fn(),
+  saveDualPerspectiveView: vi.fn(),
+  generateTuzhanDraft: vi.fn(),
+  deleteDualPerspective: vi.fn(),
+}))
 
 const mockedArtifacts = vi.mocked(listArtifacts)
 const mockedLetters = vi.mocked(listFutureLetters)
@@ -38,6 +55,12 @@ const mockedDelete = vi.mocked(deleteFutureLetter)
 const mockedSnapshots = vi.mocked(listRelationshipSnapshots)
 const mockedCreatePage = vi.mocked(createRelationshipSnapshot)
 const mockedDeletePage = vi.mocked(deleteRelationshipSnapshot)
+const mockedDuals = vi.mocked(listDualPerspectives)
+const mockedDualAnchors = vi.mocked(listDualAnchorCandidates)
+const mockedDualCreate = vi.mocked(createDualPerspective)
+const mockedDualSave = vi.mocked(saveDualPerspectiveView)
+const mockedDualDraft = vi.mocked(generateTuzhanDraft)
+const mockedDualDelete = vi.mocked(deleteDualPerspective)
 
 const artifact: ArtifactItem = {
   id: 1,
@@ -58,6 +81,20 @@ const quietSnapshots: RelationshipSnapshotsBoard = {
   days_since: null,
   milestones: [],
   snapshots: [],
+}
+
+const dualFixture: DualPerspective = {
+  id: 31,
+  title: '考试那周',
+  source_type: 'free',
+  source_id: null,
+  source_date: '',
+  source_label: '',
+  user_view: '我以为你嫌我烦。',
+  tuzhan_view: '我只是在担心你。',
+  tuzhan_view_origin: 'llm',
+  created_at: '2026-09-06T12:00:00',
+  updated_at: '2026-09-06T12:00:00',
 }
 
 const pageFixture: RelationshipSnapshotsBoard['snapshots'][number] = {
@@ -94,8 +131,16 @@ describe('CornerPanel', () => {
     mockedSnapshots.mockReset()
     mockedCreatePage.mockReset()
     mockedDeletePage.mockReset()
+    mockedDuals.mockReset()
+    mockedDualAnchors.mockReset()
+    mockedDualCreate.mockReset()
+    mockedDualSave.mockReset()
+    mockedDualDraft.mockReset()
+    mockedDualDelete.mockReset()
     mockedLetters.mockResolvedValue(emptyBoard)
     mockedSnapshots.mockResolvedValue(quietSnapshots)
+    mockedDuals.mockResolvedValue([])
+    mockedDualAnchors.mockResolvedValue({ events: [], diary: [], goals: [] })
   })
 
   it('shows real artifacts with type labels and provenance date', async () => {
@@ -395,6 +440,60 @@ describe('CornerPanel', () => {
 
     expect(wrapper.text()).toContain(artifact.title)
     expect(wrapper.find('section.letters').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('角落暂时打不开')
+  })
+
+  it('creates a free-theme dual perspective through the form', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    mockedDualCreate.mockResolvedValue(dualFixture)
+    mockedDuals.mockResolvedValueOnce([]).mockResolvedValueOnce([dualFixture])
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text() === '新建一页')!.trigger('click')
+    const form = wrapper.find('form.compose')
+    await form.find('input.line').setValue('考试那周')
+    await form.find('textarea').setValue('我以为你嫌我烦。')
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(mockedDualCreate).toHaveBeenCalledWith({
+      title: '考试那周',
+      source_type: 'free',
+      user_view: '我以为你嫌我烦。',
+    })
+    expect(wrapper.text()).toContain('她记得的')
+    expect(wrapper.text()).toContain('我只是在担心你。')
+    expect(wrapper.text()).toContain('她想')
+  })
+
+  it('fills her side with an LLM draft on demand and saves it as llm-origin', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    mockedDuals.mockResolvedValue([{ ...dualFixture, tuzhan_view: '', tuzhan_view_origin: 'user' }])
+    mockedDualDraft.mockResolvedValue('后来才懂那是我的笨拙关心。')
+    mockedDualSave.mockResolvedValue({ ...dualFixture, tuzhan_view: '后来才懂那是我的笨拙关心。' })
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text() === '请她想一想')!.trigger('click')
+    await flushPromises()
+    expect(mockedDualDraft).toHaveBeenCalledWith(31)
+
+    const editor = wrapper.find('textarea[aria-label="她的版本编辑"]')
+    expect((editor.element as HTMLTextAreaElement).value).toBe('后来才懂那是我的笨拙关心。')
+    await wrapper.findAll('button').find((b) => b.text() === '保存她的版本')!.trigger('click')
+    await flushPromises()
+    expect(mockedDualSave).toHaveBeenCalledWith(31, 'tuzhan', '后来才懂那是我的笨拙关心。', 'llm')
+  })
+
+  it('hides the dual perspectives section when disabled, artifacts unaffected', async () => {
+    mockedArtifacts.mockResolvedValue([artifact])
+    mockedDuals.mockRejectedValue(new Error('双视角叙事未开启'))
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.find('section.duals').exists()).toBe(false)
+    expect(wrapper.text()).toContain(artifact.title)
     expect(wrapper.text()).not.toContain('角落暂时打不开')
   })
 })
