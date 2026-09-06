@@ -55,3 +55,7 @@ export function completeFocus(activityId: number): Promise<FocusSession> {
 export function cancelFocus(activityId: number): Promise<FocusSession> {
   return focusRequest(`/api/focus/${activityId}/cancel`, { method: 'POST' })
 }
+
+export function exportFocusUrl(activityId: number): string {
+  return `/api/focus/${activityId}/export?format=md`
+}

@@ -95,6 +95,8 @@ def _test_state_machine() -> None:
     assert done["status"] == "completed"
     assert done["completed_at"]
     assert _event_count(activity_id) == 1
+    exported = focus.export_markdown(UID, activity_id)
+    assert "# 专注 25 分钟" in exported and "不包含完成度" in exported
     try:
         focus.complete_focus(UID, activity_id)
         raise AssertionError("重复完成不应成功")
@@ -108,6 +110,23 @@ def _test_state_machine() -> None:
     assert cancelled["status"] == "cancelled"
     assert _event_count(again["id"]) == 0
     print("[OK] 状态机：开始/暂停/恢复/完成/取消，非法迁移拒绝，事件幂等，取消无事件")
+
+
+def _test_export_api() -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app import create_app
+
+    session = focus.start_focus(UID, 25)
+    try:
+        with TestClient(create_app()) as client:
+            response = client.get(f"/api/focus/{session['id']}/export?format=md")
+        assert response.status_code == 200
+        assert "text/markdown" in response.headers["content-type"]
+        assert "计划时长：25 分钟" in response.text
+    finally:
+        focus.cancel_focus(UID, session["id"])
+    print("[OK] 导出：专注记录有 API，且不引入绩效评价")
 
 
 def _test_mutual_exclusion() -> None:
@@ -205,6 +224,7 @@ def _test_focus_context_gating() -> None:
 
 async def main() -> None:
     _test_state_machine()
+    _test_export_api()
     _test_mutual_exclusion()
     _test_lazy_completion_and_silence()
     _test_wrapup_eligibility()

@@ -112,8 +112,10 @@ def test_chat_sse_frame_contract() -> None:
     orig_process = chat_mod.process
 
     async def fake_process(user_id, text, *, mock=False, merged_msg=False,
+                           ephemeral=False,
                            stream_cb=None, image_cb=None, progress_cb=None,
                            explain_cb=None):
+        assert ephemeral is False
         from backend.tools.confirm import current_sse_push
 
         push = current_sse_push.get()
@@ -199,6 +201,41 @@ def test_chat_sse_error_frame() -> None:
             assert frames[-1].get("error") is not None, frames
             assert isinstance(frames[-1]["error"], str) and frames[-1]["error"], frames
         print("[OK] chat SSE：process 异常 → error 帧（通用提示，不泄露内部异常）")
+    finally:
+        chat_mod.process = orig_process
+
+
+def test_chat_ephemeral_no_session_persistence() -> None:
+    """显式开关和自然语言触发都只返回 SSE，不写当前会话。"""
+    import backend.api.chat as chat_mod
+
+    orig_process = chat_mod.process
+    seen: list[bool] = []
+
+    async def fake_process(user_id, text, **kw):
+        seen.append(bool(kw.get("ephemeral")))
+        return "我在，慢慢说。"
+
+    chat_mod.process = fake_process
+    try:
+        with TestClient(app) as client:
+            before = client.get("/api/sessions/current").json()
+            explicit = client.post(
+                "/api/chat",
+                content=form_body(text="这是只说一次的话", ephemeral="true"),
+                headers=FRONTEND_HEADERS,
+            )
+            natural = client.post(
+                "/api/chat",
+                content=form_body(text="陪我说完但别记住这件事"),
+                headers=FRONTEND_HEADERS,
+            )
+            assert parse_sse(explicit.text)[-1] == {"done": "我在，慢慢说。"}
+            assert parse_sse(natural.text)[-1] == {"done": "我在，慢慢说。"}
+            after = client.get("/api/sessions/current").json()
+            assert after == before, "临时对话的 user/bot 消息都不能写入 sessions.db"
+            assert seen == [True, True]
+        print("[OK] chat 临时对话：显式开关/自然语言触发均不写会话")
     finally:
         chat_mod.process = orig_process
 
@@ -447,6 +484,7 @@ def test_origin_guard_matrix() -> None:
 def main() -> None:
     test_chat_sse_frame_contract()
     test_chat_sse_error_frame()
+    test_chat_ephemeral_no_session_persistence()
     test_chat_validation()
     test_agent_create_form_body()
     test_agent_create_json_and_query_compat()

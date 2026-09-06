@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 
 const input = defineModel<string>('input', { required: true })
+const ephemeral = defineModel<boolean>('ephemeral', { default: false })
 const emit = defineEmits<{
   send: []
   stop: []
@@ -60,7 +61,7 @@ function useShortcut(s: Shortcut) {
           <path d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
-      <button class="icon-btn" :title="'识图：上传图片让' + (personaName || '助手') + '看看'" @click="fileInput?.click()">
+      <button class="icon-btn" :disabled="ephemeral" :title="ephemeral ? '不留痕模式不上传图片' : '识图：上传图片让' + (personaName || '助手') + '看看'" @click="fileInput?.click()">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="4"/>
           <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -80,7 +81,14 @@ function useShortcut(s: Shortcut) {
       </button>
     </div>
     <div class="inputbar-foot">
-      <span class="tip">Enter 发送 · Shift+Enter 换行 · Ctrl+Shift+F 对话内搜索</span>
+      <button
+        class="privacy-toggle"
+        :class="{ active: ephemeral }"
+        :aria-pressed="ephemeral"
+        :disabled="busy || streaming"
+        title="仅本轮生效：消息和回复只在当前界面暂时显示，不进入会话、记忆、画像、日记或关系状态"
+        @click="ephemeral = !ephemeral"
+      >{{ ephemeral ? '本轮不留痕 · 已开启' : '本轮不留痕' }}</button>
       <span class="foot-status" :class="{ live: streaming }">
         <span class="dot"></span>{{ streaming ? '正在输入…' : '菟丝缠绕' }}
       </span>
@@ -142,6 +150,7 @@ function useShortcut(s: Shortcut) {
   box-shadow: inset 0 0 0 1px var(--edge-subtle);
   color: var(--primary-text);
 }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 textarea {
   flex: 1;
   background: transparent;
@@ -192,6 +201,19 @@ textarea::placeholder { color: var(--text-faint); }
   padding: 6px 6px 0;
 }
 .tip { font-size: 0.68rem; color: var(--text-faint); }
+.privacy-toggle {
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: transparent;
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+.privacy-toggle:hover { color: var(--text-dim); border-color: var(--border); }
+.privacy-toggle.active { color: var(--primary-text); border-color: var(--edge-active); background: var(--primary-soft); }
+.privacy-toggle:disabled { opacity: 0.55; cursor: default; }
 .foot-status {
   display: inline-flex;
   align-items: center;

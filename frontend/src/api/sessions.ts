@@ -14,6 +14,7 @@ export interface Message {
   content: string
   image?: string | null
   explanation?: MessageExplanation | null
+  ephemeral?: boolean
   ts: number
 }
 

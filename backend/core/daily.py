@@ -5,7 +5,7 @@
 由 affection.on_message 跨天回滚或 pipeline 惰性触发。
 """
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from . import affection
 from .llm import chat
@@ -26,11 +26,11 @@ JUDGE_PROMPT = """你是「菟菚」的好感度管理员。根据以下某用�
 """
 
 FACT_PROMPT = """你是记忆提取员。根据下面的对话，提取两样东西，只输出一个 JSON：
-1) facts：值得**长期记住**的关于用户的事实——喜好、习惯、工作/生活状态、约定承诺、关系进展、重要经历、家人朋友等。**不要**把一次性话题记进去（比如"今天吃了饺子"这种只聊一次的琐事，除非它反映长期习惯）。每条包含 content（以「用户」开头的一句短话）、confidence（0-1）和 conflicts_with_fact_id（与已有事实明确矛盾时填其编号，否则为 null）；用户明确说出的事实可为 0.9，依据间接或存在推断时不得高于 0.7。最多 5 条。不得自行覆盖或删除冲突事实。
+1) facts：值得记住的关于用户的事实——喜好、习惯、工作/生活状态、约定承诺、关系进展、重要经历、家人朋友等。**不要**把毫无后续价值的一次性话题记进去（比如"今天吃了饺子"，除非它反映长期习惯）。每条包含：content（以「用户」开头的一句短话）、confidence（0-1）、conflicts_with_fact_id（与已有事实明确矛盾时填其编号，否则为 null）、retention_days（保留天数）。明确长期稳定的身份/偏好/习惯/重要经历填 null；带“最近/当前/临时/这周/正在”等时效的状态填 7-180 的整数，期限越明确越贴近实际。用户明确说出的事实可为 0.9，依据间接或存在推断时不得高于 0.7。最多 5 条。不得自行覆盖或删除冲突事实。
 2) style：对「用户说话风格」的简要描述（1-2 句），包括：句子长短、是否爱用语气词/表情、常用口头禅、语气是直接还是委婉、爱不爱开玩笑等。
 
 输出格式（不要任何其他内容）：
-{"facts": [{"content":"用户喜欢下雨天","confidence":0.9,"conflicts_with_fact_id":null}, {"content":"用户住在武汉","confidence":0.9,"conflicts_with_fact_id":12}], "style": "对方说话简短直接，常用'啊'和'哈'，喜欢发短句和表情。"}
+{"facts": [{"content":"用户喜欢下雨天","confidence":0.9,"conflicts_with_fact_id":null,"retention_days":null}, {"content":"用户最近在准备考试","confidence":0.9,"conflicts_with_fact_id":12,"retention_days":30}], "style": "对方说话简短直接，常用'啊'和'哈'，喜欢发短句和表情。"}
 没有值得记的事实就输出 {"facts": [], "style": "..."}
 """
 
@@ -111,10 +111,18 @@ def _repair_truncated_json(text: str) -> dict | None:
 
 async def run_daily_batch(user_id: str, day: date) -> None:
     """昨日好感度判定 + 事实提炼。执行完成才推进 last_batch_date（失败可重试）。"""
+    from .fact_decay import decay_expired_facts_async
     from .userdb import kv_get as _kv_get, kv_set as _kv_set
     from .persona_profiles import persona_name_for_user_id
 
     persona_name = persona_name_for_user_id(user_id)
+
+    # 必须位于 done_key 与空日早退之前：批次重复触发或当天无消息时，已到期且
+    # 未固定的事实仍应收敛；清理本身幂等，失败不阻塞其余每日总结。
+    try:
+        await decay_expired_facts_async(user_id)
+    except Exception:
+        logger.exception("[每日总结] {} 的过期事实清理失败", user_id)
 
     # 幂等防重跑：同一天只执行一次（schedule 按 key 去重，这里再兜一道）
     done_key = f"daily_batch:{day.isoformat()}"
@@ -413,12 +421,23 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
                     conflict_id = int(f["conflicts_with_fact_id"]) if f.get("conflicts_with_fact_id") is not None else None
                 except (TypeError, ValueError):
                     conflict_id = None
+                try:
+                    retention_days = int(f["retention_days"]) if f.get("retention_days") is not None else None
+                except (TypeError, ValueError):
+                    retention_days = None
+                if retention_days is not None and not 1 <= retention_days <= 365:
+                    retention_days = None
                 if conflict_id not in active_fact_ids:
                     conflict_id = None
             else:  # 兼容旧模型/旧测试仍返回字符串数组
                 content = str(f).strip()[:100]
                 confidence = 0.7
                 conflict_id = None
+                retention_days = None
+            expires_at = (
+                (datetime.now() + timedelta(days=retention_days)).isoformat(timespec="seconds")
+                if retention_days is not None else None
+            )
             source_ids = json.dumps([int(r["id"]) for r in rows], separators=(",", ":"))
             fid = db.add_fact(
                 user_id,
@@ -426,6 +445,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
                 source_type="conversation_inference",
                 source_message_ids=source_ids,
                 confidence=confidence,
+                expires_at=expires_at,
                 conflicts_with_fact_id=conflict_id,
             )
             # 给新事实建稠密向量索引（失败静默）

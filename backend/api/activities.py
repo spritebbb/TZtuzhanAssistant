@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import quote
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from ..core import activities
@@ -37,6 +38,10 @@ class NoteBody(BaseModel):
 class ViewpointBody(BaseModel):
     role: str = Field(pattern="^(user|tuzhan|shared)$")
     content: str = Field(max_length=2_000)
+
+
+class QuestionBody(BaseModel):
+    user_viewpoint: str = Field(default="", max_length=2_000)
 
 
 def _error(exc: activities.ActivityError, status_code: int = 400) -> JSONResponse:
@@ -73,6 +78,35 @@ async def api_resume_activity(activity_id: int):
     except activities.ActivityError as exc:
         return _error(exc, 404)
     return {"ok": True, "activity": row}
+
+
+@router.post("/{activity_id}/pause")
+async def api_pause_activity(activity_id: int):
+    try:
+        row = await asyncio.to_thread(activities.pause_activity, _active_user_id(), activity_id)
+    except activities.ActivityError as exc:
+        return _error(exc, 404)
+    return {"ok": True, "activity": row}
+
+
+@router.post("/{activity_id}/cancel")
+async def api_cancel_activity(activity_id: int):
+    try:
+        row = await asyncio.to_thread(activities.cancel_activity, _active_user_id(), activity_id)
+    except activities.ActivityError as exc:
+        return _error(exc, 404)
+    return {"ok": True, "activity": row}
+
+
+@router.post("/{activity_id}/question")
+async def api_discussion_question(activity_id: int, body: QuestionBody):
+    try:
+        question = await activities.propose_discussion_question(
+            _active_user_id(), activity_id, body.user_viewpoint
+        )
+    except activities.ActivityError as exc:
+        return _error(exc, 404)
+    return {"ok": True, "question": question}
 
 
 @router.put("/{activity_id}/position")
@@ -121,3 +155,21 @@ async def api_complete_activity(activity_id: int):
     except activities.ActivityError as exc:
         return _error(exc, 404)
     return {"ok": True, "activity": row}
+
+
+@router.get("/{activity_id}/export")
+async def api_export_activity(
+    activity_id: int,
+    format: str = Query("md", pattern="^md$"),
+):
+    try:
+        detail = await asyncio.to_thread(activities.get_activity, _active_user_id(), activity_id)
+        content = await asyncio.to_thread(activities.export_markdown, _active_user_id(), activity_id)
+    except activities.ActivityError as exc:
+        return _error(exc, 404)
+    filename = quote(f"{detail['filename'] if detail else '共读记录'}.md")
+    return Response(
+        content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )

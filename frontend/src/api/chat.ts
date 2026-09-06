@@ -27,12 +27,14 @@ export async function streamChat(
   cb: ChatCallbacks,
   image?: string | null,
   requestId?: string,
+  ephemeral = false,
 ): Promise<void> {
   const body = new URLSearchParams()
   body.set('text', text)
   if (sessionId) body.set('session_id', sessionId)
   if (image) body.set('image', image)
   if (requestId) body.set('request_id', requestId)
+  if (ephemeral) body.set('ephemeral', 'true')
 
   const res = await apiFetch('/api/chat', {
     method: 'POST',

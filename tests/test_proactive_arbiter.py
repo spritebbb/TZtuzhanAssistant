@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_test_arbiter_"))
 os.environ.setdefault("MEMORY_V2", "0")
+# 这组契约专门验证「额度为 1 时跨源共享」。不能继承开发机 .env 的个性化
+# 上限，否则本机配置为 2 时第二个来源本来就应当获准，测试会产生假失败。
+os.environ["PROACTIVE_DAILY_MAX"] = "1"
 
 from backend.core import focus, initiative, proactive_policy as policy  # noqa: E402
 from backend.core.userdb import db, get_due_promises, save_promise  # noqa: E402

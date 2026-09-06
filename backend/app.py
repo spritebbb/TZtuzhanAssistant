@@ -22,6 +22,7 @@ from .api import (
     dashboard,
     diary,
     focus,
+    future_letters,
     goals,
     greeting,
     health,
@@ -35,6 +36,7 @@ from .api import (
     personas,
     plugins as plugins_api,
     relationship,
+    relationship_snapshots,
     remote,
     sessions,
     unlocks,
@@ -172,9 +174,11 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(diary.router)
     app.include_router(focus.router)
+    app.include_router(future_letters.router)
     app.include_router(goals.router)
     app.include_router(writings.router)
     app.include_router(relationship.router)
+    app.include_router(relationship_snapshots.router)
     app.include_router(colists.router)
     app.include_router(memory_admin.router)
     app.include_router(keepsake.router)

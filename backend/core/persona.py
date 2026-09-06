@@ -88,6 +88,7 @@ def build_system_prompt(
     affection: int = 0,
     user_id: str = "",
     behavior_text: str | None = None,
+    include_plugins: bool = True,
 ) -> str:
     """组装最终 system prompt = 人格 + 风格参考 + 当前用户状态注入。"""
     persona = load_persona()
@@ -172,13 +173,14 @@ def build_system_prompt(
 
     # 插件系统提示注入（v2）：插件通过 ctx.on_system_prompt 贡献的文本，
     # 追加在末尾；异常已在 context 层过滤，这里再兜底一次确保不影响主流程
-    try:
-        from ..plugins.context import system_prompt_contributions
+    if include_plugins:
+        try:
+            from ..plugins.context import system_prompt_contributions
 
-        plugin_part = system_prompt_contributions()
-        if plugin_part:
-            dynamic += "\n\n## 插件补充信息\n" + plugin_part
-    except Exception:
-        pass
+            plugin_part = system_prompt_contributions()
+            if plugin_part:
+                dynamic += "\n\n## 插件补充信息\n" + plugin_part
+        except Exception:
+            pass
 
     return persona + dynamic

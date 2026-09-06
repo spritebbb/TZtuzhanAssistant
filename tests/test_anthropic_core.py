@@ -58,12 +58,17 @@ def test_behavior_frame() -> int:
     passed += _ok("疲惫帧含'累'", "累" in f.mood_line)
     passed += _ok("初识帧含'疏离'", "疏离" in f.stage_line)
     passed += _ok("低落时主动性收敛", "简短" in f.initiative or "兴致" in f.initiative)
+    passed += _ok("低落时语言更短", "1–2 句" in f.texture_line)
+    passed += _ok("低落时不硬追问", "硬加反问" in f.texture_line)
+    passed += _ok("低落时收住幽默", "幽默" in f.texture_line and "收住" in f.texture_line)
 
     # 雀跃 + 恋人 → 主动
     f2 = behavior.build_behavior_frame(
         state.AgentState(emotion=88, energy=90, affection=85, stage="恋人")
     )
     passed += _ok("雀跃时主动", "主动" in f2.initiative)
+    passed += _ok("亲近高情绪可轻调侃", "轻微腹黑" in f2.texture_line)
+    passed += _ok("追问频率有上限", "最多" in f2.texture_line and "追问" in f2.texture_line)
 
     # 情绪残留
     f3 = behavior.build_behavior_frame(

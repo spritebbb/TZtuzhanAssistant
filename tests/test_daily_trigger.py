@@ -97,8 +97,13 @@ async def _test_batch_marker_advances() -> None:
     with patch("backend.core.affection.schedule", new=lambda key, fn: scheduled.append(key)):
         await affection.on_message(uid, "今天第一句")
 
-    assert not scheduled, f"昨天已处理过（kv 标记在），不应重复调度：{scheduled}"
-    print("[OK] 幂等：已处理过的日子不重复调度")
+    assert not any(key.startswith("daily:") for key in scheduled), (
+        f"昨天已处理过（kv 标记在），不应重复调度每日批次：{scheduled}"
+    )
+    assert scheduled == [f"fact-decay:{uid}:{today.isoformat()}"], (
+        "跨天事实衰减是独立的每日兜底，不应被 daily done-key 一并跳过"
+    )
+    print("[OK] 幂等：已处理过的日子不重复调度，每日衰减兜底仍保留")
 
 
 async def main() -> None:

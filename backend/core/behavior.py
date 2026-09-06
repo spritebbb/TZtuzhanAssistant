@@ -22,6 +22,7 @@ class BehaviorFrame:
     initiative: str         # 主动性基调（主动/平常/收敛）
     reaction_line: str      # 若她正处在情绪残留里，该怎么流露
     stage_line: str         # 关系阶段对应的分寸提醒
+    texture_line: str = ""  # 长度档、正式度、反问频率与幽默强度
     archive_line: str = ""  # 长期情绪档案 → 长期态度（她记得这段关系里的情感积累）
     event_line: str = ""    # 事件级长期记忆 → 精确引用「你上次说的某句话」
     rest_line: str = ""     # 用户让她休息后，真实休息计时在语气里的体现
@@ -31,6 +32,8 @@ class BehaviorFrame:
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
         parts = [self.mood_line, self.stage_line]
+        if self.texture_line:
+            parts.append(self.texture_line)
         if self.season_line:
             parts.append(self.season_line)
         if self.initiative:
@@ -91,6 +94,30 @@ def _initiative_line(s: AgentState) -> str:
     if s.emotion >= 85:
         return "你现在情绪很高，想多说话、想分享，可以主动抛话题。"
     return ""
+
+
+def _texture_line(s: AgentState) -> str:
+    """把语言质地显式化，避免只靠人格卡和模型临场手感。"""
+    tension = int(getattr(s, "tension", 0) or 0)
+    if s.emotion < 30 or s.energy < 35 or tension > 0:
+        return (
+            "这一轮控制在 1–2 句，口语、直接，不写成正式说明；"
+            "不要为了续聊硬加反问，幽默和调侃先收住，也允许自然停住。"
+        )
+    if s.emotion >= 70 and s.stage in {"熟悉", "亲密", "恋人"}:
+        return (
+            "这一轮以 2–4 句为宜，保持日常口语而不是报告腔；"
+            "最多带一个真正有用的追问，可以有一点轻微腹黑或调侃，但别连续抖机灵。"
+        )
+    if s.stage == "初识":
+        return (
+            "这一轮以 1–3 句为宜，措辞自然但保留分寸，不用客服式正式表达；"
+            "只在确实需要信息时问一句，不靠反问制造熟络，幽默保持很轻。"
+        )
+    return (
+        "这一轮以 1–3 句为宜，使用自然口语，不写成报告；"
+        "追问有必要才问，通常不超过一个，幽默点到即止。"
+    )
 
 
 # ---- 情绪残留 → 该怎么流露 ----
@@ -227,6 +254,7 @@ def build_behavior_frame(state: AgentState, season_line: str = "") -> BehaviorFr
     return BehaviorFrame(
         mood_line=_mood_line(state),
         stage_line=_stage_line(state),
+        texture_line=_texture_line(state),
         initiative=_initiative_line(state),
         reaction_line=_reaction_line(state),
         archive_line=_archive_line(state),

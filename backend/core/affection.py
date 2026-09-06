@@ -505,6 +505,17 @@ async def on_message(user_id: str, text: str) -> None:
     # ---- 跨天回滚：昨日每日总结 + 新一天首次聊天/陪伴 ----
     last_day = user["last_chat_date"]
     if last_day != today.isoformat():
+        # 即使离线期间全是空日、没有任何 daily batch 会被调度，回来的第一句也要
+        # 触发一次事实衰减。与 run_daily_batch 的接入互为兜底，函数本身幂等。
+        try:
+            from .fact_decay import decay_expired_facts_async
+
+            schedule(
+                f"fact-decay:{user_id}:{today.isoformat()}",
+                lambda uid=user_id: decay_expired_facts_async(uid),
+            )
+        except Exception:
+            logger.exception("[好感度] 过期事实清理调度失败")
         if last_day:
             # 补跑：处理 (last_batch_date, 昨天] 之间所有有消息的日子。
             # 边界语义（2026-09-06 修复 off-by-one）：last_batch_date 是「最后已

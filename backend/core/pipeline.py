@@ -522,7 +522,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -537,47 +537,69 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
     progress_cb：可选的异步回调 async (event: dict) -> None，工具循环阶段进展
     （thinking/tool/tool_done）实时推送，供前端在工具执行期间展示进度而非空窗。
 
+    ephemeral=True 表示这一轮只在当前界面暂时展示，不写会话、记忆、画像、关系
+    状态或主动回访素材；仍可读取既有背景，以正常完成陪伴回复。
+
     explain_cb：可选的异步回调 async (snapshot: dict) -> None，返回这一轮实际
     注入的状态、行为帧、记忆与工具快照；不包含 system prompt 或模型思考链。
     """
+    from .privacy import is_ephemeral_request
+
+    # 在任何可扩展钩子之前识别临时语义，避免插件把本轮内容另行持久化。
+    ephemeral = is_ephemeral_request(text, explicit=ephemeral)
     async with _user_lock(user_id):
         # 插件消息钩子（v2）：用户消息入口改写（异常已在 context 层过滤）
-        try:
-            from ..plugins.context import apply_user_message
+        if not ephemeral:
+            try:
+                from ..plugins.context import apply_user_message
 
-            text = apply_user_message(text)
-        except Exception:
-            pass
+                text = apply_user_message(text)
+            except Exception:
+                pass
         return await _process_locked(
-            user_id, text, mock=mock, merged_msg=merged_msg,
+            user_id, text, mock=mock, merged_msg=merged_msg, ephemeral=ephemeral,
             stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
             explain_cb=explain_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
     from .persona_profiles import persona_name_for_user_id
+    from .privacy import ephemeral_prompt, is_ephemeral_request
+
+    ephemeral = is_ephemeral_request(text, explicit=ephemeral)
 
     persona_name = persona_name_for_user_id(user_id)
-    user = db.ensure_user(user_id)
+    user = db.get_user(user_id) if ephemeral else db.ensure_user(user_id)
+    if user is None:
+        # 尚未建档的临时会话也能回复，初始关系值只存在于本轮内存。
+        user = {
+            "first_chat_done": 0,
+            "nickname_pref": None,
+            "lover_confirm": 0,
+            "affection": 0,
+        }
     first_chat = not user["first_chat_done"]
     # 取存档前的最后一条消息时间戳：跨场判定必须基于「本轮之前」的消息，
     # 否则 add_message 后 last_message_ts 恒为 now，_long_gap 恒 False
     prev_ts = db.last_message_ts(user_id)
 
     # 1) 好感度即时规则（含跨天回滚）
-    await affection.on_message(user_id, text)
+    if not ephemeral:
+        await affection.on_message(user_id, text)
     # 好感度可能已变：刷新快照，后续 system prompt / 阶段判定用最新值
-    user = db.get_user(user_id)
+    if not ephemeral:
+        user = db.get_user(user_id)
 
     # 1.0.0) C4 解锁时刻检测：语义感知的好感度最迟上轮已结算（同用户消息串行），
     # 此刻比较「上次见过的阶段/羁绊」与当前值即得跨越；彩蛋条件同点判定。
-    try:
-        from . import unlock as _unlock_mod
+    if not ephemeral:
+        try:
+            from . import unlock as _unlock_mod
 
-        _unlock_mod.check_and_enqueue(user_id)
-    except Exception:
-        logger.exception("[pipeline] 解锁检测失败（不影响回复）")
+            _unlock_mod.check_and_enqueue(user_id)
+        except Exception:
+            logger.exception("[pipeline] 解锁检测失败（不影响回复）")
 
     # 1.0.1) 拟人核心层：LLM 语义感知 + 状态演化
     # 用一次 LLM 调用读懂这句话对菟菚的情绪/好感影响，驱动多维状态演化。
@@ -587,83 +609,90 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 且因同用户消息经 _user_lock 串行，好感度最迟在回复生成完成后更新。
     # C1 的显式交互（让她去休息 / 哄她）必须同步落账，因为它们会直接改变
     # 这一轮回复的行为帧；其余开放语义感知仍保留后台执行，避免增加首字延迟。
-    try:
-        from .state import handle_state_interaction
+    if not ephemeral:
+        try:
+            from .state import handle_state_interaction
 
-        handle_state_interaction(user_id, text)
-    except Exception:
-        logger.exception("[pipeline] 显式状态交互处理失败")
-    try:
-        _spawn_memory_task(_perceive_and_settle(user_id, text, mock=mock))
-    except Exception:
-        logger.exception("[pipeline] 拟人感知后台任务启动失败")
+            handle_state_interaction(user_id, text)
+        except Exception:
+            logger.exception("[pipeline] 显式状态交互处理失败")
+        try:
+            _spawn_memory_task(_perceive_and_settle(user_id, text, mock=mock))
+        except Exception:
+            logger.exception("[pipeline] 拟人感知后台任务启动失败")
 
     # 1.0) 用户消息先存档：即使后续 LLM 调用失败，对话历史也不丢、
     # 失败重发时不至于重复计好感（assistant 消息在生成成功后补存）。
-    db.add_message(user_id, "user", text)
+    if not ephemeral:
+        db.add_message(user_id, "user", text)
 
     # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
     # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
     # 这里只保留两个语义感知不覆盖、始终走关键词的即时信号。
-    try:
-        # 用称呼交流
-        if affection.check_nickname_used(text, user["nickname_pref"]):
-            affection.try_daily_bonus(user_id, "nickname", affection.NICKNAME_BONUS, f"用{persona_name}的称呼交流")
-        # 引用过去记忆（用户提到上次/之前/记得…，说明在引用共同经历；语义不覆盖）
-        from .memory import looks_like_recall
+    if not ephemeral:
+        try:
+            # 用称呼交流
+            if affection.check_nickname_used(text, user["nickname_pref"]):
+                affection.try_daily_bonus(user_id, "nickname", affection.NICKNAME_BONUS, f"用{persona_name}的称呼交流")
+            # 引用过去记忆（用户提到上次/之前/记得…，说明在引用共同经历；语义不覆盖）
+            from .memory import looks_like_recall
 
-        if looks_like_recall(text):
-            affection.try_daily_bonus(user_id, "memory", affection.MEMORY_REFERENCE_BONUS, "提到共同经历/回忆")
-    except Exception:
-        logger.exception("[pipeline] 好感度即时奖励失败")
+            if looks_like_recall(text):
+                affection.try_daily_bonus(user_id, "memory", affection.MEMORY_REFERENCE_BONUS, "提到共同经历/回忆")
+        except Exception:
+            logger.exception("[pipeline] 好感度即时奖励失败")
 
     # 1.5) 惰性事实提炼（按消息批量 + 会话长时间没说话后补提尾部）→ 后台执行，
     # 不阻塞本轮回复；失败只记日志（见 tasks.schedule 的 _runner）
-    try:
-        from .daily import extract_facts  # 延迟导入避免循环
-        from .tasks import schedule
+    if not ephemeral:
+        try:
+            from .daily import extract_facts  # 延迟导入避免循环
+            from .tasks import schedule
 
-        unseen = db.max_message_id(user_id) - db.get_last_fact_msg_id(user_id)
-        if unseen >= 10:
-            schedule(f"facts:{user_id}", lambda: extract_facts(user_id))
-        elif unseen >= _IDLE_MIN_NEW and _long_gap(prev_ts):
-            schedule(f"facts:{user_id}", lambda: extract_facts(user_id))
-    except Exception:
-        logger.exception("[pipeline] 惰性事实提炼调度失败")
+            unseen = db.max_message_id(user_id) - db.get_last_fact_msg_id(user_id)
+            if unseen >= 10:
+                schedule(f"facts:{user_id}", lambda: extract_facts(user_id))
+            elif unseen >= _IDLE_MIN_NEW and _long_gap(prev_ts):
+                schedule(f"facts:{user_id}", lambda: extract_facts(user_id))
+        except Exception:
+            logger.exception("[pipeline] 惰性事实提炼调度失败")
 
     # 1.6) 惰性画像提炼（共用独立游标 last_profile_msg_id，与 facts 并行）
     # → 后台执行，不阻塞回复
-    try:
-        from .features import flag
-        from .tasks import schedule
+    if not ephemeral:
+        try:
+            from .features import flag
+            from .tasks import schedule
 
-        if flag("profile_enabled"):
-            p_unseen = db.max_message_id(user_id) - db.get_last_profile_msg_id(user_id)
-            if p_unseen >= 10:
-                schedule(f"profile:{user_id}", lambda: _extract_profile(user_id))
-            elif p_unseen >= _IDLE_MIN_NEW and _long_gap(prev_ts):
-                schedule(f"profile:{user_id}", lambda: _extract_profile(user_id))
-    except Exception:
-        logger.exception("[pipeline] 惰性画像提炼调度失败")
+            if flag("profile_enabled"):
+                p_unseen = db.max_message_id(user_id) - db.get_last_profile_msg_id(user_id)
+                if p_unseen >= 10:
+                    schedule(f"profile:{user_id}", lambda: _extract_profile(user_id))
+                elif p_unseen >= _IDLE_MIN_NEW and _long_gap(prev_ts):
+                    schedule(f"profile:{user_id}", lambda: _extract_profile(user_id))
+        except Exception:
+            logger.exception("[pipeline] 惰性画像提炼调度失败")
 
     # 1.7) 惰性话题记忆：长时间没聊（新会话开场前）提炼"上次聊到哪"，让菟菚能接着聊
-    try:
-        from .tasks import schedule
+    if not ephemeral:
+        try:
+            from .tasks import schedule
 
-        if _long_gap(prev_ts):
-            schedule(f"topic:{user_id}", lambda: _extract_topic_lazy(user_id))
-    except Exception:
-        logger.exception("[pipeline] 惰性话题提炼调度失败")
+            if _long_gap(prev_ts):
+                schedule(f"topic:{user_id}", lambda: _extract_topic_lazy(user_id))
+        except Exception:
+            logger.exception("[pipeline] 惰性话题提炼调度失败")
 
     # 1.8) 惰性结构化事实提取：跨场（新会话）时从最近消息提取五元组。
     # 只在新会话触发，避免每条消息都打一次 LLM（同 key 去重）
-    try:
-        from .tasks import schedule as _schedule2
+    if not ephemeral:
+        try:
+            from .tasks import schedule as _schedule2
 
-        if _long_gap(prev_ts):
-            _schedule2(f"triples:{user_id}", lambda: _extract_triples_lazy(user_id))
-    except Exception:
-        logger.exception("[pipeline] 惰性三元组提取调度失败")
+            if _long_gap(prev_ts):
+                _schedule2(f"triples:{user_id}", lambda: _extract_triples_lazy(user_id))
+        except Exception:
+            logger.exception("[pipeline] 惰性三元组提取调度失败")
 
     # 2) 称呼与过分称呼处理（无论是否已设称呼，过分称呼都要检测并扣分）
     pref = user["nickname_pref"]
@@ -697,9 +726,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             candidate = None
     if candidate:
         if affection.check_bad_address(candidate):
-            db.update_affection(user_id, affection.BAD_ADDRESS_PENALTY, "要求不合适的称呼")
+            if not ephemeral:
+                db.update_affection(user_id, affection.BAD_ADDRESS_PENALTY, "要求不合适的称呼")
             bad_address = candidate
-        else:
+        elif not ephemeral:
             db.set_nickname(user_id, candidate)
             pref = candidate
 
@@ -741,7 +771,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     try:
         from .focus import focus_context
 
-        focus_ctx = await asyncio.to_thread(focus_context, user_id, text)
+        focus_ctx = await asyncio.to_thread(
+            focus_context, user_id, text, settle=not ephemeral
+        )
     except Exception:
         logger.exception("[pipeline] 专注上下文读取失败，按无活动继续")
 
@@ -786,14 +818,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 3.1) 长会话压缩：总消息超阈值时，把旧消息摘要成一段记忆，只保留最近的完整消息
     ctx = short_term_messages(user_id)
     compact_summary = None
-    try:
-        from .memory import compact_context
+    if not ephemeral:
+        try:
+            from .memory import compact_context
 
-        compacted = await compact_context(user_id, mock=mock)
-        if compacted is not None:
-            compact_summary, ctx = compacted
-    except Exception:
-        logger.exception("[pipeline] 长会话压缩失败，保持原上下文")
+            compacted = await compact_context(user_id, mock=mock)
+            if compacted is not None:
+                compact_summary, ctx = compacted
+        except Exception:
+            logger.exception("[pipeline] 长会话压缩失败，保持原上下文")
 
     # 3.5) 联网搜索（命中需要搜索的关键词时）
     search_hits = []
@@ -833,7 +866,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 生成结果通过 image_cb 交出去（Web 端用它拼 URL 渲染）；失败不阻塞对话，
     # 靠 LLM 自然回应。注意：只有 user 显式触发"画"才生成，避免无关句误触。
     drawn_image_path: str | None = None
-    if not mock and image_cb is not None and intent is not None and intent.get("need_draw"):
+    if not ephemeral and not mock and image_cb is not None and intent is not None and intent.get("need_draw"):
         try:
             # 先推"开始生图"标记，让前端显示占位反馈（生图较慢，避免看似卡住）
             if stream_cb is not None:
@@ -859,7 +892,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         from .seasons import current_season
         from .state import load_state
 
-        reply_state = load_state(user_id)
+        reply_state = load_state(user_id, create_if_missing=not ephemeral)
         reply_season = current_season(user_id, reply_state)
         reply_frame = build_behavior_frame(reply_state, season_line=reply_season["line"])
     except Exception:
@@ -874,8 +907,11 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         affection=user["affection"],
         user_id=user_id,
         behavior_text=reply_frame.compose() if reply_frame is not None else None,
+        include_plugins=not ephemeral,
     )
     messages = [{"role": "system", "content": system}]
+    if ephemeral:
+        messages.append({"role": "system", "content": ephemeral_prompt()})
 
     # 4.0.2) 新会话开场：距离上一场聊完较久（跨场）且有记录的上次话题时，
     # 让菟菚像记得似的自然接上，而不是每次都像重新认识。只在真正开场时提一次。
@@ -904,14 +940,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.exception("[pipeline] 话题延续注入失败")
 
     # 4.0) 日常对话里的特殊日子识别：用户这句若在告知/约定某个日子，自动记住
-    try:
-        from .date_memory import extract_from_message
-        from .userdb import get_today_important_dates
+    newly_saved = []
+    if not ephemeral:
+        try:
+            from .date_memory import extract_from_message
 
-        newly_saved = await extract_from_message(user_id, text, mock=mock)
-    except Exception:
-        logger.exception("[pipeline] 特殊日子识别失败")
-        newly_saved = []
+            newly_saved = await extract_from_message(user_id, text, mock=mock)
+        except Exception:
+            logger.exception("[pipeline] 特殊日子识别失败")
+    from .userdb import get_today_important_dates
 
     # 4.1) 情感记忆：今天有没有特殊日子（生日/纪念日等）
     try:
@@ -921,15 +958,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         today_dates = []
     if today_dates:
         # M2：日子真的到来了——写入/刷新 important_date 事件（幂等，每年同一条）。
-        try:
-            from datetime import date as _today_cls
+        if not ephemeral:
+            try:
+                from datetime import date as _today_cls
 
-            from .relationship_events import refresh_important_date
+                from .relationship_events import refresh_important_date
 
-            for _date_row in today_dates:
-                refresh_important_date(user_id, _date_row, _today_cls.today())
-        except Exception:
-            logger.exception("[pipeline] 纪念日事件记录失败（不影响注入）")
+                for _date_row in today_dates:
+                    refresh_important_date(user_id, _date_row, _today_cls.today())
+            except Exception:
+                logger.exception("[pipeline] 纪念日事件记录失败（不影响注入）")
         labels = "、".join(d["label"] for d in today_dates)
         messages.append(
             {
@@ -1004,7 +1042,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     ),
                 }
             )
-            if not mock:
+            if not mock and not ephemeral:
                 _spawn_memory_task(arbitrate_and_forget(user_id, text))
     except Exception:
         logger.exception("[pipeline] 记忆纠偏处理失败")
@@ -1194,30 +1232,31 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # C4 解锁时刻：她有句心里话了到想说的时候（阈值跨越/彩蛋触发，队列制每轮最多一条）。
     # 锚点写死、措辞由她现场展开——与 C3 纪念日/C6 约定同一模式。
     pending_unlock: dict | None = None
-    try:
-        from . import unlock as _unlock_mod
+    if not ephemeral:
+        try:
+            from . import unlock as _unlock_mod
 
-        pending_unlock = _unlock_mod.next_pending(user_id)
-        if pending_unlock is not None:
-            anchor_lines = "\n".join(f"- {a}" for a in pending_unlock["anchors"])
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "你心里有件事一直想对他说，今天你想自然地说出来"
-                        "（这不是任务，是你自己想讲）：\n"
-                        f"这件事是关于：{pending_unlock['title']}\n"
-                        "你心里盘旋的念头：\n"
-                        + anchor_lines
-                        + "\n用你自己的话、顺着眼下的聊天氛围带出来，可以先铺垫几句再说；"
-                        "说完就自然聊下去。不要念清单、不要「我要跟你说件事」式预告、"
-                        "不要提好感度/等级/解锁/系统这类词。"
-                    ),
-                }
-            )
-    except Exception:
-        logger.exception("[pipeline] 解锁注入失败（不影响回复）")
-        pending_unlock = None
+            pending_unlock = _unlock_mod.next_pending(user_id)
+            if pending_unlock is not None:
+                anchor_lines = "\n".join(f"- {a}" for a in pending_unlock["anchors"])
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "你心里有件事一直想对他说，今天你想自然地说出来"
+                            "（这不是任务，是你自己想讲）：\n"
+                            f"这件事是关于：{pending_unlock['title']}\n"
+                            "你心里盘旋的念头：\n"
+                            + anchor_lines
+                            + "\n用你自己的话、顺着眼下的聊天氛围带出来，可以先铺垫几句再说；"
+                            "说完就自然聊下去。不要念清单、不要「我要跟你说件事」式预告、"
+                            "不要提好感度/等级/解锁/系统这类词。"
+                        ),
+                    }
+                )
+        except Exception:
+            logger.exception("[pipeline] 解锁注入失败（不影响回复）")
+            pending_unlock = None
 
     # 4.2) 对对方的了解：画像 + 口头禅/黑话 + 场景风格 + 说话风格，合成一条注入。
     # 闲聊时跳过，避免堆砌额外信息（意图路由判定）。
@@ -1318,29 +1357,31 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 好感度阶段过渡感知：跨阶段（初识→熟悉→亲密→恋人）时，注入一条
     # "心里隐约感觉到关系在变化"的提示，让升级体验自然（而非生硬切换）。
     # 用 kv 记录"上次报告过的阶段"，只报告一次，避免每轮重复注入。
-    try:
-        from .userdb import kv_get as _kv_get, kv_set as _kv_set
+    if not ephemeral:
+        try:
+            from .userdb import kv_get as _kv_get, kv_set as _kv_set
 
-        prev_stage = _kv_get(user_id, "reported_stage")
-        if prev_stage and prev_stage != stage:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"你心里隐约觉得，你们的关系在悄悄发生变化（从「{prev_stage}」慢慢走到了「{stage}」）。"
-                        "这种变化不用刻意说破、不用汇报，就像真的相处久了自然发生的一样："
-                        "在语气、分寸、亲近程度里自然流露一点点就好，别解释、别总结、别提阶段名称。"
-                    ),
-                }
-            )
-        _kv_set(user_id, "reported_stage", stage)
-    except Exception:
-        pass
+            prev_stage = _kv_get(user_id, "reported_stage")
+            if prev_stage and prev_stage != stage:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"你心里隐约觉得，你们的关系在悄悄发生变化（从「{prev_stage}」慢慢走到了「{stage}」）。"
+                            "这种变化不用刻意说破、不用汇报，就像真的相处久了自然发生的一样："
+                            "在语气、分寸、亲近程度里自然流露一点点就好，别解释、别总结、别提阶段名称。"
+                        ),
+                    }
+                )
+            _kv_set(user_id, "reported_stage", stage)
+        except Exception:
+            pass
 
     # 初识阶段强调已在 persona 的 dynamic 段中注入，不再重复（避免冗余指令冲淡工具调用）。
     # 仅保留对过早表白/求婚的拒绝处理。
     if stage in ("初识", "熟悉") and affection.check_early_confession(text):
-        db.update_affection(user_id, affection.EARLY_CONFESSION_PENALTY, "过早表白/求婚")
+        if not ephemeral:
+            db.update_affection(user_id, affection.EARLY_CONFESSION_PENALTY, "过早表白/求婚")
         messages.append(
             {
                 "role": "system",
@@ -1405,7 +1446,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 5.1) 工具调用循环：有明确工具需求（搜索/生图/回忆/待办/文件/命令等）时启用，
     # 让 LLM 按需自主调用工具，结果注入下一轮；纯聊天直接走流式生成
     # （打字机效果），避免流式分支成为死代码。
-    use_tool_loop = not mock and _needs_tool_loop(text, intent)
+    # 临时对话禁用工具循环，避免待办、文件、记忆工具把本轮内容写到旁路存储。
+    # 只读的内建搜索仍可在上方按需使用。
+    use_tool_loop = not ephemeral and not mock and _needs_tool_loop(text, intent)
 
     # 5.1.5) 生图提示：图片已在 4.0.1 生成好，告诉 LLM 让它在回复里自然提及
     # （图会由前端另行渲染，这里只负责让菟菚"知道自己画了"、回一句自然的话）
@@ -1558,19 +1601,20 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             logger.exception("[pipeline] 重复回复检测失败（不影响回复）")
 
     # 5.9) 插件回复钩子（v2）：最终回复出口改写（敏感词过滤/自动翻译等）
-    try:
-        from ..plugins.context import apply_reply
+    if not ephemeral:
+        try:
+            from ..plugins.context import apply_reply
 
-        reply2 = apply_reply(reply)
-        if reply2.strip():
-            reply = reply2
-    except Exception:
-        pass
+            reply2 = apply_reply(reply)
+            if reply2.strip():
+                reply = reply2
+        except Exception:
+            pass
 
     # 5.10) 自制表情包：只在明显情绪场景下低频触发，优先复用收藏。
     # 用户明确要求画图时已有 drawn_image_path，不再叠第二张图片。
     sticker_path: str | None = None
-    if not mock and image_cb is not None and drawn_image_path is None:
+    if not ephemeral and not mock and image_cb is not None and drawn_image_path is None:
         try:
             from .stickers import maybe_attach_sticker
 
@@ -1587,7 +1631,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             logger.exception("[pipeline] 表情包附带失败（不影响回复）")
 
     # 5.10.1) C4 解锁落账：回复已定稿，把「她说出口的话」摘要存进收集页
-    if pending_unlock is not None:
+    if not ephemeral and pending_unlock is not None:
         try:
             from . import unlock as _unlock_mod
 
@@ -1632,7 +1676,11 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 回复解释快照失败（不影响回复）")
 
-    # 6) 存档（user 消息已在 1.0 存档，这里只补 assistant 回复）
+    # 6) 临时对话只把回复交给当前客户端，任何会话/记忆/关系状态都不落盘。
+    if ephemeral:
+        return reply
+
+    # 普通对话存档（user 消息已在 1.0 存档，这里只补 assistant 回复）
     db.add_message(user_id, "assistant", reply)
     lm1_id = db.add_long_memory(user_id, f"用户说：{text}")
     lm2_id = db.add_long_memory(user_id, f"{persona_name}说：{reply}")

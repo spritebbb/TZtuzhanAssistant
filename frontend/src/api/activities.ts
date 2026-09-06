@@ -14,7 +14,7 @@ export interface ReadingActivity {
   kind: 'reading'
   document_id: number
   title: string
-  status: 'active' | 'paused' | 'completed'
+  status: 'active' | 'paused' | 'completed' | 'cancelled'
   position: number
   created_at: string
   updated_at: string
@@ -59,6 +59,14 @@ export function resumeReading(activityId: number): Promise<ReadingActivity> {
   return activityRequest(`/api/activities/${activityId}/resume`, { method: 'POST' })
 }
 
+export function pauseReading(activityId: number): Promise<ReadingActivity> {
+  return activityRequest(`/api/activities/${activityId}/pause`, { method: 'POST' })
+}
+
+export function cancelReading(activityId: number): Promise<ReadingActivity> {
+  return activityRequest(`/api/activities/${activityId}/cancel`, { method: 'POST' })
+}
+
 export function setReadingPosition(activityId: number, position: number): Promise<ReadingActivity> {
   return activityRequest(`/api/activities/${activityId}/position`, {
     method: 'PUT',
@@ -89,4 +97,24 @@ export function saveReadingViewpoint(
 
 export function completeReading(activityId: number): Promise<ReadingActivity> {
   return activityRequest(`/api/activities/${activityId}/complete`, { method: 'POST' })
+}
+
+export async function proposeReadingQuestion(
+  activityId: number,
+  userViewpoint = '',
+): Promise<string> {
+  const response = await apiFetch(`/api/activities/${activityId}/question`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_viewpoint: userViewpoint }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok || typeof data.question !== 'string') {
+    throw new Error(data.error || '这一段的问题暂时没想出来')
+  }
+  return data.question
+}
+
+export function exportReadingUrl(activityId: number): string {
+  return `/api/activities/${activityId}/export?format=md`
 }

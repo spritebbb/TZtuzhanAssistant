@@ -9,6 +9,7 @@ import {
   getInteractionStyle,
   resetInteractionStyle,
   updateFact,
+  updateFactPinned,
   resolveFactConflict,
   updateFactSurfacePolicy,
   type FactItem,
@@ -18,6 +19,7 @@ import MemoryPanel from '../MemoryPanel.vue'
 vi.mock('../../api/memory', () => ({
   getFacts: vi.fn(),
   updateFact: vi.fn(),
+  updateFactPinned: vi.fn(),
   deleteFact: vi.fn(),
   updateFactSurfacePolicy: vi.fn(),
   resolveFactConflict: vi.fn(),
@@ -52,6 +54,7 @@ describe('MemoryPanel', () => {
   beforeEach(() => {
     vi.mocked(getFacts).mockReset()
     vi.mocked(updateFact).mockReset()
+    vi.mocked(updateFactPinned).mockReset()
     vi.mocked(deleteFact).mockReset()
     vi.mocked(updateFactSurfacePolicy).mockReset()
     vi.mocked(resolveFactConflict).mockReset()
@@ -61,6 +64,7 @@ describe('MemoryPanel', () => {
     vi.mocked(deleteUserTerm).mockReset()
     vi.mocked(getFacts).mockResolvedValue([{ ...fact }])
     vi.mocked(updateFact).mockResolvedValue()
+    vi.mocked(updateFactPinned).mockResolvedValue()
     vi.mocked(updateFactSurfacePolicy).mockResolvedValue()
     vi.mocked(resolveFactConflict).mockResolvedValue()
     vi.mocked(getHerProfile).mockResolvedValue([
@@ -102,6 +106,18 @@ describe('MemoryPanel', () => {
     expect(wrapper.text()).toContain('用户更喜欢阵雨')
     expect(wrapper.text()).toContain('你已确认')
     expect(wrapper.text()).toContain('置信度 100%')
+  })
+
+  it('lets the user keep a fact beyond natural decay', async () => {
+    const wrapper = mount(MemoryPanel, { props: { show: true } })
+    await flushPromises()
+
+    const toggle = wrapper.get<HTMLInputElement>('.pin-toggle input')
+    await toggle.setValue(true)
+    await flushPromises()
+
+    expect(updateFactPinned).toHaveBeenCalledWith(7, true)
+    expect(toggle.element.checked).toBe(true)
   })
 
   it('renders a pending conflict and lets the user choose the new fact', async () => {

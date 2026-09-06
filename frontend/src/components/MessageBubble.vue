@@ -139,6 +139,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
       />
       <div class="meta" :class="{ pinned: copied || whyOpen }">
         <span class="time">{{ formatTime(message.ts) }}</span>
+        <span v-if="message.ephemeral" class="ephemeral-mark" title="刷新后消失，不进入记忆或关系状态">不留痕</span>
         <button
           v-if="canExplain()"
           class="whybtn"
@@ -342,6 +343,14 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 }
 .msg:hover .meta, .msg .meta.pinned { opacity: 1; }
 .time { font-size: 0.7rem; color: var(--text-faint); }
+.ephemeral-mark {
+  padding: 1px 6px;
+  border: 1px solid var(--edge-active);
+  border-radius: 999px;
+  color: var(--primary-text);
+  background: var(--primary-soft);
+  font-size: 0.65rem;
+}
 .copybtn {
   display: flex;
   align-items: center;

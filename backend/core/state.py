@@ -330,12 +330,16 @@ def _decay_emotion_memory(memory: list[dict], now: datetime) -> list[dict]:
 
 
 # ---- 状态读取 ----
-def load_state(user_id: str) -> AgentState:
-    """读取用户当前状态（含漂移演化，读时即推进，无需外部定时器）。"""
+def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
+    """读取用户当前状态（含漂移演化，读时即推进，无需外部定时器）。
+
+    ``create_if_missing=False`` 用于临时对话等只读路径，避免一次读取隐式创建
+    users/mood_log 记录。不存在的用户按初始状态构造，但不落盘。
+    """
     from .userdb import db
 
-    user = db.ensure_user(user_id)
-    affection = int(user["affection"] or 0)
+    user = db.ensure_user(user_id) if create_if_missing else db.get_user(user_id)
+    affection = int(user["affection"] or 0) if user is not None else 0
     emotion, updated = db.get_mood(user_id)
 
     # 精力：从「上次聊天到现在」的时长推疲惫度（越久越没聊 → 越累/越闷）

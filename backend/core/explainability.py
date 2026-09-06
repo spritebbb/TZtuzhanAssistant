@@ -25,6 +25,7 @@ def build_reply_explanation(
     for label, value in (
         ("情绪与精力", frame.mood_line),
         ("关系分寸", frame.stage_line),
+        ("语言质地", getattr(frame, "texture_line", "")),
         ("主动性", frame.initiative),
         ("情绪余温", frame.reaction_line),
         ("休息状态", frame.rest_line),

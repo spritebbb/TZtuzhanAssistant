@@ -149,6 +149,10 @@ class Config:
         self.unlock_streak_days: int = max(2, _env_int("UNLOCK_STREAK_DAYS", 7))
         # M3.2 专注陪伴：25/50 分钟安静模式（feature flag，0 关闭）
         self.focus_enabled: bool = os.getenv("FOCUS_ENABLED", "1") != "0"
+        # M8 写给未来的我们：未来信件（feature flag，0 关闭）
+        self.future_letters_enabled: bool = os.getenv("FUTURE_LETTERS_ENABLED", "1") != "0"
+        # M8 关系快照：30/100/365 天纪念页（feature flag，0 关闭）
+        self.relationship_snapshots_enabled: bool = os.getenv("RELATIONSHIP_SNAPSHOTS_ENABLED", "1") != "0"
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
