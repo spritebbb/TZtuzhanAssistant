@@ -1,7 +1,7 @@
-# 菟菚桌面助手 —— Codex 接手交接报告（2026-09-06 更新）
+# 菟菚桌面助手 —— Codex 接手交接报告（2026-09-07 更新）
 
 > 本报告为 Codex 接手的**最新**状态。上一版（D5 交接）已过时——此后经历了 D2 RAG 知识库、C4 好感度玩法闭环、历史文档归档。
-> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线 M0–M5 的核心退出标准已达成，M6 首批低成本原型完成，M8 已完成未来信件、关系快照、双视角叙事（A+B）、阶段封存与告别；M3 的世界观/观察日志与网页/EPUB 属按真实使用再评估的扩展项。当前工作区验证基线为后端聚合 **67/67**、前端 Vitest **59/59**、人格 golden set **48 场景**、生产构建与浏览器关键路径 **6/6**。M1 临时对话、事实自然衰减与「长期保留」入口已完成；每日批处理 off-by-one 与主动统一仲裁器均已收口。
+> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线 M0–M5 的核心退出标准已达成，M6 首批低成本原型完成，M8 已完成未来信件、关系快照、双视角叙事（A+B）、阶段封存与告别、梦境/平行可能性、不同版本的我们（M8.7，2026-09-07，ZCode 实现、Codex 独立审查验收）；M3 的世界观/观察日志与网页/EPUB 属按真实使用再评估的扩展项。当前稳定验证基线为后端聚合 **69/69**、前端 Vitest **67/67**、人格 golden set **48 场景**、生产构建与浏览器关键路径 **7/7**。M1 临时对话、事实自然衰减与「长期保留」入口已完成；每日批处理 off-by-one 与主动统一仲裁器均已收口。
 
 ---
 
@@ -62,6 +62,8 @@ TZtuzhanAssistant/
 - M0 语言质地补漏同步完成：回复长度、正式度、追问频率、幽默强度、沉默倾向进入行为帧，先增 eval 再调参数
 - M1 收尾切片已于 2026-09-06 完成（Codex / GPT-5；zCode 提供衰减初步方案，其只读扫描任务未返回有效发现）：一次性/自然语言临时对话全链路不落盘，插件与工具副作用隔离；到期未固定事实按权威生命周期衰减，daily + 跨空白日归来双重兜底；记忆管理可固定长期保留
 - M8.1「写给未来的我们」已于 2026-09-06 完成（ZCode / GLM 初稿，Codex / GPT-5 审查验收）：日期/目标/事件三类解锁，锁定态正文不出后端，用户显式拆信后生成 artifact；schema v10、双 reset、关系包迁移、多人格隔离和真删除均有回归覆盖
+- M8.6「梦境/平行可能性」已于 2026-09-06 完成（ZCode / GLM）：`backend/core/possibilities.py` + `/api/possibilities` + CornerPanel 虚构创作区；草稿绝不落库、收藏是唯一持久化点（artifacts 复用，source_type='fiction'，合成 source_id 单调）；双视角锚点/候选与快照汇编均排除 fiction，惊喜素材白名单天然不受影响；不升 schema
+- M8.7「不同版本的我们」已于 2026-09-07 完成并通过 Codex 独立验收：`backend/core/relationship_versions.py` + `/api/relationship-versions` + CornerPanel「不同版本的我们」区；用户显式创建命名检查点、不可修改只可删除，snapshot_json（format_version=1）只存状态/行为帧白名单/计数，绝不存任何原文；确定性比较无 LLM 无价值判断；schema v12→v13（relationship_versions），双 reset 清单、关系包导出恢复、feature flag 全联动；新增 tests/test_relationship_versions.py 9 组与 CornerPanel 4 例。实测后端 69/69、前端 67/67、生产构建与浏览器 7/7 全绿。
 
 ### D8 移动端（PWA 推送）
 - **前置**：A4 公网部署（Web Push 需 HTTPS 可达域名）
@@ -81,7 +83,7 @@ env -u CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR -u CODEBUDDY_TOOL_CALL_ID .venv/Scri
 
 ### 3. 测试套件入口 + 计数
 - 全量：`pytest tests/test_suite_runner.py -q`（聚合 `tests/` 各模块）
-- 当前聚合基线为 **67/67**；`test_edge_regressions.py` 另有快速边界回归
+- 当前聚合基线为 **69/69**；`test_edge_regressions.py` 另有快速边界回归
 - 改动后先 `py_compile` 相关 .py 再跑套件
 
 ### 4. 前端改完要过 vue-tsc + vite build
@@ -126,9 +128,9 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 
 ## 八、给你的下一步（Codex 建议行动序列）
 
-1. **先跑全量测试确认基线**：`.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q` → 当前基线应 **67/67 全绿**；前端执行 `npm test` 与 `npm run test:e2e`（当前分别 59/59、7/7）。
+1. **先确认工作树与验收记录**：M8.7 已于 2026-09-07 由 Codex 实跑 `.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q`、`npm test`、`npm run build`、`npm run test:e2e`，结果为后端 **69/69**、前端 **67/67**、生产构建与浏览器 **7/7** 全绿；后续改动以此为回归基线。
 2. 读 `docs/EVOLUTION-ROADMAP.md`（逐项验收标准）+ `persona-菟菚.md`（人格约束，改动别破坏人设）
-3. **下一推荐切片为 M8「梦境/平行可能性」或「重逢」**：双视角 A/B 与阶段封存均已落地（sealing.py：只导出不删除，纪念包走 E03 恢复通道，LLM 告别信失败回退确定性文案）。剩余：梦境/平行可能性（复用 `<fiction_story>` 虚构隔离）、重逢交互（待用户拍板）、不同版本的我们（版本化快照比较）。M3 世界观/观察日志、网页/EPUB 按真实使用再评估；桌面宠物与 STT 仍需用户拍板。
+3. **下一推荐切片转入 M9 地基与人格打磨**：M8.7「不同版本的我们」已完成并验收（relationship_versions.py：显式检查点不可变、白名单快照、确定性比较无价值判断，schema v13）。M8 仅余重逢交互，三段式方案已经用户拍板：她视角离线叙事 → 用户回应 → 补写日记/研究；实施须遵守长期离线不扣好感、不追问去向、不制造负罪感及 E03 恢复预览/校验/回滚。M3 世界观/观察日志、网页/EPUB 按真实使用再评估；桌面宠物与 STT 按 M9 的既定延期条件推进。
 4. **D8 不要直接开做**：它仍卡公网部署、HTTPS、推送凭据与通知策略，需先与用户对齐资源和方案。
 
 ---

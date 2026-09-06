@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 12
+_SCHEMA_VERSION = 13
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -404,6 +404,20 @@ CREATE TABLE IF NOT EXISTS dual_perspectives (
 );
 CREATE INDEX IF NOT EXISTS idx_dual_perspectives_user
     ON dual_perspectives(user_id, id);
+-- M8.7「不同版本的我们」：用户显式创建的关系版本检查点。snapshot_json 只保存
+-- 当时的结构化状态、行为帧白名单与记录计数（format_version=1），绝不保存消息
+-- 原文、事实正文、事件 payload 或日记/产物内容；一经创建不可修改，只可删除。
+CREATE TABLE IF NOT EXISTS relationship_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_relationship_versions_user
+    ON relationship_versions(user_id, captured_at, id);
 -- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
 CREATE TABLE IF NOT EXISTS pending_thoughts (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1428,6 +1442,7 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
+                "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
             ):
                 self.conn.execute(f"DELETE FROM {table}")

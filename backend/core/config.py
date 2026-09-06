@@ -155,6 +155,10 @@ class Config:
         self.relationship_snapshots_enabled: bool = os.getenv("RELATIONSHIP_SNAPSHOTS_ENABLED", "1") != "0"
         # M8 双视角叙事：同一经历的双方解释页（feature flag，0 关闭）
         self.dual_perspectives_enabled: bool = os.getenv("DUAL_PERSPECTIVES_ENABLED", "1") != "0"
+        # M8 梦境/平行可能性：显式收藏的虚构片段（feature flag，0 关闭）
+        self.possibilities_enabled: bool = os.getenv("POSSIBILITIES_ENABLED", "1") != "0"
+        # M8.7 不同版本的我们：关系版本检查点（feature flag，0 关闭）
+        self.relationship_versions_enabled: bool = os.getenv("RELATIONSHIP_VERSIONS_ENABLED", "1") != "0"
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()

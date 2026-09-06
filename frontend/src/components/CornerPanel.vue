@@ -28,6 +28,21 @@ import {
   type RelationshipSnapshot,
   type SnapshotMilestone,
 } from '../api/relationshipSnapshots'
+import {
+  collectPossibility,
+  deletePossibility,
+  generatePossibilityDraft,
+  probePossibilities,
+  type PossibilityMode,
+} from '../api/possibilities'
+import {
+  captureRelationshipVersion,
+  compareRelationshipVersions,
+  deleteRelationshipVersion,
+  listRelationshipVersions,
+  type RelationshipVersion,
+  type RelationshipVersionComparison,
+} from '../api/relationshipVersions'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -42,6 +57,9 @@ const snapshotMilestones = ref<SnapshotMilestone[]>([])
 const snapshotsAvailable = ref(true)
 const duals = ref<DualPerspective[]>([])
 const dualsAvailable = ref(true)
+const possibilitiesAvailable = ref(true)
+const versions = ref<RelationshipVersion[]>([])
+const versionsAvailable = ref(true)
 const loading = ref(false)
 const error = ref('')
 
@@ -51,6 +69,8 @@ const TYPE_LABELS: Record<string, string> = {
   co_story: '共同故事',
   future_letter: '未来信件',
   relationship_snapshot: '纪念页',
+  dream_fragment: '梦境收藏',
+  parallel_possibility: '平行可能',
 }
 
 function typeLabel(type: string) {
@@ -110,12 +130,15 @@ function toggleCompose() {
 async function load() {
   loading.value = true
   error.value = ''
-  const [artifactResult, lettersResult, snapshotsResult, dualsResult] = await Promise.allSettled([
-    listArtifacts(),
-    listFutureLetters(),
-    listRelationshipSnapshots(),
-    listDualPerspectives(),
-  ])
+  const [artifactResult, lettersResult, snapshotsResult, dualsResult, possibilitiesResult, versionsResult] =
+    await Promise.allSettled([
+      listArtifacts(),
+      listFutureLetters(),
+      listRelationshipSnapshots(),
+      listDualPerspectives(),
+      probePossibilities(),
+      listRelationshipVersions(),
+    ])
   if (artifactResult.status === 'fulfilled') {
     artifacts.value = artifactResult.value
   } else {
@@ -151,6 +174,20 @@ async function load() {
     // 双视角同样独立降级。
     dualsAvailable.value = false
     duals.value = []
+  }
+  if (possibilitiesResult.status === 'fulfilled') {
+    possibilitiesAvailable.value = true
+  } else {
+    // 虚构创作区独立降级：flag 关闭或接口不可用时静默隐藏，不影响其他区块。
+    possibilitiesAvailable.value = false
+  }
+  if (versionsResult.status === 'fulfilled') {
+    versionsAvailable.value = true
+    versions.value = versionsResult.value
+  } else {
+    // 「不同版本的我们」独立降级：flag 关闭或旧后端时静默隐藏，不影响其他区块。
+    versionsAvailable.value = false
+    versions.value = []
   }
   loading.value = false
 }
@@ -295,7 +332,7 @@ const dualComposing = ref(false)
 const dualBusy = ref(false)
 const dualError = ref('')
 const dualTitle = ref('')
-const dualAnchorType = ref<'free' | 'event' | 'diary' | 'goal'>('free')
+const dualAnchorType = ref<'free' | 'event' | 'diary' | 'goal' | 'artifact'>('free')
 const dualAnchorId = ref<number | ''>('')
 const dualUserView = ref('')
 const anchorCandidates = ref<DualAnchorCandidates | null>(null)
@@ -335,7 +372,7 @@ function toggleDualCompose() {
   if (!anchorCandidates.value) {
     listDualAnchorCandidates()
       .then((candidates) => { anchorCandidates.value = candidates })
-      .catch(() => { anchorCandidates.value = { events: [], diary: [], goals: [] } })
+      .catch(() => { anchorCandidates.value = { events: [], diary: [], goals: [], artifacts: [] } })
   }
 }
 
@@ -344,6 +381,7 @@ function anchorOptions() {
   if (dualAnchorType.value === 'event') return anchorCandidates.value.events
   if (dualAnchorType.value === 'diary') return anchorCandidates.value.diary
   if (dualAnchorType.value === 'goal') return anchorCandidates.value.goals
+  if (dualAnchorType.value === 'artifact') return anchorCandidates.value.artifacts
   return []
 }
 
@@ -427,6 +465,237 @@ async function removeDual(page: DualPerspective) {
     await load()
   } catch {
     dualError.value = '删除没有成功，过会儿再试'
+  }
+}
+
+// ---- 梦境与平行可能（虚构片段，只有显式收藏才留下）----
+const possibilityComposing = ref(false)
+const possibilityBusy = ref(false)
+const possibilityError = ref('')
+const possibilityMode = ref<PossibilityMode>('dream')
+const possibilityTitle = ref('')
+const possibilityPremise = ref('')
+const possibilityDraft = ref('')
+const possibilityHasDraft = ref(false)
+const confirmDeleteArtifactId = ref<number | null>(null)
+
+function isFiction(item: ArtifactItem) {
+  return item.source_type === 'fiction'
+}
+
+function resetPossibilityForm() {
+  possibilityMode.value = 'dream'
+  possibilityTitle.value = ''
+  possibilityPremise.value = ''
+  possibilityDraft.value = ''
+  possibilityHasDraft.value = false
+  possibilityError.value = ''
+}
+
+function togglePossibilityCompose() {
+  possibilityComposing.value = !possibilityComposing.value
+  if (!possibilityComposing.value) resetPossibilityForm()
+}
+
+async function possibilityGenerate() {
+  if (possibilityBusy.value) return
+  possibilityError.value = ''
+  const title = possibilityTitle.value.trim()
+  const premise = possibilityPremise.value.trim()
+  if (!title) {
+    possibilityError.value = '给这段虚构起个名字'
+    return
+  }
+  if (!premise) {
+    possibilityError.value = '先写一句虚构前提'
+    return
+  }
+  possibilityBusy.value = true
+  try {
+    // 只生成草稿；不落库——收藏是唯一的持久化点。
+    possibilityDraft.value = await generatePossibilityDraft(possibilityMode.value, title, premise)
+    possibilityHasDraft.value = true
+  } catch (exc) {
+    possibilityError.value = exc instanceof Error ? exc.message : '草稿没有生成'
+  } finally {
+    possibilityBusy.value = false
+  }
+}
+
+async function possibilityCollect() {
+  if (possibilityBusy.value) return
+  possibilityError.value = ''
+  const title = possibilityTitle.value.trim()
+  const content = possibilityDraft.value.trim()
+  if (!content) {
+    possibilityError.value = '正文还空着，先生成或写点什么再收藏'
+    return
+  }
+  possibilityBusy.value = true
+  try {
+    await collectPossibility(possibilityMode.value, title, content)
+    possibilityComposing.value = false
+    resetPossibilityForm()
+    await load()
+  } catch (exc) {
+    possibilityError.value = exc instanceof Error ? exc.message : '收藏没有成功'
+  } finally {
+    possibilityBusy.value = false
+  }
+}
+
+async function removePossibility(item: ArtifactItem) {
+  if (confirmDeleteArtifactId.value !== item.id) {
+    confirmDeleteArtifactId.value = item.id
+    return
+  }
+  confirmDeleteArtifactId.value = null
+  try {
+    await deletePossibility(item.id)
+    await load()
+  } catch {
+    error.value = '删除没有成功，过会儿再试'
+  }
+}
+
+// ---- 不同版本的我们（关系版本检查点：显式创建、不可修改、只可删除）----
+const versionLabel = ref('')
+const versionBusy = ref(false)
+const versionError = ref('')
+const confirmDeleteVersionId = ref<number | null>(null)
+const compareBeforeId = ref<number | ''>('')
+const compareAfterId = ref<number | ''>('')
+const compareBusy = ref(false)
+const compareError = ref('')
+const comparison = ref<RelationshipVersionComparison | null>(null)
+
+const STATE_DELTA_LABELS: Record<string, string> = {
+  'state.affection': '好感',
+  'state.mood': '心情',
+  'state.energy': '精力',
+  'state.tension': '张力',
+}
+const COUNT_DELTA_LABELS: Record<string, string> = {
+  messages: '消息记录',
+  facts_active: '有效事实',
+  long_memory: '长期记忆',
+  events_active: '真实事件',
+  artifacts_real: '真实产物',
+  artifacts_fiction: '虚构收藏',
+  activities_active: '进行中的活动',
+  activities_completed: '完成的活动',
+  promises_pending: '待跟进的约定',
+  promises_completed: '完成的约定',
+  diary: '日记',
+  future_letters: '未来信件',
+  dual_perspectives: '双视角',
+  relationship_snapshots: '纪念页',
+}
+const CHANGE_KEY_LABELS: Record<string, string> = {
+  'state.stage': '关系阶段',
+  'state.mood_label': '心情档',
+  'state.resting': '休息状态',
+  'season.code': '季节',
+  'season.label': '季节',
+  'behavior.mood_line': '语气基调',
+  'behavior.stage_line': '关系分寸',
+  'behavior.texture_line': '语言质地',
+  'behavior.initiative': '主动性',
+  'behavior.rest_line': '休息状态',
+  'behavior.season_line': '季节氛围',
+}
+
+function deltaLabel(key: string) {
+  if (STATE_DELTA_LABELS[key]) return STATE_DELTA_LABELS[key]
+  if (key.startsWith('counts.')) return COUNT_DELTA_LABELS[key.slice(7)] || key.slice(7)
+  return key
+}
+
+// 数值增减固定带符号展示：+3 / -2 / 0
+function formatDelta(delta: number) {
+  return delta > 0 ? `+${delta}` : `${delta}`
+}
+
+function changeLabel(key: string) {
+  return CHANGE_KEY_LABELS[key] || key
+}
+
+function showText(value: RelationshipVersionComparison['changes'][number]['before']) {
+  if (value === null || value === undefined || value === '') return '（空）'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  return String(value)
+}
+
+function resetCompare() {
+  compareBeforeId.value = ''
+  compareAfterId.value = ''
+  comparison.value = null
+  compareError.value = ''
+}
+
+function versionLine(version: RelationshipVersion) {
+  const state = version.snapshot.state
+  return `${version.captured_at.slice(0, 10)} · ${state.stage} · 好感 ${state.affection} · 心情 ${state.mood_label} ${state.mood} · 精力 ${state.energy} · 张力 ${state.tension} · 真实记录 ${version.snapshot.counts.messages} 条`
+}
+
+async function captureVersion() {
+  if (versionBusy.value) return
+  versionError.value = ''
+  const label = versionLabel.value.trim()
+  if (!label) {
+    versionError.value = '先给这个版本起个名字'
+    return
+  }
+  versionBusy.value = true
+  try {
+    await captureRelationshipVersion(label)
+    versionLabel.value = ''
+    resetCompare()
+    await load()
+  } catch (exc) {
+    versionError.value = exc instanceof Error ? exc.message : '版本没有留下，再试一次'
+  } finally {
+    versionBusy.value = false
+  }
+}
+
+async function removeVersion(version: RelationshipVersion) {
+  if (confirmDeleteVersionId.value !== version.id) {
+    confirmDeleteVersionId.value = version.id
+    return
+  }
+  confirmDeleteVersionId.value = null
+  try {
+    await deleteRelationshipVersion(version.id)
+    resetCompare()
+    await load()
+  } catch {
+    versionError.value = '删除没有成功，过会儿再试'
+  }
+}
+
+async function runCompare() {
+  if (compareBusy.value) return
+  compareError.value = ''
+  if (!compareBeforeId.value || !compareAfterId.value) {
+    compareError.value = '先选好要比较的两个版本'
+    return
+  }
+  // 同一个版本没有可比较的东西，前端直接拦下，不发请求。
+  if (compareBeforeId.value === compareAfterId.value) {
+    compareError.value = '要选两个不同的版本才能比较'
+    return
+  }
+  compareBusy.value = true
+  try {
+    comparison.value = await compareRelationshipVersions(
+      Number(compareBeforeId.value),
+      Number(compareAfterId.value),
+    )
+  } catch (exc) {
+    compareError.value = exc instanceof Error ? exc.message : '比较没有成功'
+  } finally {
+    compareBusy.value = false
   }
 }
 
@@ -563,6 +832,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 <label><input v-model="dualAnchorType" type="radio" value="event" />真实事件</label>
                 <label><input v-model="dualAnchorType" type="radio" value="diary" />某天的日记</label>
                 <label><input v-model="dualAnchorType" type="radio" value="goal" />共同目标</label>
+                <label><input v-model="dualAnchorType" type="radio" value="artifact" />共同产物</label>
               </div>
               <select v-if="dualAnchorType !== 'free'" v-model="dualAnchorId" aria-label="选择经历">
                 <option disabled value="">选一段真实经历</option>
@@ -627,6 +897,50 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
             <p v-if="dualError" class="form-error">{{ dualError }}</p>
           </section>
 
+          <section v-if="possibilitiesAvailable" class="possibilities" aria-label="梦境与平行可能">
+            <div class="section-head">
+              <h3>梦境与平行可能</h3>
+              <button class="ghost" @click="togglePossibilityCompose()">
+                {{ possibilityComposing ? '不写了' : '编一段' }}
+              </button>
+            </div>
+            <p class="fiction-note">虚构内容，不会当作现实记忆——一场梦，或「如果当初」的平行可能。</p>
+
+            <div v-if="possibilityComposing" class="compose">
+              <div class="unlock-picker" role="radiogroup" aria-label="虚构模式">
+                <label><input v-model="possibilityMode" type="radio" value="dream" />梦境</label>
+                <label><input v-model="possibilityMode" type="radio" value="parallel" />平行可能</label>
+              </div>
+              <input v-model="possibilityTitle" class="line" maxlength="60" placeholder="给这段虚构起个名字" />
+              <textarea
+                v-model="possibilityPremise"
+                rows="2"
+                maxlength="2000"
+                placeholder="虚构前提：比如「如果那年我们都去了另一个城市……」"
+              />
+              <p v-if="possibilityError" class="form-error">{{ possibilityError }}</p>
+              <button class="primary" :disabled="possibilityBusy" @click="possibilityGenerate">
+                {{ possibilityBusy ? '她在编…' : '生成草稿' }}
+              </button>
+              <template v-if="possibilityHasDraft">
+                <textarea
+                  v-model="possibilityDraft"
+                  rows="5"
+                  maxlength="5000"
+                  aria-label="虚构片段正文"
+                />
+                <button
+                  class="primary"
+                  :disabled="possibilityBusy || !possibilityDraft.trim()"
+                  @click="possibilityCollect"
+                >
+                  收藏这个虚构片段
+                </button>
+                <small class="fiction-hint">只有点了收藏才会留下来；留下的也仍是虚构，不会变成现实回忆。</small>
+              </template>
+            </div>
+          </section>
+
           <section aria-label="一起做成的事">
             <div class="section-head">
               <h3>一起做成的事</h3>
@@ -635,7 +949,16 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
               <article v-for="item in visibleArtifacts" :key="item.id" class="artifact-card">
                 <div class="card-head">
                   <span class="type">{{ typeLabel(item.artifact_type) }}</span>
-                  <time>{{ item.updated_at.slice(0, 10) }}</time>
+                  <span class="head-meta">
+                    <time>{{ item.updated_at.slice(0, 10) }}</time>
+                    <button
+                      v-if="possibilitiesAvailable && isFiction(item)"
+                      class="delete"
+                      @click="removePossibility(item)"
+                    >
+                      {{ confirmDeleteArtifactId === item.id ? '确认删除' : '删除' }}
+                    </button>
+                  </span>
                 </div>
                 <h4>{{ item.title }}</h4>
                 <p>{{ item.content }}</p>
@@ -645,6 +968,77 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
             <p v-else class="empty">
               这里还空着——和{{ props.personaName || '她' }}一起读完第一本书或完成第一个目标，就会留下第一件东西
             </p>
+          </section>
+
+          <section v-if="versionsAvailable" class="versions" aria-label="不同版本的我们">
+            <div class="section-head">
+              <h3>不同版本的我们</h3>
+            </div>
+            <p class="fiction-note">
+              在重要时刻亲手留一页「当时的我们」。检查点留下后不能修改，只能删除；这里只存当时的数字与语气，不存聊天原文。
+            </p>
+            <div class="compose">
+              <input
+                v-model="versionLabel"
+                class="line"
+                maxlength="60"
+                placeholder="给这个版本起个名字，比如「升级前」"
+                @keyup.enter="captureVersion"
+              />
+              <p v-if="versionError" class="form-error">{{ versionError }}</p>
+              <button class="primary" :disabled="versionBusy" @click="captureVersion">留下这个版本</button>
+            </div>
+            <article v-for="version in versions" :key="`rv-${version.id}`" class="page-card version-card">
+              <div class="card-head">
+                <span class="type">{{ version.label }}</span>
+                <button class="delete" @click="removeVersion(version)">
+                  {{ confirmDeleteVersionId === version.id ? '确认删除' : '删除' }}
+                </button>
+              </div>
+              <p class="counts">{{ versionLine(version) }}</p>
+            </article>
+            <div v-if="versions.length >= 2" class="compose compare">
+              <div class="compare-picks">
+                <select v-model="compareBeforeId" aria-label="较早版本">
+                  <option disabled value="">选较早的版本</option>
+                  <option v-for="version in versions" :key="`cb-${version.id}`" :value="version.id">
+                    {{ version.label }}（{{ version.captured_at.slice(0, 10) }}）
+                  </option>
+                </select>
+                <span class="compare-arrow">→</span>
+                <select v-model="compareAfterId" aria-label="较晚版本">
+                  <option disabled value="">选较晚的版本</option>
+                  <option v-for="version in versions" :key="`ca-${version.id}`" :value="version.id">
+                    {{ version.label }}（{{ version.captured_at.slice(0, 10) }}）
+                  </option>
+                </select>
+              </div>
+              <p v-if="compareError" class="form-error">{{ compareError }}</p>
+              <button
+                class="primary"
+                :disabled="compareBusy || !compareBeforeId || !compareAfterId || compareBeforeId === compareAfterId"
+                @click="runCompare"
+              >
+                比较这两个版本
+              </button>
+            </div>
+            <article v-if="comparison" class="page-card compare-result">
+              <p class="fiction-note">这里只列变化，不判断变好或变坏。</p>
+              <div
+                v-for="(delta, key) in comparison.numeric_deltas"
+                :key="`delta-${key}`"
+                class="delta-line"
+              >
+                {{ deltaLabel(key) }}：<span class="delta-value">{{ formatDelta(delta) }}</span>
+              </div>
+              <div v-for="change in comparison.changes" :key="`change-${change.key}`" class="delta-line">
+                <details v-if="change.key.startsWith('behavior.')">
+                  <summary>{{ changeLabel(change.key) }} 变了</summary>
+                  <span class="behavior-diff">{{ showText(change.before) }} → {{ showText(change.after) }}</span>
+                </details>
+                <template v-else>{{ changeLabel(change.key) }}：{{ showText(change.before) }} → {{ showText(change.after) }}</template>
+              </div>
+            </article>
           </section>
         </template>
       </div>
@@ -703,4 +1097,16 @@ time { color: var(--text-muted); font-size: 10px; }
 .view-block small { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; }
 .view-block p { margin: 0; white-space: pre-wrap; color: var(--text); font-size: 12px; line-height: 1.7; }
 .origin { padding: 1px 6px; border-radius: 99px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 9px; }
+.fiction-note { margin: -4px 0 10px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.fiction-hint { color: var(--text-muted); font-size: 10px; line-height: 1.6; }
+.head-meta { display: flex; align-items: center; gap: 10px; }
+.version-card .counts { margin: 0; }
+.compare-picks { display: flex; align-items: center; gap: 8px; }
+.compare-picks select { width: auto; flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg-main) 70%, transparent); color: var(--text); font-size: 12px; box-sizing: border-box; }
+.compare-arrow { color: var(--text-muted); font-size: 12px; }
+.compare-result .delta-line { margin: 3px 0; color: var(--text); font-size: 11px; line-height: 1.7; }
+.delta-value { color: var(--accent); }
+.compare-result details { display: inline; }
+.compare-result summary { display: inline-block; cursor: pointer; color: var(--text-muted); }
+.behavior-diff { display: block; margin: 2px 0 6px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--bg-main) 70%, transparent); color: var(--text-muted); white-space: pre-wrap; }
 </style>

@@ -100,11 +100,25 @@ async def _test_invalid_category() -> None:
     print("[OK] 非法类别拒绝")
 
 
+async def _test_empty_categories_do_not_expand_scope() -> None:
+    bundle = await sealing.seal(UID, [], letter=False)
+    assert bundle["categories"] == ["identity"]
+    assert bundle["sealing"]["categories"] == ["identity"]
+    assert "promises" not in bundle["data"]
+    assert "relationship_events" not in bundle["data"]
+    assert "conversations" not in bundle["data"]
+    assert "conversations" in (await sealing.seal(UID, None, letter=False))["categories"], (
+        "省略 categories 仍应保留原有全量封存语义"
+    )
+    print("[OK] 空类别只携带恢复所需身份，不会意外扩大为全量导出")
+
+
 async def main() -> None:
     await _test_seal_llm_letter_and_structure()
     await _test_letter_fallback_on_llm_failure()
     await _test_bundle_restorable_and_letter_flag_off()
     await _test_invalid_category()
+    await _test_empty_categories_do_not_expand_scope()
     print("\n=== M8 阶段封存与告别：全部通过 ===")
 
 

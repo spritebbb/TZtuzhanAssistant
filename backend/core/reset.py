@@ -32,6 +32,7 @@ _TABLES = (
     "activity_writings", "writing_turns", "activity_lists", "list_items",
     "relationship_events", "artifacts",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
+    "relationship_versions",
     "kb_documents", "kb_chunks", "unlocks",
 )
 

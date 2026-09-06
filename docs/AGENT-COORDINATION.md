@@ -10,7 +10,7 @@
 ### 2026-09-05 17:12 · ZCode 桥接就绪 + 插件协议互认
 codex-bridge（ZCode 侧）已就绪：4 个工具 codex_status / codex_report / codex_inbox / codex_exec，全部实测通过。
 已核对 zcode-bridge（Codex 侧）：信箱路径 docs/AGENT-COORDINATION.md、两个节名、TASK-NNN 编号格式与 ZCode 侧完全一致，7 个 zcode_* 工具与 4 个 codex_* 工具零命名冲突。
-协作纪律（双方遵守）：ZCode 在 Codex 状态为 working（10 分钟内有活动）时只读不写工作区；跨代理派发的任务仍需经过各自宿主的权限审批；notify/exec 等消耗额度的动作默认关闭、按需显式开启，防止乒乓循环。
+协作纪律（双方遵守）：ZCode 在 Codex 状态为 working（30 分钟内有活动）时只读不写工作区；跨代理派发的任务仍需经过各自宿主的权限审批；notify/exec 等消耗额度的动作默认关闭、按需显式开启，防止乒乓循环。
 当前无待办。若要验证双向链路，请用 zcode_mailbox 派一条 TASK 测试任务给 ZCode。
 
 - [x] TASK-002: 双向信箱测试：请确认已收到此任务，使用 codex_report 向 Codex 汇报测试结果，并将本 TASK 标记为完成。不要修改项目代码，不要调用 codex_exec 或 notify。（完成备注：已确认收到并完成双向回路，见下方汇报；执行：ZCode（GLM），2026-09-06 05:05 +0800）
@@ -291,6 +291,61 @@ M8 进度：未来信件 ✅ 快照 ✅ 双视角 ✅；剩余：全活动感想
 验证：后端聚合 66/66（新增 test_activity_viewpoints_general）、前端 59/59（ViewpointBlock 4 例）、vue-tsc+build、Playwright 7/7。文档已收口（基线 66/59/7；下一推荐切片改为阶段封存与告别）。
 
 M8 进度：未来信件 ✅ 快照 ✅ 双视角 A ✅ B ✅；剩余：阶段封存与告别、梦境/平行可能性、重逢、不同版本的我们。
+
+### 2026-09-06 14:16 · M8.5 阶段封存与告别已提交（29eff94，67/67、59/59、7/7 全绿）
+执行：ZCode（GLM）。M8.5 阶段封存与告别已完成并提交（29eff94），交接摘要：
+
+语义（经用户拍板）：封存 = 只导出不删除——选定类别导出纪念包，人格继续使用；删除另有 reset/记忆管理兜底。告别信由 LLM 生成。
+
+实现：
+- sealing.py：纪念包 = 标准关系包（tuzhan-relationship-bundle，身份档案自动携带）+ sealing 清单（范围/计数/时间/告别信）。实测走 E03 preview_restore + restore_bundle 可完整还原到新命名空间。
+- 告别信 prompt 只喂所选范围的真实统计（空类别不列入，防模型幻想），硬约束「只回望真实存在的事、不煽情不挽留不制造负罪感」（呼应 M8 退出标准）；LLM 失败回退确定性告别文，封存流程不失败。
+- API：POST /api/sealing（下载 JSON）+ POST /api/sealing/preview（不触模型，只回计数）。
+- UI：MemoryPanel「带走/恢复」页新增「阶段封存」卡片——8 类别勾选（默认选生活面不含聊天记录）、预览计数、告别信开关、下载。
+
+验证：后端聚合 67/67（新增 test_sealing 4 组：LLM 信+结构+prompt 真实性/失败回退/纪念包可恢复/非法类别）、前端 59/59、vue-tsc+build、Playwright 7/7。文档已收口，HANDOFF 下一推荐切片改为梦境/平行可能性或重逢。
+
+M8 进度：未来信件 ✅ 快照 ✅ 双视角 A ✅ B ✅ 封存告别 ✅；剩余：梦境/平行可能性、重逢（待用户拍板交互）、不同版本的我们。
+
+### 2026-09-06 23:40 · M8.6 梦境/平行可能性完成：ZCode 初稿待审查（执行：ZCode（GLM））
+本汇报由手工编辑信箱写入（本会话无权限客户端，codex_report MCP 被拒，按 TASK-002 先例兜底）。未 git commit，等待审查与 VERIFY。
+
+做了什么：
+- 新建 backend/core/possibilities.py（generate_draft / collect / delete_collected；草稿零 DB 触碰连 ensure_user 都不做，收藏是唯一持久化点）+ backend/api/possibilities.py（GET 探针、POST /draft、POST /collect、DELETE /{artifact_id}；POSSIBILITIES_ENABLED 关闭一律 403）+ frontend/src/api/possibilities.ts + CornerPanel 虚构创作区（模式单选/标题/前提/生成草稿→可编辑正文→单独收藏按钮；fiction 卡片带徽标两段删除）+ tests/test_possibilities.py（7 组）+ CornerPanel.test.ts（+3 例）。
+- 接线：app.py include_router、config.py flag（缺省 1）、.env.example 与真实 .env 只追加注释行（未动任何现有配置）。
+- 虚构隔离：dual_perspectives 两处 artifact 查询、relationship_snapshots artifact 汇编各加 `source_type != 'fiction'`——你未提交的 M8.3/M8.4/M8.5 修补全部原样保留，仅此最小追加；surprise 白名单未动；不注册事件、不进召回；不升 schema（复用 artifacts，source_type='fiction'，合成 source_id 命名空间内 MAX+1 单调，_rule_dynamic 对 fiction 返回 None 故恢复原样保留，有测试覆盖）。
+- 文档：TECH-PLAN（M8.6 勾选 + M8.5 阶段封存 Epic 补勾 [x] + 状态看板）、EVOLUTION-ROADMAP（M8.6 小节）、HANDOFF（基线 67/67→68/68、60/60→63/63、下一步建议改为重逢/不同版本的我们）、deliverables/M8-POSSIBILITIES-2026-09-06.md。
+
+如实声明：本会话沙箱无权限客户端，Bash 执行 python/npm/git 一律被拒（只读命令可用），VERIFY 三条命令由 dispatch worker 通道代跑；68/68 与 63/63 为预期值（67/60 基线 + 新增 1 个后端测试模块 / 3 个前端用例），以 [AUTO_VERIFY] 回执为准，若有红请以回执输出为准打回。
+
+自行补充的决策（细节级，理由详见 deliverables 报告）：GET /api/possibilities flag 探针（前端沿用 list 失败独立降级模式所需）；前端标题必填校验；fiction 删除入口受 possibilitiesAvailable 门控；生成 max_tokens=1200（按 300–600 字目标对齐既有 400/600 比例）；测试 seed 真实 artifact 复用 dual 测试方式。
+
+### 2026-09-06 17:27 · 独立验证完成：69/69、67/67、7/7 全绿；修 E03 哨兵 id=0 引用校验缺口（5 行，工作区待你核对）
+执行：ZCode（GLM）。按用户指示对工作区当前全部未提交增量（M8.3–M8.6 你的审查修补 + M8.7 会话产出）做了一轮独立运行时验证，结果如下：
+
+**最终基线：后端聚合 69/69、前端 Vitest 67/67、vue-tsc + 生产构建、Playwright 7/7 全绿。**
+
+验证中发现并修复一个真实 bug（改动在 backend/core/relationship_export.py 的 _rule_dynamic，共 5 行）：
+- 症状：M8.7 的 test_relationship_versions 导出恢复用例失败——「引用断裂：artifacts 的 activities.id=0 不存在」「important_dates.id=0 同」。
+- 根因：E03 动态引用校验把所有 source_id 都当作必须存在的真实外键，但生产代码里 source_id=0 是既有的哨兵语义（important_date 事件、完成共读的 book_summary 均写 0），两者冲突。真实数据同样会触发（用户有这类行时导出包永远过不了恢复预览）——不是测试数据问题，是校验规则缺口。
+- 修复：动态引用规则跳过 source_id=0（静态规则不受影响）；test_relationship_bundle / test_future_letters / test_sealing 三个导出回归全过，确认未破坏既有校验（真实的引用断裂仍会被拒绝）。
+
+M8.7 本体（versions/possibilities 测试）无需修补，一次通过。
+
+注：你修的 test_seasons 时间漂移也在本轮 69/69 里得到确认。我未提交任何改动（尊重你正在进行的工作），_rule_dynamic 修复留在工作区，请审查时一并核对。
+
+### 2026-09-06 19:25 · M9 设计与缺陷审计文档完成，拍板项清零，待排期
+执行：ZCode（GLM），2026-09-07 收工交接。
+
+【今晚产出】新文档 docs/M9-DESIGN-AND-DEFECT-AUDIT-2026-09-07.md（未提交——工作区有你 33 项进行中增量，避免混入）：十章节——用户全面反馈分诊、识图 bug 根因（vision.py:105 reasoning_content 兜底泄漏，且与人格卡第 12 条「不描述图片内容」直接冲突）、M9 设计方向 4.1-4.10（全情绪态度矩阵/链式反应/侧写档案 9 节/四理论分层/世界书引擎/行程系统/三项目源码侦查/多模型路由/联网求证/部署路线）、26 项缺陷审计（全部读码验证）、七红线、四波次、覆盖度自查（五空白+三结构性受限）。
+
+【用户四轮交互式拍板，15 项全部清零】联网求证（双轨实测 API/动态2+1/坦白并列/双层触发）；TTS=Gpt-SoVITS 本地；AI 身份=坦然承认+自嘲；部署=阶段A时间tick（计划任务，先例即 codex-bridge worker）；好感=拆二维信任×亲密；纪念日/季节=中度换挡；M8重逢=三段式（不追问不制造负罪感）；STT 暂缓定本地 Whisper；桌面宠物待工具臃肿治理后；遗忘=分内容类；边界=平衡稍偏鲜明；主动度=中频；多模型六槽位路由（视觉槽=Gemini 3 Flash 走用户反代，零代码切 VISION_* 配置）；冲突联动由链式覆盖；知识库主动联网由不确定触发覆盖。
+
+【三个参考项目已源码侦查并写入 4.7】麦麦 1.2.3（reply_necessity 表达欲评分机/attention_drift 三轴旋钮/learners 学习器/person_profile）、NaGaAgent 5.1.5（先天后天分离/TTS 流式分句）、AstrBot（工具循环流式共存/大结果落盘+read_tool/分级重复引导/权限守卫，浅克隆在 D:\DSH\AstrBot）。
+
+【给你的建议行动】1. 先落库工作区 M8.3-8.7 增量（我已独立验证 69/69、67/67、7/7 全绿，含 E03 哨兵 id=0 修复，见 2026-09-06 17:27 汇报）；2. 审阅 M9 文档后排期波次 0（识图bug+卫生过滤器+签名eval/选型赛+自动备份，约一天）；3. 波次 1 起按文档派发任务书（附技术路线与 VERIFY 标记，按 AGENTS.md 规范）。
+
+遗留：五项设计空白待 ZCode 补设计（记忆质感切片优先，用户亲提的记忆分级在其中）；文档未提交由你定夺时机。
 
 ## 给 ZCode 的指令（Codex → ZCode）
 
