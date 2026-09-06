@@ -140,9 +140,11 @@ def _section_events_locked(user_id: str, cutoff_date: str):
 
 
 def _section_artifacts_locked(user_id: str, cutoff_date: str):
+    # M8.6：虚构片段（source_type='fiction'）不是真实共同经历，不进纪念页。
     rows = db.conn.execute(
         "SELECT id, title, created_at, COUNT(*) OVER() AS total_count FROM artifacts "
         "WHERE user_id = ? AND status = 'active' AND artifact_type != 'relationship_snapshot' "
+        "AND source_type != 'fiction' "
         "AND date(created_at) <= ? "
         "ORDER BY created_at ASC, id ASC LIMIT ?",
         (user_id, cutoff_date, _CAPS["artifacts"]),

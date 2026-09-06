@@ -24,6 +24,21 @@ import {
   saveDualPerspectiveView,
   type DualPerspective,
 } from '../../api/dualPerspectives'
+import {
+  collectPossibility,
+  deletePossibility,
+  generatePossibilityDraft,
+  probePossibilities,
+  type PossibilityArtifact,
+} from '../../api/possibilities'
+import {
+  captureRelationshipVersion,
+  compareRelationshipVersions,
+  deleteRelationshipVersion,
+  listRelationshipVersions,
+  type RelationshipVersion,
+  type RelationshipVersionComparison,
+} from '../../api/relationshipVersions'
 import CornerPanel from '../CornerPanel.vue'
 
 vi.mock('../../api/artifacts', () => ({ listArtifacts: vi.fn() }))
@@ -46,6 +61,18 @@ vi.mock('../../api/dualPerspectives', () => ({
   generateTuzhanDraft: vi.fn(),
   deleteDualPerspective: vi.fn(),
 }))
+vi.mock('../../api/possibilities', () => ({
+  probePossibilities: vi.fn(),
+  generatePossibilityDraft: vi.fn(),
+  collectPossibility: vi.fn(),
+  deletePossibility: vi.fn(),
+}))
+vi.mock('../../api/relationshipVersions', () => ({
+  listRelationshipVersions: vi.fn(),
+  captureRelationshipVersion: vi.fn(),
+  compareRelationshipVersions: vi.fn(),
+  deleteRelationshipVersion: vi.fn(),
+}))
 
 const mockedArtifacts = vi.mocked(listArtifacts)
 const mockedLetters = vi.mocked(listFutureLetters)
@@ -61,6 +88,72 @@ const mockedDualCreate = vi.mocked(createDualPerspective)
 const mockedDualSave = vi.mocked(saveDualPerspectiveView)
 const mockedDualDraft = vi.mocked(generateTuzhanDraft)
 const mockedDualDelete = vi.mocked(deleteDualPerspective)
+const mockedProbePossibilities = vi.mocked(probePossibilities)
+const mockedPossGenerate = vi.mocked(generatePossibilityDraft)
+const mockedPossCollect = vi.mocked(collectPossibility)
+const mockedPossDelete = vi.mocked(deletePossibility)
+const mockedVersionsList = vi.mocked(listRelationshipVersions)
+const mockedVersionCapture = vi.mocked(captureRelationshipVersion)
+const mockedVersionCompare = vi.mocked(compareRelationshipVersions)
+const mockedVersionDelete = vi.mocked(deleteRelationshipVersion)
+
+const possibilityItem: PossibilityArtifact = {
+  id: 71,
+  artifact_type: 'dream_fragment',
+  source_type: 'fiction',
+  source_id: 1,
+  title: '站台之梦',
+  content: '梦里那班地铁准点到达。',
+  version: 1,
+  created_at: '2026-09-06T21:00:00',
+  updated_at: '2026-09-06T21:00:00',
+}
+
+function makeVersion(id: number, label: string, overrides: Partial<RelationshipVersion> = {}): RelationshipVersion {
+  return {
+    id,
+    label,
+    captured_at: '2026-09-07T10:00:00',
+    schema_version: 13,
+    created_at: '2026-09-07T10:00:00',
+    snapshot: {
+      format_version: 1,
+      state: { affection: 10, mood: 60, mood_label: '平淡', energy: 70, tension: 0, stage: '初识', resting: false },
+      season: { code: 'quiet', label: '沉淀期' },
+      behavior: { mood_line: '旧语气。', stage_line: '旧分寸。', texture_line: '', initiative: '', rest_line: '', season_line: '' },
+      counts: {
+        messages: 12, facts_active: 3, long_memory: 40, events_active: 2,
+        artifacts_real: 1, artifacts_fiction: 0, activities_active: 1, activities_completed: 0,
+        promises_pending: 1, promises_completed: 0, diary: 2, future_letters: 1,
+        dual_perspectives: 1, relationship_snapshots: 0,
+      },
+    },
+    ...overrides,
+  }
+}
+
+function zeroDeltas(): Record<string, number> {
+  return {
+    'state.affection': 0, 'state.mood': 0, 'state.energy': 0, 'state.tension': 0,
+    'counts.messages': 0, 'counts.facts_active': 0, 'counts.long_memory': 0, 'counts.events_active': 0,
+    'counts.artifacts_real': 0, 'counts.artifacts_fiction': 0, 'counts.activities_active': 0,
+    'counts.activities_completed': 0, 'counts.promises_pending': 0, 'counts.promises_completed': 0,
+    'counts.diary': 0, 'counts.future_letters': 0, 'counts.dual_perspectives': 0,
+    'counts.relationship_snapshots': 0,
+  }
+}
+
+function comparisonFixture(before: RelationshipVersion, after: RelationshipVersion): RelationshipVersionComparison {
+  return {
+    before,
+    after,
+    numeric_deltas: { ...zeroDeltas(), 'state.affection': 3, 'counts.messages': 0 },
+    changes: [
+      { key: 'state.stage', before: '初识', after: '亲密' },
+      { key: 'behavior.mood_line', before: '旧语气。', after: '新语气。' },
+    ],
+  }
+}
 
 const artifact: ArtifactItem = {
   id: 1,
@@ -137,10 +230,20 @@ describe('CornerPanel', () => {
     mockedDualSave.mockReset()
     mockedDualDraft.mockReset()
     mockedDualDelete.mockReset()
+    mockedProbePossibilities.mockReset()
+    mockedPossGenerate.mockReset()
+    mockedPossCollect.mockReset()
+    mockedPossDelete.mockReset()
+    mockedVersionsList.mockReset()
+    mockedVersionCapture.mockReset()
+    mockedVersionCompare.mockReset()
+    mockedVersionDelete.mockReset()
     mockedLetters.mockResolvedValue(emptyBoard)
     mockedSnapshots.mockResolvedValue(quietSnapshots)
     mockedDuals.mockResolvedValue([])
-    mockedDualAnchors.mockResolvedValue({ events: [], diary: [], goals: [] })
+    mockedDualAnchors.mockResolvedValue({ events: [], diary: [], goals: [], artifacts: [] })
+    mockedProbePossibilities.mockResolvedValue(undefined)
+    mockedVersionsList.mockResolvedValue([])
   })
 
   it('shows real artifacts with type labels and provenance date', async () => {
@@ -467,6 +570,34 @@ describe('CornerPanel', () => {
     expect(wrapper.text()).toContain('她想')
   })
 
+  it('creates an artifact-anchored dual perspective from the candidate list', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    mockedDualAnchors.mockResolvedValue({
+      events: [],
+      diary: [],
+      goals: [],
+      artifacts: [{ id: 44, label: '2026-09-06 《藤本植物》共同书摘' }],
+    })
+    mockedDualCreate.mockResolvedValue({ ...dualFixture, source_type: 'artifact', source_id: 44 })
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text() === '新建一页')!.trigger('click')
+    await flushPromises()
+    const form = wrapper.find('form.compose')
+    await form.find('input.line').setValue('一起读完的那天')
+    await form.find('input[type="radio"][value="artifact"]').setValue(true)
+    await form.find('select[aria-label="选择经历"]').setValue('44')
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(mockedDualCreate).toHaveBeenCalledWith({
+      title: '一起读完的那天',
+      source_type: 'artifact',
+      source_id: 44,
+    })
+  })
+
   it('fills her side with an LLM draft on demand and saves it as llm-origin', async () => {
     mockedArtifacts.mockResolvedValue([])
     mockedDuals.mockResolvedValue([{ ...dualFixture, tuzhan_view: '', tuzhan_view_origin: 'user' }])
@@ -495,5 +626,157 @@ describe('CornerPanel', () => {
     expect(wrapper.find('section.duals').exists()).toBe(false)
     expect(wrapper.text()).toContain(artifact.title)
     expect(wrapper.text()).not.toContain('角落暂时打不开')
+  })
+
+  it('hides the fiction composer when the possibilities API is unavailable, artifacts unaffected', async () => {
+    mockedArtifacts.mockResolvedValue([artifact])
+    mockedProbePossibilities.mockRejectedValue(new Error('梦境与平行可能性未开启'))
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.find('section.possibilities').exists()).toBe(false)
+    expect(wrapper.text()).toContain(artifact.title)
+    expect(wrapper.text()).not.toContain('角落暂时打不开')
+  })
+
+  it('generates a draft without collecting; collects only on the explicit second action and reloads', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    mockedPossGenerate.mockResolvedValue('她在梦里说：这班车谁都不会迟到。')
+    mockedPossCollect.mockResolvedValue(possibilityItem)
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text() === '编一段')!.trigger('click')
+    const compose = wrapper.find('section.possibilities .compose')
+    await compose.find('input.line').setValue('站台之梦')
+    await compose.find('textarea').setValue('梦见我们坐上了一班不存在的地铁')
+    await compose.findAll('button').find((b) => b.text() === '生成草稿')!.trigger('click')
+    await flushPromises()
+
+    // 草稿阶段绝不触发收藏
+    expect(mockedPossGenerate).toHaveBeenCalledWith('dream', '站台之梦', '梦见我们坐上了一班不存在的地铁')
+    expect(mockedPossCollect).not.toHaveBeenCalled()
+    const draftsBefore = mockedArtifacts.mock.calls.length
+
+    // 用户编辑正文后，显式点击收藏才落库并重新 load
+    const editor = wrapper.find('textarea[aria-label="虚构片段正文"]')
+    expect((editor.element as HTMLTextAreaElement).value).toContain('谁都不会迟到')
+    await editor.setValue('她编辑过的心愿：这班车谁都不会迟到。')
+    await wrapper.findAll('button').find((b) => b.text() === '收藏这个虚构片段')!.trigger('click')
+    await flushPromises()
+
+    expect(mockedPossCollect).toHaveBeenCalledWith('dream', '站台之梦', '她编辑过的心愿：这班车谁都不会迟到。')
+    expect(mockedArtifacts.mock.calls.length).toBeGreaterThan(draftsBefore)
+    expect(wrapper.text()).toContain('编一段')
+  })
+
+  it('gives fiction cards a type badge and two-step delete, real artifacts none', async () => {
+    mockedArtifacts.mockResolvedValue([
+      { ...artifact, id: 41, artifact_type: 'dream_fragment', source_type: 'fiction', title: '站台之梦' },
+      artifact,
+    ])
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('梦境收藏')
+    expect(wrapper.text()).toContain('站台之梦')
+    const cards = wrapper.findAll('article.artifact-card')
+    expect(cards.length).toBe(2)
+    expect(cards[0].find('button.delete').exists()).toBe(true)
+    expect(cards[1].find('button.delete').exists()).toBe(false)
+
+    await cards[0].find('button.delete').trigger('click')
+    expect(mockedPossDelete).not.toHaveBeenCalled()
+    expect(cards[0].text()).toContain('确认删除')
+
+    await cards[0].find('button.delete').trigger('click')
+    expect(mockedPossDelete).toHaveBeenCalledWith(41)
+  })
+
+  it('hides the relationship versions section when its API is unavailable, artifacts unaffected', async () => {
+    mockedArtifacts.mockResolvedValue([artifact])
+    mockedVersionsList.mockRejectedValue(new Error('不同版本的我们未开启'))
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    expect(wrapper.find('section.versions').exists()).toBe(false)
+    expect(wrapper.text()).toContain(artifact.title)
+    expect(wrapper.text()).not.toContain('角落暂时打不开')
+  })
+
+  it('captures a checkpoint through the explicit label form and reloads', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    const saved = makeVersion(51, '升级前')
+    mockedVersionCapture.mockResolvedValue(saved)
+    mockedVersionsList.mockResolvedValueOnce([]).mockResolvedValueOnce([saved])
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const input = wrapper.find('section.versions input.line')
+    await input.setValue('升级前')
+    await wrapper.findAll('button').find((b) => b.text() === '留下这个版本')!.trigger('click')
+    await flushPromises()
+
+    expect(mockedVersionCapture).toHaveBeenCalledWith('升级前')
+    // 成功后清空输入并重新 load（列表被再次拉取）
+    expect(mockedVersionsList.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect((wrapper.find('section.versions input.line').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.text()).toContain('升级前')
+    expect(wrapper.text()).toContain('真实记录 12 条')
+  })
+
+  it('compares two chosen versions with signed deltas, before→after changes and no verdict copy', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    const before = makeVersion(5, '升级前')
+    const after = makeVersion(9, '这个夏天结束时', {
+      snapshot: {
+        ...makeVersion(9, '').snapshot,
+        state: { affection: 13, mood: 60, mood_label: '平淡', energy: 70, tension: 0, stage: '亲密', resting: false },
+        behavior: { mood_line: '新语气。', stage_line: '旧分寸。', texture_line: '', initiative: '', rest_line: '', season_line: '' },
+      },
+    })
+    mockedVersionsList.mockResolvedValue([before, after])
+    mockedVersionCompare.mockResolvedValue(comparisonFixture(before, after))
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const picks = wrapper.find('section.versions .compare-picks')
+    await picks.find('select[aria-label="较早版本"]').setValue('5')
+    await picks.find('select[aria-label="较晚版本"]').setValue('9')
+    await wrapper.findAll('button').find((b) => b.text() === '比较这两个版本')!.trigger('click')
+    await flushPromises()
+
+    expect(mockedVersionCompare).toHaveBeenCalledWith(5, 9)
+    expect(wrapper.text()).toContain('好感：+3')
+    expect(wrapper.text()).toContain('这里只列变化，不判断变好或变坏')
+    expect(wrapper.text()).toContain('关系阶段：初识 → 亲密')
+    expect(wrapper.text()).toContain('语气基调 变了')
+  })
+
+  it('blocks comparing a version with itself and deletes versions only after confirmation', async () => {
+    mockedArtifacts.mockResolvedValue([])
+    const one = makeVersion(5, '升级前')
+    const two = makeVersion(9, '这个夏天结束时')
+    mockedVersionsList.mockResolvedValue([one, two])
+    const wrapper = mount(CornerPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    // 同 id 前端拦截：按钮禁用，点击也不会发出 compare 请求
+    const picks = wrapper.find('section.versions .compare-picks')
+    await picks.find('select[aria-label="较早版本"]').setValue('5')
+    await picks.find('select[aria-label="较晚版本"]').setValue('5')
+    const compareButton = wrapper.findAll('button').find((b) => b.text() === '比较这两个版本')!
+    expect(compareButton.attributes('disabled')).toBeDefined()
+    await compareButton.trigger('click')
+    await flushPromises()
+    expect(mockedVersionCompare).not.toHaveBeenCalled()
+
+    // 两段式删除
+    const deleteButton = wrapper.find('section.versions button.delete')
+    await deleteButton.trigger('click')
+    expect(mockedVersionDelete).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('确认删除')
+    await wrapper.find('section.versions button.delete').trigger('click')
+    expect(mockedVersionDelete).toHaveBeenCalledWith(5)
   })
 })

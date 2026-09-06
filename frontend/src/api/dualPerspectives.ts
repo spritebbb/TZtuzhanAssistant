@@ -18,6 +18,7 @@ export interface DualAnchorCandidates {
   events: { id: number; label: string }[]
   diary: { id: number; label: string }[]
   goals: { id: number; label: string }[]
+  artifacts: { id: number; label: string }[]
 }
 
 function parseItem(data: unknown): DualPerspective {
@@ -55,7 +56,12 @@ export async function listDualAnchorCandidates(): Promise<DualAnchorCandidates> 
           return { id: Number(row.id), label: String(row.label ?? '') }
         })
       : []
-  return { events: pick(data.events), diary: pick(data.diary), goals: pick(data.goals) }
+  return {
+    events: pick(data.events),
+    diary: pick(data.diary),
+    goals: pick(data.goals),
+    artifacts: pick(data.artifacts),
+  }
 }
 
 export async function createDualPerspective(payload: {

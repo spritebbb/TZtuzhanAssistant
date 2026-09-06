@@ -31,7 +31,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives"),
+    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions"),
     "tasks": ("tasks", "promises"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -81,6 +81,11 @@ def _rule_dynamic(table: str, column: str, type_column: str):
     def ref(row: dict):
         value = row.get(column)
         if value is None:
+            return None
+        # source_id=0 是各来源模块的哨兵语义（占位、不指向真实行）——
+        # important_date 事件、完成共读的 book_summary 等既有写入均如此，
+        # 不参与引用完整性校验。
+        if int(value) == 0:
             return None
         ref_table = _SOURCE_TABLE_BY_TYPE.get(str(row.get(type_column) or ""))
         if ref_table is None:

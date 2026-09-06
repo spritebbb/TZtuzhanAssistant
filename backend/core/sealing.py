@@ -10,8 +10,7 @@
   「只回望真实发生过的事，不虚构细节、不煽情挽留、不制造负罪感」（呼应 M8
   退出标准：长期离开不制造负罪感）；生成失败时回退到确定性告别文，封存
   流程不因此失败。
-- 导出文件落盘到用户可见路径（downloads 目录），同时返回结构化结果供前端
-  直接下载。
+- API 直接返回带下载文件名的 JSON 附件，不在服务端额外落盘。
 """
 from __future__ import annotations
 
@@ -81,6 +80,15 @@ def _validate_categories(categories: list[str]) -> None:
         raise BundleError(f"未知的数据类别：{'、'.join(unknown)}")
 
 
+def normalize_categories(categories: list[str] | None) -> list[str]:
+    """区分省略（全量）与显式空选（仅携带恢复必需的身份档案）。"""
+    selected = list(_CATEGORIES) if categories is None else list(categories)
+    if "identity" not in selected:
+        selected.insert(0, "identity")
+    _validate_categories(selected)
+    return selected
+
+
 async def seal(
     user_id: str,
     categories: list[str] | None = None,
@@ -88,11 +96,8 @@ async def seal(
     letter: bool = True,
 ) -> dict:
     """封存：选定类别导出纪念包 + 告别信。不删除任何数据。"""
-    selected = list(categories) if categories else list(_CATEGORIES)
-    if "identity" not in selected:
-        # 身份档案始终携带：恢复通道需要 users 行才能重建命名空间。
-        selected.insert(0, "identity")
-    _validate_categories(selected)
+    # 身份档案始终携带：恢复通道需要 users 行才能重建命名空间。
+    selected = normalize_categories(categories)
 
     bundle = export_bundle(user_id, selected)
     counts = _category_stats(bundle)
@@ -101,6 +106,7 @@ async def seal(
     exported_at = bundle["exported_at"]
 
     letter_text = _fallback_letter(stats_text.replace("\n", "，").replace("- ", ""), exported_at)
+    used_llm = False
     if letter:
         try:
             reply = await chat(
@@ -113,6 +119,7 @@ async def seal(
             reply = reply.strip().strip('"「」')
             if reply:
                 letter_text = reply[:_MAX_LETTER]
+                used_llm = True
         except Exception as exc:
             logger.warning("[封存] {} 的告别信生成失败，使用确定性告别文：{}", user_id, exc)
 
@@ -131,7 +138,7 @@ async def seal(
         "categories": selected,
         "counts": counts,
         "letter": letter_text,
-        "letter_generated_by": "llm" if letter_text != _fallback_letter(stats_text.replace("\n", "，").replace("- ", ""), exported_at) else "fallback",
+        "letter_generated_by": "llm" if used_llm else "fallback",
         "note": "封存只导出、不删除；本包可被 /api/relationship/restore 通道直接恢复。",
     }
     # 纪念包 = 标准关系包 + 封存清单（标准键之外的自有键，恢复通道忽略未知键）

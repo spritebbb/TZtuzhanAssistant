@@ -23,7 +23,9 @@ from backend.core.seasons import current_season  # noqa: E402
 from backend.core.userdb import db, save_promise  # noqa: E402
 
 UID = "assistant-main"
-TODAY = date(2026, 9, 5)
+# 事件窗口由生产代码按真实当前时间计算；测试基准也必须使用运行当天，
+# 否则跨过固定日期后的第 2 天会把本应有效的特殊日子误判为过期。
+TODAY = date.today()
 
 
 class _State:
