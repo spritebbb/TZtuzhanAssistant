@@ -143,7 +143,26 @@ async def api_save_viewpoint(activity_id: int, body: ViewpointBody):
         )
     except activities.ActivityError as exc:
         return _error(exc)
-    return {"ok": True, "activity": row}
+    # M8-B：非共读活动返回观点集合；共读保持返回活动详情。
+    if isinstance(row, dict) and row.get("kind") == "reading":
+        return {"ok": True, "activity": row}
+    return row
+
+
+@router.get("/{activity_id}/viewpoints")
+async def api_get_viewpoints(activity_id: int):
+    try:
+        return await asyncio.to_thread(activities.get_viewpoints, _active_user_id(), activity_id)
+    except activities.ActivityError as exc:
+        return _error(exc, 404)
+
+
+@router.post("/{activity_id}/viewpoint-draft")
+async def api_viewpoint_draft(activity_id: int):
+    try:
+        return await activities.viewpoint_draft(_active_user_id(), activity_id)
+    except activities.ActivityError as exc:
+        return _error(exc)
 
 
 @router.post("/{activity_id}/complete")

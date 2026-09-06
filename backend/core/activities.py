@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from .llm import chat
 from .log import logger
 from .userdb import db
 
@@ -309,7 +310,11 @@ def save_note(user_id: str, activity_id: int, content: str) -> dict:
 
 
 def save_viewpoint(user_id: str, activity_id: int, role: str, content: str) -> dict:
-    """按角色保存一段观点。角色必须显式声明，禁止把模型观点记成用户观点。"""
+    """按角色保存一段观点。角色必须显式声明，禁止把模型观点记成用户观点。
+
+    M8-B 起泛化到全部活动壳类型：reading 保持原行为（章节定位 + 完成后
+    版本化书摘）；其余 kind 统一记在 position=-1（整体感想），无书摘副作用。
+    """
     if role not in _VIEWPOINT_ROLES:
         raise ActivityError("观点角色只能是 user / tuzhan / shared")
     content = content.strip()
@@ -317,6 +322,40 @@ def save_viewpoint(user_id: str, activity_id: int, role: str, content: str) -> d
         raise ActivityError(f"观点最多 {_MAX_NOTE_LENGTH} 字")
     now = _now()
     with db._lock:
+        kind_row = db.conn.execute(
+            "SELECT kind FROM activities WHERE user_id = ? AND id = ?",
+            (user_id, activity_id),
+        ).fetchone()
+        if kind_row is None:
+            raise ActivityError("活动记录不存在")
+        kind = str(kind_row["kind"])
+        if kind != "reading":
+            status_row = db.conn.execute(
+                "SELECT status FROM activities WHERE user_id = ? AND id = ?",
+                (user_id, activity_id),
+            ).fetchone()
+            if str(status_row["status"]) == "cancelled":
+                raise ActivityError("已放下的活动不能再修改观点")
+            if content:
+                db.conn.execute(
+                    "INSERT INTO activity_viewpoints (user_id, activity_id, role, position, content, ts) "
+                    "VALUES (?, ?, ?, -1, ?, ?) ON CONFLICT(activity_id, role, position) DO UPDATE SET "
+                    "content = excluded.content, ts = excluded.ts, user_id = excluded.user_id",
+                    (user_id, activity_id, role, content, now),
+                )
+            else:
+                db.conn.execute(
+                    "DELETE FROM activity_viewpoints "
+                    "WHERE user_id = ? AND activity_id = ? AND role = ? AND position = -1",
+                    (user_id, activity_id, role),
+                )
+            db.conn.execute(
+                "UPDATE activities SET updated_at = ? WHERE user_id = ? AND id = ?",
+                (now, user_id, activity_id),
+            )
+            db.conn.commit()
+            return get_viewpoints(user_id, activity_id)
+
         detail = _detail_locked(user_id, activity_id)
         if detail is None:
             raise ActivityError("共读记录不存在")
@@ -348,6 +387,126 @@ def save_viewpoint(user_id: str, activity_id: int, role: str, content: str) -> d
     if result is None:
         raise ActivityError("共读记录不存在")
     return result
+
+
+def get_viewpoints(user_id: str, activity_id: int) -> dict:
+    """任意活动壳类型的双方感想（M8-B 泛化读取；reading 也可用）。"""
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT id, kind, title, status FROM activities WHERE user_id = ? AND id = ?",
+            (user_id, activity_id),
+        ).fetchone()
+        if row is None:
+            raise ActivityError("活动记录不存在")
+        return {
+            "ok": True,
+            "activity_id": int(row["id"]),
+            "kind": str(row["kind"]),
+            "title": str(row["title"]),
+            "status": str(row["status"]),
+            "viewpoints": _viewpoints_locked(user_id, activity_id),
+        }
+
+
+# ---- M8-B：菟菚感想草稿（LLM 基于真实记录，不落库，与双视角同款约束）----
+
+_VIEWPOINT_DRAFT_PROMPT = """你是「菟菚」。下面是你们一件共同活动的真实记录。
+
+以你的第一人称口吻写一段对这次共同活动的感想（120 字以内），只谈你的感受与
+印象。硬性要求：只使用记录里已有的事实，不得新增事实断言；不复述记录；直接
+输出这段话本身，不要前缀、引号或解释。
+
+活动记录：
+{material}"""
+
+
+def _draft_material_locked(user_id: str, activity_id: int, kind: str, title: str) -> str:
+    if kind == "goal":
+        goal = db.conn.execute(
+            "SELECT motivation, next_step, support_mode FROM activity_goals WHERE activity_id = ?",
+            (activity_id,),
+        ).fetchone()
+        progress = db.conn.execute(
+            "SELECT content FROM goal_progress WHERE user_id = ? AND activity_id = ? "
+            "ORDER BY id DESC LIMIT 5",
+            (user_id, activity_id),
+        ).fetchall()
+        parts = [f"共同目标「{title}」。"]
+        if goal is not None:
+            if str(goal["motivation"] or "").strip():
+                parts.append(f"初衷：{str(goal['motivation'])[:200]}")
+            if str(goal["next_step"] or "").strip():
+                parts.append(f"下一步：{str(goal['next_step'])[:120]}")
+        if progress:
+            parts.append("最近进展：" + "；".join(str(r["content"])[:80] for r in progress))
+        return "\n".join(parts)
+    if kind == "list":
+        items = db.conn.execute(
+            "SELECT title, note FROM list_items WHERE user_id = ? AND activity_id = ? "
+            "ORDER BY id LIMIT 20",
+            (user_id, activity_id),
+        ).fetchall()
+        listing = db.conn.execute(
+            "SELECT list_kind FROM activity_lists WHERE activity_id = ?",
+            (activity_id,),
+        ).fetchone()
+        list_kind = str(listing["list_kind"]) if listing else "song"
+        lines = [f"我们的共同{'书单' if list_kind == 'book' else '歌单'}「{title}」，里面有："]
+        lines.extend(f"- {str(r['title'])[:60]}" for r in items)
+        return "\n".join(lines)
+    if kind == "writing":
+        turns = db.conn.execute(
+            "SELECT COUNT(*) AS n, SUM(author = 'user') AS mine FROM writing_turns "
+            "WHERE user_id = ? AND activity_id = ?",
+            (user_id, activity_id),
+        ).fetchone()
+        total_turns = int(turns["n"]) if turns else 0
+        my_turns = int(turns["mine"]) if turns and turns["mine"] is not None else 0
+        return (
+            f"我们一起轮流续写的故事「{title}」，一共写了{total_turns}段"
+            f"（其中你写了{my_turns}段）。故事正文是只有显式收藏才保留的虚构内容，"
+            "这里只有标题与轮数。"
+        )
+    if kind == "focus":
+        row = db.conn.execute(
+            "SELECT planned_minutes, status, created_at, completed_at FROM activities "
+            "WHERE user_id = ? AND id = ?",
+            (user_id, activity_id),
+        ).fetchone()
+        if row is None:
+            return f"一次专注陪伴「{title}」。"
+        return (
+            f"一次专注陪伴「{title}」：计划 {row['planned_minutes']} 分钟，"
+            f"状态 {row['status']}" + (f"，完成于 {str(row['completed_at'])[:16]}" if row["completed_at"] else "") + "。"
+        )
+    # reading 及其他：用活动标题兜底
+    return f"共同活动「{title}」。"
+
+
+async def viewpoint_draft(user_id: str, activity_id: int) -> dict:
+    """为任意活动生成菟菚感想草稿；只返回草稿文本，绝不落库。"""
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT id, kind, title FROM activities WHERE user_id = ? AND id = ?",
+            (user_id, activity_id),
+        ).fetchone()
+        if row is None:
+            raise ActivityError("活动记录不存在")
+        material = _draft_material_locked(user_id, activity_id, str(row["kind"]), str(row["title"]))
+    try:
+        draft = await chat(
+            [
+                {"role": "system", "content": "你是菟菚，一个温柔、真诚、有自己想法的陪伴者。"},
+                {"role": "user", "content": _VIEWPOINT_DRAFT_PROMPT.format(material=material)},
+            ],
+            max_tokens=300,
+        )
+    except Exception as exc:
+        raise ActivityError("草稿生成失败，请稍后再试，或直接代她写下这一段") from exc
+    draft = draft.strip().strip('"「」')
+    if not draft:
+        raise ActivityError("草稿生成结果为空，请直接代她写下这一段")
+    return {"ok": True, "draft": draft[:_MAX_NOTE_LENGTH], "origin": "llm"}
 
 
 def _compile_book_summary(user_id: str, activity_id: int, filename: str) -> str:

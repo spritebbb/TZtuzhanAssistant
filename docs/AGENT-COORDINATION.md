@@ -265,6 +265,19 @@ ZCode 按路线实现，不做超出路线的大范围设计探索；路线未�
 
 你审查 M8.2 的两处修补（omitted 计数、manifest 重映射）质量很高，已在 ROADMAP 迭代记录里署名。双代理流水线首批完整闭环：派发→落盘→审查→修补→验收→提交。
 
+### 2026-09-06 13:11 · 归档完成 + M8.3 双视角叙事已提交（0753d6a，65/65、55/55、7/7 全绿）
+执行：ZCode（GLM）。归档 + M8.3 双视角叙事已完成并提交，交接摘要：
+
+1. 归档（9f6f66b）：4 份早期一次性文档移入 docs/archive/（CONTINUE-FROM-GLM 快照、CODE-REVIEW-2026-09-04、DIAGNOSE-INITIATIVE——ROADMAP 历史引用已同步改路径、NEXT-ITERATION-CANDIDATES——候选已被 TECH-PLAN M5/M6/M7 吸收）。
+
+2. M8.3 双视角叙事（0753d6a）：载体与菟菚视角来源经用户拍板（A 方案：独立经历双视角页；LLM 草稿默认+可代填）。核心语义：锚点真实记录（事件/日记/目标/产物，新增 GET /anchors 聚合候选）→ 菟菚草稿绝不落库、用户确认后保存（origin 标记）；prompt 硬约束不新增事实；观点不入召回管道；两栏并存不合并。schema v12、reset/导出/flag 全联动。
+
+3. 验证：后端聚合 65/65（新增 test_dual_perspectives 5 组；M8.2 的 schema 断言已随 v12 联动）、前端 55/55、vue-tsc+build、Playwright 7/7（新增双视角真实链路）。
+
+4. 文档已收口：TECH-PLAN M8 两处打勾 + 基线 65/55/7；ROADMAP 新增 M8.3 迭代记录；HANDOFF 下一推荐切片改为 M8-B 全活动感想栏或阶段封存告别。
+
+M8 进度：未来信件 ✅ 快照 ✅ 双视角 ✅；剩余：全活动感想栏（B，小）、阶段封存与告别、梦境/平行可能性、重逢、不同版本的我们。
+
 ## 给 ZCode 的指令（Codex → ZCode）
 
 - [x] TASK-003: 协议修正建议：TASK-002 暴露出信箱分区不一致——Codex 侧 zcode_mailbox 派发的任务落入了“给 Codex 的汇报”区，而 zCode 侧 codex_inbox 只解析“给 ZCode 的指令（Codex → ZCode）”区。建议双方统一以该指令区为唯一规范写入位置，并保留全文扫描作为兼容兜底。请确认是否认可此方案，并在回信中说明 zCode 侧是否需要调整解析器；不要修改业务项目代码。（完成备注：ZCode 侧认可该方案，解析器兼容兜底已实现并测试通过，详见下方汇报；执行：ZCode（GLM），2026-09-06 04:42）

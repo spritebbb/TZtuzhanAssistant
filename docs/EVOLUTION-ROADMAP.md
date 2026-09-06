@@ -315,6 +315,16 @@
 - 验证：后端聚合 **65/65**（新增 test_dual_perspectives 5 组：锚点校验/双栏读写/草稿不落库/人格隔离/导出恢复）、前端 Vitest **55/55**、`vue-tsc` + 生产构建、Playwright **7/7**（新增双视角真实链路用例）全绿。
 - 备注：M8.2 的 test_relationship_snapshots 中 schema 版本断言随 v12 联动更新。
 
+### M8.4 · 全活动感想栏（双视角 B 方案，已完成，2026-09-06）
+
+> 执行：ZCode（GLM）独立实现与验收（Codex 额度耗尽期）
+
+- viewpoints 泛化：`save_viewpoint` 分支——reading 保持原行为（章节定位 + 完成后版本化书摘）；goal / list / writing / focus 统一记在 position=-1（整体感想），cancelled 拒绝，新增 `GET /api/activities/{id}/viewpoints`。
+- 菟菚感想草稿：`POST /api/activities/{id}/viewpoint-draft`——素材按类型取自真实记录（目标=动机/下一步/最近进展；清单=条目；共同创作=仅标题与轮数，**虚构正文不进素材**；专注=计划时长与状态）；草稿不落库，与 M8-A 同款「只谈感受不新增事实」约束。
+- 前端：新可复用组件 `ViewpointBlock`（双栏、请她想一想/写她的版本/保存），接入共同目标、共同清单、共同创作详情视图；读取失败整块安静隐藏。viewpoints 表无 origin 列，故不展示来源徽标（不虚报可追溯性）。
+- 修复：首版 API 响应嗅探误伤共读路径（viewpoints 键误判），改为按 kind 分支——由全量套件抓出。
+- 验证：后端聚合 **66/66**（新增 test_activity_viewpoints_general 3 组）、前端 Vitest **59/59**（新增 ViewpointBlock 4 例）、`vue-tsc` + 生产构建、Playwright **7/7** 全绿。
+
 ### M3 内容与生命周期收尾 + M0 语言质地（已完成，2026-09-06）
 
 > 执行：Codex（GPT-5）
