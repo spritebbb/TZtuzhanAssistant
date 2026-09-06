@@ -18,7 +18,10 @@ import {
 import {
   exportRelationshipUrl,
   previewRestore,
+  previewSeal,
   restoreRelationship,
+  sealFileName,
+  sealMemories,
   type BundlePreview,
 } from '../api/relationship'
 
@@ -42,6 +45,69 @@ const restorePreview = ref<BundlePreview | null>(null)
 const restoreBundle = ref<unknown>(null)
 const restoreFileName = ref('')
 const restoreTarget = ref('')
+// ---- M8 阶段封存 ----
+const sealBusy = ref(false)
+const sealNotice = ref('')
+const sealError = ref('')
+const sealLetter = ref(true)
+const SEAL_OPTIONS: { key: string; label: string }[] = [
+  { key: 'memory', label: '记忆与事实' },
+  { key: 'life', label: '日记/纪念页/信' },
+  { key: 'milestones', label: '里程碑' },
+  { key: 'tasks', label: '约定' },
+  { key: 'activities', label: '共同活动与产物' },
+  { key: 'events', label: '真实事件' },
+  { key: 'conversations', label: '聊天记录' },
+  { key: 'knowledge', label: '一起读过的文档' },
+]
+const sealSelected = ref<string[]>(['memory', 'life', 'milestones', 'tasks', 'activities', 'events'])
+const sealTotal = ref<number | null>(null)
+
+function toggleSealCategory(key: string) {
+  sealSelected.value = sealSelected.value.includes(key)
+    ? sealSelected.value.filter((item) => item !== key)
+    : [...sealSelected.value, key]
+  sealTotal.value = null
+}
+
+async function runSealPreview() {
+  sealError.value = ''
+  if (!sealSelected.value.length) {
+    sealTotal.value = null
+    return
+  }
+  try {
+    const preview = await previewSeal(sealSelected.value)
+    sealTotal.value = Object.values(preview.counts)
+      .flatMap((tables) => Object.values(tables))
+      .reduce((sum, n) => sum + Number(n || 0), 0)
+  } catch (exc) {
+    sealError.value = exc instanceof Error ? exc.message : '封存预览失败'
+  }
+}
+
+async function runSeal() {
+  if (sealBusy.value) return
+  sealBusy.value = true
+  sealNotice.value = ''
+  sealError.value = ''
+  try {
+    const blob = await sealMemories(sealSelected.value, sealLetter.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = sealFileName(new Date().toISOString())
+    link.click()
+    URL.revokeObjectURL(url)
+    sealNotice.value = sealLetter.value
+      ? '纪念包已下载。告别信在包里，也写在下面——这段时光只是被收藏，没有被抹掉。'
+      : '纪念包已下载。这段时光只是被收藏，没有被抹掉。'
+  } catch (exc) {
+    sealError.value = exc instanceof Error ? exc.message : '封存没有成功'
+  } finally {
+    sealBusy.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -264,6 +330,31 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle() } 
           <a class="reset-btn export-link" :href="exportRelationshipUrl()" download>导出备份（JSON）</a>
         </article>
         <article class="profile-card">
+          <small>阶段封存</small>
+          <p>把想收藏的时光导出成一个纪念包（含一封告别信），<b>只导出、不删除</b>——这段关系继续在这里。</p>
+          <div class="seal-picker">
+            <label v-for="option in SEAL_OPTIONS" :key="option.key" class="seal-choice">
+              <input
+                type="checkbox"
+                :checked="sealSelected.includes(option.key)"
+                @change="toggleSealCategory(option.key)"
+              >{{ option.label }}
+            </label>
+          </div>
+          <label class="seal-choice"><input v-model="sealLetter" type="checkbox">请{{ props.personaName || '她' }}写一封告别信</label>
+          <p v-if="sealTotal !== null" class="restore-summary">将收藏 {{ sealTotal }} 条真实记录</p>
+          <p v-if="sealError" class="restore-error">{{ sealError }}</p>
+          <p v-if="sealNotice" class="restore-notice">{{ sealNotice }}</p>
+          <div class="seal-actions">
+            <button class="reset-btn" :disabled="!sealSelected.length" @click="runSealPreview">看看会收藏什么</button>
+            <button
+              class="reset-btn"
+              :disabled="sealBusy || !sealSelected.length"
+              @click="runSeal"
+            >{{ sealBusy ? '她在写信…' : '封存并下载' }}</button>
+          </div>
+        </article>
+        <article class="profile-card">
           <small>恢复</small>
           <p>选择备份文件，恢复到一个<b>空的</b>人格命名空间（例如新装好的环境里的人格 id）。</p>
           <input type="file" accept="application/json,.json" @change="onRestoreFile">
@@ -427,4 +518,7 @@ textarea { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 8px
 .restore-summary { margin: 8px 0 0; color: var(--text); font-size: 12px; }
 .restore-error { margin: 6px 0 0; color: #df7d86; font-size: 11px; line-height: 1.5; }
 .restore-notice { margin: 6px 0 0; color: var(--accent); font-size: 11px; }
+.seal-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 8px 0; }
+.seal-choice { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.seal-actions { display: flex; gap: 8px; margin-top: 10px; }
 </style>

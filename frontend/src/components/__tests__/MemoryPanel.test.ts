@@ -32,6 +32,9 @@ vi.mock('../../api/relationship', () => ({
   exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
   previewRestore: vi.fn(),
   restoreRelationship: vi.fn(),
+  previewSeal: vi.fn(),
+  sealMemories: vi.fn(),
+  sealFileName: vi.fn((at: string) => `sealing-${(at || '').slice(0, 10) || 'bundle'}.json`),
 }))
 
 const fact: FactItem = {
@@ -177,7 +180,10 @@ describe('MemoryPanel', () => {
     expect(wrapper.text()).toContain('将写入 3 条记录')
 
     vi.stubGlobal('confirm', () => true)
-    await wrapper.get('.reset-btn:not(.export-link)').trigger('click')
+    // M8 封存卡片也用 reset-btn；恢复按钮定位在「恢复」卡片内，避免选择器歧义
+    const restoreCard = wrapper.findAll('article.profile-card')
+      .find((card) => card.find('input[type="file"]').exists())!
+    await restoreCard.get('.reset-btn').trigger('click')
     await flushPromises()
     vi.unstubAllGlobals()
     expect(restoreRelationship).toHaveBeenCalledWith(bundle, 'assistant-main-bak')
