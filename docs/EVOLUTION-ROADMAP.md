@@ -80,7 +80,7 @@
 - **风险**：生图 prompt 需锁定人设图视觉特征（绿发/圆眼镜/白大褂），防形象漂移。
 
 ### A3. 主动性引擎收尾
-- **现状**：`docs/DIAGNOSE-INITIATIVE.md` 诊断出 5 条根因，仅根因一（归档建议 15min 空闲门槛）已修。
+- **现状**：`docs/archive/DIAGNOSE-INITIATIVE.md`（已归档）诊断出 5 条根因，仅根因一（归档建议 15min 空闲门槛）已修。
 - **剩余**：
   1. 问候（8h idle, web_last_seen）与主动引擎（6h idle, last_message_ts）共享「今日已主动」去重 → 消除久别双主动
   2. poll_for（30s 拉模式）加生成中占位 → 消除 loop/poll 并发双生成；失败 mark 防重试
