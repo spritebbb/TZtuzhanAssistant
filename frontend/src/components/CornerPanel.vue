@@ -2,6 +2,16 @@
 import { computed, ref, watch } from 'vue'
 import { listArtifacts, type ArtifactItem } from '../api/artifacts'
 import {
+  createDualPerspective,
+  deleteDualPerspective,
+  generateTuzhanDraft,
+  listDualAnchorCandidates,
+  listDualPerspectives,
+  saveDualPerspectiveView,
+  type DualAnchorCandidates,
+  type DualPerspective,
+} from '../api/dualPerspectives'
+import {
   createFutureLetter,
   deleteFutureLetter,
   listFutureLetters,
@@ -30,6 +40,8 @@ const lettersAvailable = ref(true)
 const snapshots = ref<RelationshipSnapshot[]>([])
 const snapshotMilestones = ref<SnapshotMilestone[]>([])
 const snapshotsAvailable = ref(true)
+const duals = ref<DualPerspective[]>([])
+const dualsAvailable = ref(true)
 const loading = ref(false)
 const error = ref('')
 
@@ -98,10 +110,11 @@ function toggleCompose() {
 async function load() {
   loading.value = true
   error.value = ''
-  const [artifactResult, lettersResult, snapshotsResult] = await Promise.allSettled([
+  const [artifactResult, lettersResult, snapshotsResult, dualsResult] = await Promise.allSettled([
     listArtifacts(),
     listFutureLetters(),
     listRelationshipSnapshots(),
+    listDualPerspectives(),
   ])
   if (artifactResult.status === 'fulfilled') {
     artifacts.value = artifactResult.value
@@ -130,6 +143,14 @@ async function load() {
     snapshotsAvailable.value = false
     snapshots.value = []
     snapshotMilestones.value = []
+  }
+  if (dualsResult.status === 'fulfilled') {
+    dualsAvailable.value = true
+    duals.value = dualsResult.value
+  } else {
+    // 双视角同样独立降级。
+    dualsAvailable.value = false
+    duals.value = []
   }
   loading.value = false
 }
@@ -269,6 +290,146 @@ async function removeSnapshot(page: RelationshipSnapshot) {
   }
 }
 
+// ---- 双视角叙事 ----
+const dualComposing = ref(false)
+const dualBusy = ref(false)
+const dualError = ref('')
+const dualTitle = ref('')
+const dualAnchorType = ref<'free' | 'event' | 'diary' | 'goal'>('free')
+const dualAnchorId = ref<number | ''>('')
+const dualUserView = ref('')
+const anchorCandidates = ref<DualAnchorCandidates | null>(null)
+const dualSaveBusyId = ref<number | null>(null)
+const dualDraftBusyId = ref<number | null>(null)
+const dualDraftTargetId = ref<number | null>(null)
+const confirmDeleteDualId = ref<number | null>(null)
+const dualTuzhanDrafts = ref<Record<number, string>>({})
+const dualDraftOrigin = ref<Record<number, 'llm' | 'user'>>({})
+
+function toggleTuzhanEditor(page: DualPerspective) {
+  if (dualDraftTargetId.value === page.id) {
+    dualDraftTargetId.value = null
+    return
+  }
+  dualDraftTargetId.value = page.id
+  if (dualTuzhanDrafts.value[page.id] === undefined) {
+    dualTuzhanDrafts.value[page.id] = page.tuzhan_view
+  }
+  dualDraftOrigin.value[page.id] = 'user'
+}
+
+function originLabel(page: DualPerspective) {
+  return page.tuzhan_view_origin === 'llm' ? '她想' : '代填'
+}
+
+function toggleDualCompose() {
+  dualComposing.value = !dualComposing.value
+  if (!dualComposing.value) {
+    dualTitle.value = ''
+    dualAnchorType.value = 'free'
+    dualAnchorId.value = ''
+    dualUserView.value = ''
+    dualError.value = ''
+    return
+  }
+  if (!anchorCandidates.value) {
+    listDualAnchorCandidates()
+      .then((candidates) => { anchorCandidates.value = candidates })
+      .catch(() => { anchorCandidates.value = { events: [], diary: [], goals: [] } })
+  }
+}
+
+function anchorOptions() {
+  if (!anchorCandidates.value) return []
+  if (dualAnchorType.value === 'event') return anchorCandidates.value.events
+  if (dualAnchorType.value === 'diary') return anchorCandidates.value.diary
+  if (dualAnchorType.value === 'goal') return anchorCandidates.value.goals
+  return []
+}
+
+async function submitDual() {
+  if (dualBusy.value) return
+  dualError.value = ''
+  const title = dualTitle.value.trim()
+  if (!title) {
+    dualError.value = '给这段经历起个名字'
+    return
+  }
+  const payload: Parameters<typeof createDualPerspective>[0] = { title, source_type: dualAnchorType.value }
+  if (dualAnchorType.value !== 'free') {
+    if (!dualAnchorId.value) {
+      dualError.value = '选一段真实经历，或改回自由主题'
+      return
+    }
+    payload.source_id = dualAnchorId.value
+  }
+  if (dualUserView.value.trim()) payload.user_view = dualUserView.value.trim()
+  dualBusy.value = true
+  try {
+    await createDualPerspective(payload)
+    dualComposing.value = false
+    dualTitle.value = ''
+    dualAnchorType.value = 'free'
+    dualAnchorId.value = ''
+    dualUserView.value = ''
+    await load()
+  } catch (exc) {
+    dualError.value = exc instanceof Error ? exc.message : '这一页没有建成，再试一次'
+  } finally {
+    dualBusy.value = false
+  }
+}
+
+async function saveTuzhanView(page: DualPerspective, origin: 'llm' | 'user') {
+  if (dualSaveBusyId.value !== null) return
+  const content = (dualTuzhanDrafts.value[page.id] ?? page.tuzhan_view).trim()
+  if (!content && origin !== 'llm') {
+    dualError.value = '要写点什么才能保存'
+    return
+  }
+  dualSaveBusyId.value = page.id
+  dualError.value = ''
+  try {
+    await saveDualPerspectiveView(page.id, 'tuzhan', content, origin)
+    dualDraftTargetId.value = null
+    dualTuzhanDrafts.value[page.id] = ''
+    await load()
+  } catch (exc) {
+    dualError.value = exc instanceof Error ? exc.message : '保存没有成功'
+  } finally {
+    dualSaveBusyId.value = null
+  }
+}
+
+async function draftTuzhanView(page: DualPerspective) {
+  if (dualDraftBusyId.value !== null) return
+  dualDraftBusyId.value = page.id
+  dualError.value = ''
+  dualDraftTargetId.value = page.id
+  try {
+    dualTuzhanDrafts.value[page.id] = await generateTuzhanDraft(page.id)
+    dualDraftOrigin.value[page.id] = 'llm'
+  } catch (exc) {
+    dualError.value = exc instanceof Error ? exc.message : '草稿没有生成'
+  } finally {
+    dualDraftBusyId.value = null
+  }
+}
+
+async function removeDual(page: DualPerspective) {
+  if (confirmDeleteDualId.value !== page.id) {
+    confirmDeleteDualId.value = page.id
+    return
+  }
+  confirmDeleteDualId.value = null
+  try {
+    await deleteDualPerspective(page.id)
+    await load()
+  } catch {
+    dualError.value = '删除没有成功，过会儿再试'
+  }
+}
+
 watch(() => props.show, (show) => { if (show) void load() }, { immediate: true })
 </script>
 
@@ -387,6 +548,85 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
             </article>
           </section>
 
+          <section v-if="dualsAvailable" class="duals" aria-label="双视角">
+            <div class="section-head">
+              <h3>双视角 · 同一件事的两种记忆</h3>
+              <button class="ghost" @click="toggleDualCompose()">
+                {{ dualComposing ? '不写了' : '新建一页' }}
+              </button>
+            </div>
+
+            <form v-if="dualComposing" class="compose" @submit.prevent="submitDual">
+              <input v-model="dualTitle" class="line" maxlength="60" placeholder="这段经历叫什么" />
+              <div class="unlock-picker" role="radiogroup" aria-label="锚点类型">
+                <label><input v-model="dualAnchorType" type="radio" value="free" />自由主题</label>
+                <label><input v-model="dualAnchorType" type="radio" value="event" />真实事件</label>
+                <label><input v-model="dualAnchorType" type="radio" value="diary" />某天的日记</label>
+                <label><input v-model="dualAnchorType" type="radio" value="goal" />共同目标</label>
+              </div>
+              <select v-if="dualAnchorType !== 'free'" v-model="dualAnchorId" aria-label="选择经历">
+                <option disabled value="">选一段真实经历</option>
+                <option v-for="item in anchorOptions()" :key="item.id" :value="item.id">{{ item.label }}</option>
+              </select>
+              <textarea
+                v-model="dualUserView"
+                rows="2"
+                maxlength="2000"
+                placeholder="你记得的版本（现在写或之后补都可以）"
+              />
+              <p v-if="dualError" class="form-error">{{ dualError }}</p>
+              <button class="primary" type="submit" :disabled="dualBusy">留下这一页</button>
+            </form>
+
+            <p v-if="!duals.length" class="empty letters-empty">
+              同一件事，你和她记得的可能不一样——这里把两个版本都留着
+            </p>
+            <article v-for="page in duals" :key="`dual-${page.id}`" class="letter-card dual-card">
+              <div class="card-head">
+                <span class="type">{{ page.source_type === 'free' ? '自由主题' : (page.source_date || '') }}</span>
+                <button class="delete" @click="removeDual(page)">
+                  {{ confirmDeleteDualId === page.id ? '确认删除' : '删除' }}
+                </button>
+              </div>
+              <h4>{{ page.title }}</h4>
+              <div class="dual-cols">
+                <div class="view-block">
+                  <small>你记得的</small>
+                  <p>{{ page.user_view || '（还没写）' }}</p>
+                </div>
+                <div class="view-block">
+                  <small>她记得的 <span v-if="page.tuzhan_view" class="origin">{{ originLabel(page) }}</span></small>
+                  <p>{{ page.tuzhan_view || '（她还没说）' }}</p>
+                </div>
+              </div>
+              <div class="dual-actions">
+                <button class="ghost" @click="toggleTuzhanEditor(page)">
+                  {{ dualDraftTargetId === page.id ? '收起' : '写她的版本' }}
+                </button>
+                <button class="ghost" :disabled="dualDraftBusyId === page.id" @click="draftTuzhanView(page)">
+                  {{ dualDraftBusyId === page.id ? '她在想…' : '请她想一想' }}
+                </button>
+              </div>
+              <template v-if="dualDraftTargetId === page.id">
+                <textarea
+                  v-model="dualTuzhanDrafts[page.id]"
+                  rows="3"
+                  maxlength="2000"
+                  aria-label="她的版本编辑"
+                  @input="dualDraftOrigin[page.id] = 'user'"
+                />
+                <button
+                  class="primary"
+                  :disabled="dualSaveBusyId === page.id"
+                  @click="saveTuzhanView(page, dualDraftOrigin[page.id] === 'llm' ? 'llm' : 'user')"
+                >
+                  保存她的版本
+                </button>
+              </template>
+            </article>
+            <p v-if="dualError" class="form-error">{{ dualError }}</p>
+          </section>
+
           <section aria-label="一起做成的事">
             <div class="section-head">
               <h3>一起做成的事</h3>
@@ -456,4 +696,11 @@ time { color: var(--text-muted); font-size: 10px; }
 .generated { display: block; margin-top: 8px; color: var(--text-muted); font-size: 10px; }
 .empty { color: var(--text-muted); text-align: center; padding: 60px 0; }
 .letters-empty { padding: 24px 0; }
+.dual-card textarea { width: 100%; margin-top: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg-main) 70%, transparent); color: var(--text); font-size: 12px; line-height: 1.7; box-sizing: border-box; resize: vertical; }
+.dual-actions { display: flex; gap: 8px; margin-top: 8px; }
+.dual-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.view-block { padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--bg-main) 70%, transparent); }
+.view-block small { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; }
+.view-block p { margin: 0; white-space: pre-wrap; color: var(--text); font-size: 12px; line-height: 1.7; }
+.origin { padding: 1px 6px; border-radius: 99px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 9px; }
 </style>

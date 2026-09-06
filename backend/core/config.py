@@ -153,6 +153,8 @@ class Config:
         self.future_letters_enabled: bool = os.getenv("FUTURE_LETTERS_ENABLED", "1") != "0"
         # M8 关系快照：30/100/365 天纪念页（feature flag，0 关闭）
         self.relationship_snapshots_enabled: bool = os.getenv("RELATIONSHIP_SNAPSHOTS_ENABLED", "1") != "0"
+        # M8 双视角叙事：同一经历的双方解释页（feature flag，0 关闭）
+        self.dual_perspectives_enabled: bool = os.getenv("DUAL_PERSPECTIVES_ENABLED", "1") != "0"
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
