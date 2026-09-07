@@ -115,12 +115,20 @@ def build_system_prompt(
             behavior_line = "- 你此刻的状态（自然流露，不要报数值）：" + behavior_text + "\n"
     elif user_id:
         try:
+            from .calendar_modulation import compose_line, effective_modulation
             from .seasons import current_season as _season
             from .state import load_state as _load_state
             from .behavior import build_behavior_frame as _frame
 
             _state = _load_state(user_id)
-            _behavior = _frame(_state, season_line=_season(user_id, _state)["line"])
+            cal = effective_modulation(
+                user_id, datetime.now().date(),
+                energy=_state.energy, tension=_state.tension,
+            )
+            _behavior = _frame(
+                _state, season_line=_season(user_id, _state)["line"],
+                calendar_line=compose_line(cal),
+            )
             behavior_line = (
                 "- 你此刻的状态（自然流露，不要报数值）：" + _behavior.compose() + "\n"
             )
