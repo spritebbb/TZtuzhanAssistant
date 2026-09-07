@@ -972,6 +972,13 @@ VERIFY: .venv/Scripts/python.exe tests/test_aesthetic_preferences.py ;; .venv/Sc
 
 工具入口保留聊天输入、语音、活动、更多；其他已存在入口搬入可搜索“更多”弹层/已有设置分组，原功能深链和快捷键保留，最近使用仅本机运行偏好，不追踪聊天内容。不是删除工具：验收逐一按钮功能仍可达，不把调试字段放在用户主流程。
 
+界面简化补充项（2026-09-07 用户拍板，与 L08 同批实施；首屏现状 25+ 元素、header 12 图标、每消息 3-4 附加按钮）：
+1. **好感度条移出聊天**：aff-bar 不再常驻 ChatView 上方，数值/阶段/小档进度只在成长页（DashboardPanel）与「我们之间」展示；聊天过程中不可见任何关系数值（拟真总则的 UI 落地）。
+2. **状态灯异常才显示**：ToolBar 的 7 个状态 chip（联网/天气/生图/识图/记忆/MCP/在线）正常时整条隐藏，任一异常亮红提示并 clickable 查看详情；全绿=无条带。
+3. **不留痕开关收纳**：输入框底部「本轮不留痕」开关收进 ChatInput 快捷指令面板，底行只留状态文字。
+4. **解释快照保留**：「为什么」按钮已按需展开，维持现状。
+验收：收纳后首屏可见元素 ≤12（header 4 入口＋消息流＋输入区）；全部功能可达性回归照旧（L08 验收条款适用）；好感度条移出后 Dashboard 补展示位。
+
 presence home/mobile/announced_offline/rest/focus来自state/schedule；安静=系统reduced-motion或用户关闭动效或focus，优先压制动画和自动声线。后端只返回可解释状态，不泄漏全prompt。无新业务表，显示偏好写既有persona settings；同步导出该设置入口已有覆盖。feature关闭恢复原工具布局，VisualState仍可作为无行为改变适配层保留。
 
 ```text
