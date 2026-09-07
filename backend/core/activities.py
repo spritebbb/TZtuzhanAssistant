@@ -523,6 +523,13 @@ async def viewpoint_draft(user_id: str, activity_id: int) -> dict:
     draft = draft.strip().strip('"「」')
     if not draft:
         raise ActivityError("草稿生成结果为空，请直接代她写下这一段")
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    draft = protect_visible_text(
+        draft,
+        context=HygieneContext(kind="activity_viewpoint", source_namespace="activities"),
+        fallback="这段共同经历值得被认真记住，我想把当时的感受慢慢写清楚。",
+    ).text
     return {"ok": True, "draft": draft[:_MAX_NOTE_LENGTH], "origin": "llm"}
 
 
@@ -737,7 +744,13 @@ async def propose_discussion_question(
             return fallback
         if not question.endswith(("？", "?")):
             question += "？"
-        return question
+        from .output_hygiene import HygieneContext, protect_visible_text
+
+        return protect_visible_text(
+            question,
+            context=HygieneContext(kind="activity_question", source_namespace="activities"),
+            fallback=fallback,
+        ).text
     except Exception as exc:
         logger.warning("[共同活动] 相关问题生成失败，使用片段锚定兜底: {}", exc)
         return fallback

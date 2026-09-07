@@ -107,3 +107,38 @@ def inspect_reply(text: str, *, context: HygieneContext) -> HygieneResult:
     if rules and rules != ["closed_reasoning_block"]:
         return HygieneResult(candidate, "rewrite", tuple(dict.fromkeys(rules)))
     return HygieneResult(candidate, "accept", tuple(rules))
+
+
+def protect_visible_text(
+    text: str,
+    *,
+    context: HygieneContext,
+    fallback: str = "",
+    enabled: bool | None = None,
+) -> HygieneResult:
+    """在非聊天出口执行同一套检查，并在不安全时返回确定性兜底。
+
+    非聊天生成器通常没有可安全复用的第二次模型调用预算，因此发现内部协议
+    或残缺推理标记时直接丢弃候选，使用调用方提供的、与业务语义匹配的兜底。
+    ``enabled`` 仅供测试或显式调用覆盖；默认动态读取功能开关。
+    """
+    if enabled is None:
+        from .features import flag
+
+        enabled = flag("output_hygiene_enabled")
+    candidate = (text or "").strip()
+    if not enabled:
+        return HygieneResult(candidate, "accept" if candidate else "fallback")
+
+    result = inspect_reply(candidate, context=context)
+    if result.action == "accept":
+        return result
+
+    safe_fallback = inspect_reply((fallback or "").strip(), context=context)
+    if safe_fallback.action == "accept":
+        return HygieneResult(
+            safe_fallback.text,
+            "fallback",
+            tuple(dict.fromkeys((*result.rule_ids, "deterministic_fallback"))),
+        )
+    return HygieneResult("", "fallback", tuple(dict.fromkeys(result.rule_ids)))

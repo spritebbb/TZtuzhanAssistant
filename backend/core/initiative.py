@@ -365,7 +365,13 @@ async def _deliver(user_id: str, message: ProactiveMessage) -> bool:
     if _deliver_hook is None:
         return False
     try:
-        return bool(await _deliver_hook(user_id, message))
+        safe = _safe_proactive_message(message)
+        if safe is None:
+            return False
+        # 调用方随后会把同一个对象落库；原地替换保证实时展示与持久化一致。
+        message.clear()
+        message.update(safe)
+        return bool(await _deliver_hook(user_id, safe))
     except Exception:
         return False
 
@@ -374,6 +380,18 @@ async def _deliver(user_id: str, message: ProactiveMessage) -> bool:
 # 后台 loop 生成主动消息时用户可能不在线，先把消息持久化到 kv_store，
 # 前端轮询 /api/initiative 时取走。每个用户每天最多 1 条，故单 key 即可。
 _PENDING_KEY = "initiative:pending"
+
+
+def _safe_proactive_message(message: ProactiveMessage) -> ProactiveMessage | None:
+    """检查主动消息最终文字；图片字段原样保留。"""
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    result = protect_visible_text(
+        message.get("text", ""),
+        context=HygieneContext(kind="proactive", source_namespace="initiative"),
+        fallback="刚才那句话没组织好，等我想清楚再来找你。",
+    )
+    return _message(result.text, message.get("image")) if result.text else None
 
 
 async def _persist_proactive(
@@ -390,6 +408,10 @@ async def _persist_proactive(
     循环，也保证与其它写路径同锁串行，不会插到用户/菟菚消息中间。
     幂等：最后一条 bot 消息内容相同则跳过，防 SSE 重连/队列残留重复落库。
     """
+    safe = _safe_proactive_message(_message(text, image))
+    if safe is None:
+        return False
+    text, image = safe["text"], safe["image"]
     try:
         from ..session import store as _store
         from .reset import ResetSuperseded, reset_epoch, user_write_guard
@@ -422,7 +444,10 @@ async def enqueue_proactive(
     write_epoch = reset_epoch() if epoch is None else epoch
     if not epoch_is_current(write_epoch):
         return False
-    message = _message(text, image)
+    message = _safe_proactive_message(_message(text, image))
+    if message is None:
+        return False
+    text = message["text"]
     encoded = _encode_message(message)
     kv_set(user_id, _PENDING_KEY, encoded)
     if not await _persist_proactive(user_id, text, image=image, epoch=write_epoch):

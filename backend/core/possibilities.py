@@ -117,6 +117,13 @@ async def generate_draft(user_id: str, mode: str, title: str, premise: str) -> d
     draft = draft.strip().strip('"「」')
     if not draft:
         raise PossibilityError("草稿生成结果为空，请稍后再试")
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    draft = protect_visible_text(
+        draft,
+        context=HygieneContext(kind="fiction_draft", source_namespace="possibilities"),
+        fallback="这个虚构片段还没写好，先把它留在想象里，等下一次再展开。",
+    ).text
     return {"ok": True, "draft": draft[:_MAX_CONTENT], "mode": mode}
 
 
