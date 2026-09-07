@@ -5,7 +5,10 @@
 
 v2 优化：超时 + 指数退避重试（网络抖动自动恢复，不把错误甩给用户）。
 """
+from __future__ import annotations
+
 import asyncio
+import hashlib
 import json
 
 import httpx
@@ -15,9 +18,10 @@ from .config import config
 from .log import logger
 
 _client: AsyncOpenAI | None = None
+_client_cache: dict[tuple[str, str, str, int, int], AsyncOpenAI] = {}
 
 
-def _build_http_client() -> httpx.AsyncClient | None:
+def _build_http_client(timeout: int | None = None) -> httpx.AsyncClient | None:
     """构建 LLM 请求的底层 HTTP 客户端。
 
     默认返回 None（openai SDK 自建，会读系统代理环境变量）。
@@ -29,8 +33,8 @@ def _build_http_client() -> httpx.AsyncClient | None:
     if not proxy:
         return None
     if proxy in ("off", "direct", "none", "no"):
-        return httpx.AsyncClient(trust_env=False, timeout=config.llm_timeout)
-    return httpx.AsyncClient(proxy=proxy, trust_env=False, timeout=config.llm_timeout)
+        return httpx.AsyncClient(trust_env=False, timeout=timeout or config.llm_timeout)
+    return httpx.AsyncClient(proxy=proxy, trust_env=False, timeout=timeout or config.llm_timeout)
 
 # 重试策略
 _MAX_RETRIES = 2                 # 最多重试 2 次（共 3 次尝试）
@@ -64,19 +68,44 @@ def _is_retryable(exc: Exception) -> bool:
     return False
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    return status in (401, 403)
+
+
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        if not config.llm_api_key:
-            raise RuntimeError("未配置 LLM_API_KEY（请先复制 .env.example 为 .env 并填写）")
-        _client = AsyncOpenAI(
-            base_url=config.llm_base_url,
-            api_key=config.llm_api_key,
-            timeout=config.llm_timeout,
-            max_retries=0,  # 自己控制重试，避免 SDK 与这里双重退避
-            http_client=_build_http_client(),
-        )
+        from .model_routes import resolve_route
+
+        _client = _client_for_route(resolve_route("chat_routine"))
     return _client
+
+
+def _client_for_route(route) -> AsyncOpenAI:
+    from .model_routes import resolve_api_key
+    from openai import AsyncOpenAI as ClientClass
+
+    key = resolve_api_key(route)
+    if not key:
+        raise RuntimeError(f"未配置模型路由凭据：{route.key_ref}")
+    auth_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    cache_key = (route.base_url.rstrip("/"), route.key_ref, auth_id, route.timeout_sec, id(ClientClass))
+    # 单测会把 SDK 构造器替换成函数并为每个响应建立新实例；函数不进入全局缓存。
+    # 生产 SDK 构造器是 class，按端点和认证标识稳定复用。
+    cacheable = isinstance(ClientClass, type)
+    client = _client_cache.get(cache_key) if cacheable else None
+    if client is None:
+        client = ClientClass(
+            base_url=route.base_url,
+            api_key=key,
+            timeout=route.timeout_sec,
+            max_retries=0,
+            http_client=_build_http_client(route.timeout_sec),
+        )
+        if cacheable:
+            _client_cache[cache_key] = client
+    return client
 
 
 def get_perception_client() -> AsyncOpenAI:
@@ -90,23 +119,9 @@ def get_perception_client() -> AsyncOpenAI:
         # 有独立配置 → 独立 client（缓存于模块级，key 变化需 reload 重置）
         pc = getattr(get_perception_client, "_client", None)
         if pc is None:
-            base = config.llm_perception_base_url or config.llm_base_url
-            # key 回退顺序：显式 LLM_PERCEPTION_API_KEY → 同端点 IMAGE_API_KEY
-            # （硅基流动常见配法：生图 key 与 chat 小模型同 key）→ 主 LLM_API_KEY。
-            key = (
-                config.llm_perception_api_key
-                or config.image_api_key
-                or config.llm_api_key
-            )
-            if not key:
-                raise RuntimeError("未配置感知层 API key")
-            pc = AsyncOpenAI(
-                base_url=base,
-                api_key=key,
-                timeout=config.llm_perception_timeout,
-                max_retries=0,
-                http_client=_build_http_client(),
-            )
+            from .model_routes import resolve_route
+
+            pc = _client_for_route(resolve_route("batch_other"))
             get_perception_client._client = pc
         return pc
     return get_client()
@@ -139,6 +154,7 @@ async def chat(
     max_tokens: int | None = None,
     perception: bool = False,
     model: str | None = None,
+    task: str | None = None,
 ) -> str:
     """非流式整条回复。mock=True 时返回占位回复，便于无 API key 调试。
 
@@ -152,33 +168,42 @@ async def chat(
         # mock 回显最后一条**用户**消息（若末尾是 system 指令，别把 system 内容当回复）
         last = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
         return f"[模拟回复] 收到啦：{last[:30]}……(￣▽￣)"
-    client = get_perception_client() if perception else get_client()
-    effective_model = model or (
-        (config.llm_perception_model or config.llm_model)
-        if perception
-        else config.llm_model
-    )
+    from .model_routes import fallback_route, resolve_route
+
+    route = resolve_route(task or ("batch_other" if perception else "chat_routine"), model)
     prompt_text = "".join(str(m.get("content") or "") for m in messages)
     last_exc: Exception | None = None
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            resp = await client.chat.completions.create(
-                model=effective_model,
-                messages=messages,
-                temperature=config.llm_temperature if temperature is None else temperature,
-                max_tokens=config.llm_max_tokens if max_tokens is None else max_tokens,
-            )
-            text = resp.choices[0].message.content or ""
-            _record_usage("perception" if perception else "chat", effective_model,
-                          getattr(resp, "usage", None), prompt_text, text)
-            return text
-        except Exception as e:
-            last_exc = e
-            if not _is_retryable(e) or attempt >= _MAX_RETRIES:
-                break
-            wait = _RETRY_BASE_SEC * (2**attempt)
-            logger.warning("[LLM] 第{}次失败（{}），{:.1f}s 后重试", attempt + 1, type(e).__name__, wait)
-            await asyncio.sleep(wait)
+    routes = [route]
+    fallback = fallback_route(route)
+    if fallback:
+        routes.append(fallback)
+    for route_index, current in enumerate(routes):
+        if route_index == 0 and task is None:
+            client = get_perception_client() if perception else get_client()
+        else:
+            client = _client_for_route(current)
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = await client.chat.completions.create(
+                    model=current.model,
+                    messages=messages,
+                    temperature=config.llm_temperature if temperature is None else temperature,
+                    max_tokens=current.max_tokens if max_tokens is None else max_tokens,
+                )
+                text = resp.choices[0].message.content or ""
+                _record_usage(current.task, current.model, getattr(resp, "usage", None), prompt_text, text)
+                return text
+            except Exception as e:
+                last_exc = e
+                if _is_auth_error(e) or not _is_retryable(e) or attempt >= _MAX_RETRIES:
+                    break
+                wait = _RETRY_BASE_SEC * (2**attempt)
+                logger.warning("[LLM] {} 第{}次失败（{}），{:.1f}s 后重试", current.task, attempt + 1, type(e).__name__, wait)
+                await asyncio.sleep(wait)
+        if last_exc is not None and (
+            _is_auth_error(last_exc) or not _is_retryable(last_exc) or route_index >= len(routes) - 1
+        ):
+            break
     raise last_exc  # 全部失败，交给调用方兜底
 
 
@@ -197,11 +222,14 @@ async def chat_native(
     """
     if mock:
         return await chat(messages, mock=mock), []
-    client = get_client()
+    from .model_routes import resolve_route
+
+    route = resolve_route("tool")
+    client = _client_for_route(route)
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            kwargs: dict = {"model": config.llm_model, "messages": messages}
+            kwargs: dict = {"model": route.model, "messages": messages}
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
@@ -212,11 +240,11 @@ async def chat_native(
             if max_tokens is not None:
                 kwargs["max_tokens"] = max_tokens
             else:
-                kwargs["max_tokens"] = config.llm_max_tokens
+                kwargs["max_tokens"] = route.max_tokens
             resp = await client.chat.completions.create(**kwargs)
             msg = resp.choices[0].message
             text = msg.content or ""
-            _record_usage("tool", config.llm_model, getattr(resp, "usage", None),
+            _record_usage("tool", route.model, getattr(resp, "usage", None),
                           "".join(str(m.get("content") or "") for m in messages), text)
             calls: list[dict] = []
             for tc in (msg.tool_calls or []):
@@ -257,6 +285,7 @@ async def chat_stream(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model: str | None = None,
+    task: str = "chat_routine",
 ):
     """流式回复：逐 chunk 产出文本片段（打字机效果）。连接前失败直接抛出，调用方兜底。
 
@@ -267,46 +296,55 @@ async def chat_stream(
     """
     if getattr(config, "llm_stream_disable", False):
         # 留一个逃生开关：某些端点不支持 stream 时退回整句
-        yield await chat(messages, temperature=temperature, max_tokens=max_tokens, model=model)
+        yield await chat(messages, temperature=temperature, max_tokens=max_tokens, model=model, task=task)
         return
-    client = get_client()
-    effective_model = model or config.llm_model
+    from .model_routes import fallback_route, resolve_route
+
+    route = resolve_route(task, model)
     prompt_text = "".join(str(m.get("content") or "") for m in messages)
     last_exc: Exception | None = None
-    for attempt in range(_MAX_RETRIES + 1):
-        produced = False
-        produced_text = ""
-        usage = None
-        try:
-            stream = await client.chat.completions.create(
-                model=effective_model,
-                messages=messages,
-                temperature=config.llm_temperature if temperature is None else temperature,
-                max_tokens=config.llm_max_tokens if max_tokens is None else max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-            async for chunk in stream:
-                if getattr(chunk, "usage", None):
-                    usage = chunk.usage
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                piece = getattr(delta, "content", None)
-                if piece:
-                    produced = True
-                    produced_text += piece
-                    yield piece
-            _record_usage("reply", effective_model, usage, prompt_text, produced_text)
-            return
-        except Exception as e:
-            last_exc = e
-            if produced or not _is_retryable(e) or attempt >= _MAX_RETRIES:
-                break  # 已产出过内容/不可重试/重试耗尽：终止（避免前端收到重复片段）
-            wait = _RETRY_BASE_SEC * (2**attempt)
-            logger.warning("[LLM] 流式第{}次失败（{}），{:.1f}s 后重试",
-                          attempt + 1, type(e).__name__, wait)
-            await asyncio.sleep(wait)
+    routes = [route]
+    fallback = fallback_route(route)
+    if fallback:
+        routes.append(fallback)
+    for route_index, current in enumerate(routes):
+        client = _client_for_route(current)
+        for attempt in range(_MAX_RETRIES + 1):
+            produced = False
+            produced_text = ""
+            usage = None
+            try:
+                stream = await client.chat.completions.create(
+                    model=current.model,
+                    messages=messages,
+                    temperature=config.llm_temperature if temperature is None else temperature,
+                    max_tokens=current.max_tokens if max_tokens is None else max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+                async for chunk in stream:
+                    if getattr(chunk, "usage", None):
+                        usage = chunk.usage
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    piece = getattr(delta, "content", None)
+                    if piece:
+                        produced = True
+                        produced_text += piece
+                        yield piece
+                _record_usage(current.task, current.model, usage, prompt_text, produced_text)
+                return
+            except Exception as e:
+                last_exc = e
+                if produced or _is_auth_error(e) or not _is_retryable(e) or attempt >= _MAX_RETRIES:
+                    break
+                wait = _RETRY_BASE_SEC * (2**attempt)
+                logger.warning("[LLM] {} 流式第{}次失败（{}），{:.1f}s 后重试",
+                              current.task, attempt + 1, type(e).__name__, wait)
+                await asyncio.sleep(wait)
+        if produced or last_exc is None or _is_auth_error(last_exc) or not _is_retryable(last_exc) or route_index >= len(routes) - 1:
+            break
     raise last_exc  # type: ignore[misc]
 
 
@@ -334,6 +372,7 @@ async def extract_address(text: str) -> str | None:
         ],
         temperature=0.2,
         max_tokens=20,
+        task="extract",
     )
     name = resp.strip().strip("「」『』\"'“”《》 ")
     # 校验：过长/含换行/含标点的结果视为提取失败，避免把整句当称呼

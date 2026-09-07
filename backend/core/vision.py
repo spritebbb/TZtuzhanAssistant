@@ -39,7 +39,9 @@ _VISION_SYSTEM_PROMPT = (
 
 
 def enabled() -> bool:
-    return bool(config.vision_api_key or config.image_api_key or config.llm_api_key)
+    from .model_routes import resolve_api_key, resolve_route
+
+    return bool(resolve_api_key(resolve_route("vision")))
 
 
 def _vision_conf() -> tuple[str, str, str]:
@@ -50,30 +52,20 @@ def _vision_conf() -> tuple[str, str, str]:
     2. IMAGE_*（SiliconFlow 生图 key，配默认 VL 模型）——最常见的可用组合
     3. LLM_*（最后兜底，仅当该端点支持视觉）
     """
-    if config.vision_api_key and config.vision_base_url:
-        return (
-            config.vision_base_url,
-            config.vision_api_key,
-            config.vision_model or _DEFAULT_VL_MODEL,
-        )
-    if config.image_api_key and config.image_base_url:
-        return (
-            config.image_base_url,
-            config.image_api_key,
-            config.vision_model or _DEFAULT_VL_MODEL,
-        )
-    return (
-        config.llm_base_url,
-        config.llm_api_key,
-        config.vision_model or _DEFAULT_VL_MODEL,
-    )
+    from .model_routes import resolve_api_key, resolve_route
+
+    route = resolve_route("vision")
+    return route.base_url, resolve_api_key(route), route.model
 
 
 async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str | None:
     """描述一张图片的内容。"""
     if not image_bytes:
         return None
-    base, key, model = _vision_conf()
+    from .model_routes import resolve_api_key, resolve_route
+
+    route = resolve_route("vision")
+    key = resolve_api_key(route)
     if not key:
         logger.warning("[识图] 未配置视觉模型 key（VISION_* 或 IMAGE_*）")
         return None
@@ -99,13 +91,13 @@ async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str
         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": data_url}}]},
     ]
     try:
-        from openai import AsyncOpenAI
+        from .llm import _client_for_route, _record_usage
 
-        client = AsyncOpenAI(base_url=base, api_key=key, timeout=60, max_retries=1)
+        client = _client_for_route(route)
         resp = await client.chat.completions.create(
-            model=model,
+            model=route.model,
             messages=messages,
-            max_tokens=1000,  # 给 reasoning 留足空间
+            max_tokens=route.max_tokens,
         )
         message = resp.choices[0].message
         # 只认非空字符串正文；正文空 = 识图失败。绝不回退 reasoning_content：
@@ -114,6 +106,7 @@ async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str
         if not text:
             logger.warning("[识图] 视觉模型正文为空，按识图失败处理")
             return None
+        _record_usage("vision", route.model, getattr(resp, "usage", None), _VISION_SYSTEM_PROMPT, text)
         return text[:600]
     except Exception as e:
         logger.warning(f"[识图] 视觉模型调用失败: {type(e).__name__}: {e}")

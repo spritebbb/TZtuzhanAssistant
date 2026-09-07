@@ -1545,11 +1545,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # D5 模型路由：写作/代码/长文类请求走强模型（已配置 LLM_MODEL_STRONG 时）
     from .config import config as _cfg
 
-    reply_model = (
-        _cfg.llm_model_strong
-        if _cfg.llm_model_strong and not mock and _needs_strong_model(text)
-        else None
-    )
+    deep_request = not mock and _needs_strong_model(text)
+    reply_model = _cfg.llm_model_strong if _cfg.llm_model_strong and deep_request else None
+    reply_task = "chat_deep" if deep_request else "chat_routine"
     try:
         from .features import flag as _feature_flag
 
@@ -1590,7 +1588,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             # 关闭时保持旧的逐块回调行为。
 
             parts: list[str] = []
-            async for piece in chat_stream(messages, model=reply_model):
+            async for piece in chat_stream(messages, model=reply_model, task=reply_task):
                 parts.append(piece)
                 if not hygiene_enabled:
                     try:
@@ -1599,7 +1597,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                         pass  # 回调失败不中断生成
             raw = "".join(parts)
         else:
-            raw = await chat(messages, mock=mock, model=reply_model)
+            raw = await chat(messages, mock=mock, model=reply_model, task=reply_task)
     reply = _postprocess_reply(text, raw)
     rewrite_used = False
 
@@ -1631,7 +1629,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     except Exception:
                         pass
                     parts2: list[str] = []
-                    async for piece in chat_stream(messages, model=reply_model):
+                    async for piece in chat_stream(messages, model=reply_model, task=reply_task):
                         parts2.append(piece)
                         try:
                             await stream_cb(piece)
@@ -1639,7 +1637,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                             pass
                     raw2 = "".join(parts2)
                 else:
-                    raw2 = await chat(messages, mock=mock, model=reply_model)
+                    raw2 = await chat(messages, mock=mock, model=reply_model, task=reply_task)
                 reply2 = _postprocess_reply(text, raw2)
                 if reply2.strip():
                     reply = reply2
@@ -1673,7 +1671,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 ),
             }
             retry_messages = messages[:-1] + [retry_instruction, messages[-1]]
-            raw2 = await chat(retry_messages, mock=mock, model=reply_model)
+            raw2 = await chat(retry_messages, mock=mock, model=reply_model, task=reply_task)
             reply2 = _apply_reply_plugins(
                 _postprocess_reply(text, raw2), ephemeral=ephemeral
             )

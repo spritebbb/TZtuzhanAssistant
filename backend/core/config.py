@@ -67,6 +67,12 @@ class Config:
         # 10-35s，超时过小(30s)会频繁触发 APITimeoutError 重试、刷"LLM 连接失败"
         # 假警报。放宽到 60s 覆盖正常慢响应（后台跑，无碍回复首字）。
         self.llm_perception_timeout: int = _env_int("LLM_PERCEPTION_TIMEOUT", 60)
+        # P0-04 任务路由使用 MODEL_ROUTE_<TASK>_* 环境变量；具体解析延迟到
+        # model_routes，确保热重载后每个请求拿到一份完整快照。
+        self.model_route_tasks: tuple[str, ...] = (
+            "chat_routine", "chat_deep", "tool", "batch_diary",
+            "batch_other", "extract", "judge", "vision",
+        )
 
         persona = os.getenv("PERSONA_FILE", "persona-菟菚.md")
         p = Path(persona)
