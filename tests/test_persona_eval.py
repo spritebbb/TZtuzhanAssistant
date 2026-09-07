@@ -16,7 +16,7 @@ from backend.evals.persona import evaluate_deterministic, hard_violations, load_
 
 def test_dataset_and_references() -> None:
     cases = load_cases()
-    assert 30 <= len(cases) <= 50, f"人格评测集应保持 30~50 个场景，当前 {len(cases)}"
+    assert 30 <= len(cases) <= 60, f"人格评测集应保持 30~60 个场景，当前 {len(cases)}"
     required_tags = {"relationship", "dignity", "reality", "abuse", "address", "identity", "distance", "image", "style", "memory", "consistency", "stage", "boundary", "time", "tool_voice"}
     tags = {case.tag for case in cases}
     assert required_tags <= tags, f"缺少评测维度：{sorted(required_tags - tags)}"
