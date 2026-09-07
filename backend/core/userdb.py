@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 14
+_SCHEMA_VERSION = 15
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -477,6 +477,38 @@ CREATE TABLE IF NOT EXISTS context_lifecycle (
     cooldown_until_turn INTEGER NOT NULL,
     updated_at         TEXT NOT NULL,
     PRIMARY KEY (user_id, entry_id)
+);
+-- P1-04 角色虚构生活事件：结构化、确定性生成（character_fiction 命名空间，
+-- 与双方真实关系事件严格分离）。唯一 (user_id, block_id, occurrence, kind)。
+CREATE TABLE IF NOT EXISTS character_life_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    occurrence TEXT NOT NULL,          -- 发生粒度锚（本地日期或 UTC 周期键）
+    kind TEXT NOT NULL,                -- daily_life / block_change
+    payload_json TEXT NOT NULL,
+    namespace TEXT NOT NULL DEFAULT 'character_fiction',
+    occurred_at TEXT NOT NULL,         -- 事件发生在哪个时刻（补算保留真实时刻）
+    computed_at TEXT NOT NULL,         -- 实际计算时刻（迟到补算不冒充在线观察）
+    UNIQUE (user_id, block_id, occurrence, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_life_events_user ON character_life_events(user_id, occurred_at);
+-- P1-04 后台任务持久认领（JOB-1）：scope/job/period 唯一，租约 CAS 防跨进程
+-- 双跑；运行态记录，不随 E03 导出，reset 清理。
+CREATE TABLE IF NOT EXISTS job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_key TEXT NOT NULL,
+    job_key TEXT NOT NULL,
+    period_start TEXT NOT NULL,        -- UTC 周期键（整点 ISO）
+    status TEXT NOT NULL,              -- pending/running/succeeded/failed/cancelled
+    lease_owner TEXT,
+    lease_until TEXT,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    next_retry TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (scope_key, job_key, period_start)
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
@@ -1453,6 +1485,7 @@ class UserDB:
                 "activity_viewpoints", "activity_goals", "goal_progress",
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
+                "character_life_events", "job_runs",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
