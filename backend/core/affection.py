@@ -217,6 +217,29 @@ def bond_level_name(affection: int) -> str:
     return bl[0] if bl else ""
 
 
+# ---- 阶段内小档（14.10.1，2026-09-07 拍板）：每阶段内按主维划早/中/晚三档 ----
+# 只读派生，不落库不写账；切点 = 阶段起点 + 区间宽度 × 1/3 与 × 2/3
+# （初识 8/17、熟悉 33/42、亲密 58/67），恋人期沿用羁绊界 75/85/95。
+_SUBSTAGE_CUTS = {
+    "初识": (8, 17),
+    "熟悉": (33, 42),
+    "亲密": (58, 67),
+    "恋人": (85, 95),
+}
+
+
+def substage_of(trust: int, intimacy: int) -> tuple[str, str]:
+    """(trust, intimacy) → (阶段, 小档)。主维 = min(两维)；P2-01 前调用方传同一 affection。"""
+    main = min(int(trust), int(intimacy))
+    stage = stage_of(main)
+    cut1, cut2 = _SUBSTAGE_CUTS[stage]
+    if main < cut1:
+        return stage, "早"
+    if main < cut2:
+        return stage, "中"
+    return stage, "晚"
+
+
 def set_affection(user_id: str, value: int) -> None:
     """手动设置好感度（0-100），用于调试/调节。"""
     db.set_affection_absolute(user_id, value)
