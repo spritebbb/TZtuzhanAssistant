@@ -133,6 +133,18 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     if not rows:
         db.set_batch_date(user_id, day.isoformat())
         return
+    # P2-01/P2-02：对话语义关系事件的夜间提取（确定性词表、带源 message id
+    # 幂等入账，ledger 唯一键防重复计分）。只记高置信的自愿披露；冒犯类
+    # 不在此处扣分——必须经对话内明确确认才入账。
+    try:
+        from . import affection as _aff
+
+        for row in rows:
+            if row["role"] == "user" and _aff.check_sharing(str(row["content"] or "")):
+                _aff.apply_relationship_event(user_id, int(row["id"]), "user_self_disclosure")
+                break  # 每日批处理最多记一条披露
+    except Exception:
+        logger.exception("[每日总结] 语义关系事件提取失败（不影响批次）")
     transcript = "\n".join(f"{r['role']}: {r['content']}" for r in rows[-60:])
     data = {}
     llm_ok = False

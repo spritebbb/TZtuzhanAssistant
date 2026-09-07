@@ -20,6 +20,7 @@ from ..core.fact_lifecycle import (
 from ..core.her_profile import her_profile
 from ..core.log import logger
 from ..core import pending_thoughts
+from ..core import user_preferences as _prefs
 from ..core.userdb import (
     db,
     list_facts,
@@ -159,3 +160,63 @@ async def api_resolve_fact_conflict(
         return JSONResponse({"ok": False, "error": "待确认记忆不存在"}, status_code=404)
     logger.info("[记忆管理] 冲突事实 #{} 已处理: {}", fact_id, action)
     return {"ok": True, "resolution": result}
+
+
+# ---- P2-02 用户偏好教学：查看 / 新增 / 更新 / 撤销 ----
+
+
+@router.get("/preferences")
+async def api_list_preferences(include_revoked: bool = Query(False)):
+    uid = active_user_id()
+    items = await asyncio.to_thread(_prefs.list_preferences, uid, include_revoked)
+    return {"ok": True, "items": items}
+
+
+@router.post("/preferences")
+async def api_create_preference(
+    category: str = Body(...),
+    value: dict = Body(...),
+    source_message_id: int | None = Body(None),
+):
+    uid = active_user_id()
+    try:
+        row = await asyncio.to_thread(
+            _upsert_preference, uid, category, value, source_message_id
+        )
+    except _prefs.PreferenceError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    return {"ok": True, "item": row}
+
+
+def _upsert_preference(uid: str, category: str, value: dict, source_message_id):
+    return _prefs._upsert(uid, category, value, origin="user_teaching",
+                          source_message_id=source_message_id, status="active",
+                          confidence=1.0)
+
+
+@router.put("/preferences/{pref_id}")
+async def api_update_preference(
+    pref_id: int,
+    value: dict = Body(...),
+    expected_version: int = Body(...),
+):
+    uid = active_user_id()
+    try:
+        row = await asyncio.to_thread(
+            _prefs.update_preference_value, uid, pref_id, value, expected_version
+        )
+    except _prefs.PreferenceError as exc:
+        status = 409 if "版本" in str(exc) else 404 if "不存在" in str(exc) else 422
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=status)
+    return {"ok": True, "item": row}
+
+
+@router.delete("/preferences/{pref_id}")
+async def api_revoke_preference(pref_id: int):
+    uid = active_user_id()
+    try:
+        row = await asyncio.to_thread(_prefs.revoke_preference, uid, pref_id)
+    except _prefs.PreferenceError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    logger.info("[偏好教学] 撤销偏好 #{}", pref_id)
+    return {"ok": True, "item": row}

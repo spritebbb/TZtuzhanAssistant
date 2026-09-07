@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 17
+_SCHEMA_VERSION = 18
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -527,6 +527,23 @@ CREATE TABLE IF NOT EXISTS relationship_dimension_ledger (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dim_ledger_unique
     ON relationship_dimension_ledger(user_id, event_id, rule_id);
+-- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
+-- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
+CREATE TABLE IF NOT EXISTS user_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    category TEXT NOT NULL,        -- comfort / address / reminder / humor
+    value_json TEXT NOT NULL,
+    origin TEXT NOT NULL,          -- user_teaching / legacy / observed
+    source_message_id INTEGER,
+    confidence REAL NOT NULL DEFAULT 1.0,
+    status TEXT NOT NULL DEFAULT 'candidate',  -- candidate / active / revoked
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revoked_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_user_prefs ON user_preferences(user_id, category, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);

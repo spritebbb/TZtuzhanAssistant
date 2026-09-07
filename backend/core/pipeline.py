@@ -671,6 +671,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     if not ephemeral:
         turn_id = db.add_message(user_id, "user", text)
 
+    # 1.1b) P2-02 用户教学：明确指令（以后叫我X/别拿X开玩笑…）确定性提取入账；
+    # 疑似推断不出手——只有显式教学模式才写偏好。临时轮不学习。
+    if not ephemeral:
+        try:
+            from .user_preferences import propose_preference
+
+            propose_preference(user_id, text, turn_id)
+        except Exception:
+            logger.exception("[pipeline] 偏好教学提取失败（不影响回复）")
+
     # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
     # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
     # 这里只保留两个语义感知不覆盖、始终走关键词的即时信号。
@@ -1356,6 +1366,25 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     ),
                 }
             )
+
+    # 4.2b) P2-02 他亲口教过的相处方式（明确意愿，硬约束，闲聊也生效）
+    try:
+        from .user_preferences import migrate_legacy, resolve_constraints
+
+        migrate_legacy(user_id)  # 旧称呼配置惰性迁移（幂等，一次）
+        pref_lines = resolve_constraints(user_id)
+        if pref_lines:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "他亲口教过你怎么和他相处，这是他明确的意愿，必须遵守：\n- "
+                        + "\n- ".join(pref_lines)
+                    ),
+                }
+            )
+    except Exception:
+        logger.exception("[pipeline] 偏好约束注入失败（不影响回复）")
     if search_hits:
         snippets = "\n".join(f"- {h['title']}：{h['snippet']}" for h in search_hits[:5])
         messages.append(
