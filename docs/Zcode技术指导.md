@@ -2,6 +2,10 @@
 
 编写：Codex，2026-09-07。用途：ZCode 接手 M9 后续实现；Codex 负责独立审查、验证、定位与修复 bug。
 
+> 完整化修订：第 1–12 节保留切片背景和总路线；第 13 节起补充可执行契约、参数、遗漏路线和验收案例。存在精度差异时，以后面的具体契约为准。技术方案完成不等于代码已实现；延期只限制实施时机，不再用来代替设计。
+>
+> 2026-09-07 拍板补充：ZCode（GLM）经用户逐项确认 7 项决策并填入配套技术默认，见第 17 节汇总与各节内「2026-09-07 拍板/补充」标注。
+
 ## 1. 接手边界与当前基线
 
 用户最新分工：**ZCode 做功能实现，Codex 审查完成后的代码并查找、修复 bug。** 本文是实施任务书，不是已经完成的功能说明。后续不由 Codex 自动继续大批功能开发；用户将本文交给 ZCode 后，按下述切片逐项实现、逐项交审。
@@ -152,11 +156,12 @@ VERIFY: .venv/Scripts/python.exe tests/test_output_hygiene.py ;; .venv/Scripts/p
 **修改** `backend/maintenance/loop.py`、`backend/maintenance/schema_backup.py`；**新建** `tests/test_periodic_backup.py`，必要时 `backend/maintenance/backup_manifest.py`。复用 app 的现有维护启动点。首切片不创建 Windows 计划任务；P1-04 统一处理常驻外的调度。
 
 1. 核实真实数据构成：三个 SQLite 库（bot/sessions/agent_tasks）、imgs/screenshots、人格资料、知识库源文件、可重建向量索引。列 manifest 的 included/excluded/rebuildable；不要把现有“库+图片”包称为完整 data 灾备，也不默认把密钥加入包。
-2. 到期依据落在最近成功 manifest 的时间，启动时检查是否超过一天，而不是每次进程启动重新计 6 小时。首次有数据但没有成功包时补一次。失败不更新成功时间，重试退避。
+2. 到期依据落在最近成功 manifest 的时间，启动时检查是否超过一天，而不是每次进程启动重新计 6 小时。首次有数据但没有成功包时补一次。失败不更新成功时间，重试退避。（2026-09-07 拍板确认：每日成功一次、保留 7 份，回溯窗口约 7 天。）
 3. `backup()` 写到唯一 `.partial` 目录；每个 SQLite 通过 backup API 创建独立一致快照，integrity_check 后记录大小和校验和；媒体复制结果与遗漏明确计数。
 4. **多库限制要诚实**：单库 backup 不保证三个库是同一业务时刻。先交付标明起止时间、逐库一致性的可恢复包；若需要承诺跨库原子恢复，另加覆盖所有写路径/进程的短时写入协调与快照边界，不能仅套一个线程锁就声称原子一致。
 5. 所有必需项目成功后写 manifest、原子改名完成；轮转只处理匹配本模块格式且验证成功的包，不清理 schema-* 快照，也不在新包失败时删旧成功包。恢复只写新的空目录，拒绝覆盖在用库。
 6. 在临时恢复目录打开数据库、校验 schema/计数/代表性引用，验证 E03 恢复仍独立有效。增量丢媒体或导出范围不完整时报告 partial，而非 success。
+7. 恢复只经 CLI（2026-09-07 拍板，不做恢复 UI）：新增 `scripts/restore_backup.py`，子命令 list/verify/restore；restore 显式 `--data-root` 与 manifest，默认 dry-run 预览，`--apply` 才落盘且只写新的空目录，完成后打印校验结果与手动切换指引。设置区不承载恢复流程。
 
 **数据**：manifest format_version=1，字段至少 created_at/start/end、数据库版本、文件列表/散列、范围、完整状态。成功时间可从 manifest 推导，避免为调度多建业务表；若使用 kv 就登记为 runtime 不导出。磁盘失败不影响对话，但现有状态入口能报告备份失败。
 
@@ -180,7 +185,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_persona_eval.py ;; .venv/Scripts/pyt
 
 ### P0-04：路由及实测工具，拆三次交付
 
-**A 路由骨架**：修改 `core/llm.py`、`config.py`；新建 `core/model_routes.py`、`tests/test_model_routes.py`。建议 `resolve_route(task, explicit_model=None) -> Route`，任务键为 chat_routine/chat_deep/tool/batch_diary/batch_other/judge/vision。这是“六类职责、七个任务键”，日记从批处理拆出，不必纠结字面六或七。
+**A 路由骨架**：修改 `core/llm.py`、`config.py`；新建 `core/model_routes.py`、`tests/test_model_routes.py`。建议 `resolve_route(task, explicit_model=None) -> Route`，任务键为 chat_routine/chat_deep/tool/batch_diary/batch_other/judge/vision。这是“六类职责、七个任务键”，日记从批处理拆出，不必纠结字面六或七。2026-09-07 补充：另设第八键 `extract` 承载结构化提取（见 13.7），未单独配置时兼容复用 batch_other 端点。
 
 - 首次解析旧 LLM_*/LLM_PERCEPTION_*/VISION_* 配置，保持旧优先级和显式 model 参数语义；新槽位未配置时走兼容分支。
 - 客户端缓存按端点+认证配置标识隔离，禁止日志打印 key；降级链检测环，按错误类型限定重试次数。
@@ -189,7 +194,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_persona_eval.py ;; .venv/Scripts/pyt
 
 **B 离线实验工具**：新建 `scripts/benchmark_model_routes.py`、`scripts/benchmark_search_providers.py` 及 tests 下的 mock 测试。工具默认 dry-run，显式 `--live` 才联网；参数要求样本数、并发、总调用上限、预算、输出位置。支持断点续跑、失败计数和输入散列，避免重试重复收费。
 
-**C 真实实验**：在已授权且配置可用的端点上执行。M9 文档的模型名只作历史候选别名，先核验支持的实际 id，不写死不存在的模型；没有接入的候选标 unavailable。Tavily/Bocha 用同一合成查询集比较中文/英文/时效/冲突；展示覆盖率、延迟、结果域名分布及成本，不按返回条数判断质量。采样预算与密钥准备缺失时仍交付 A/B，不虚构 C 结论。真实结论经过查看再更新路由配置，不因旧文档榜单自动切换生产模型。
+**C 真实实验**：在已授权且配置可用的端点上执行。M9 文档的模型名只作历史候选别名，先核验支持的实际 id，不写死不存在的模型；没有接入的候选标 unavailable。Tavily/Bocha 用同一合成查询集比较中文/英文/时效/冲突；展示覆盖率、延迟、结果域名分布及成本，不按返回条数判断质量。采样预算与密钥准备缺失时仍交付 A/B，不虚构 C 结论。真实结论经过查看再更新路由配置，不因旧文档榜单自动切换生产模型。实测授权（2026-09-07 拍板）：单次实测总额硬上限默认 ¥30（配置可调），并发≤2、每调用网络重试≤2；断点续跑键保证不重复计费，报告含逐笔费用与总额，密钥由用户提供。合成查询集由 ZCode 构建（2026-09-07 补充）：≥40 条，覆盖中文/英文/时效/冲突四类，存 `backend/evals/fixtures/search_queries.jsonl`。范围拆分（2026-09-07 拍板）：当前仅主力+廉价两个 OpenAI 兼容端点可用、无 Bocha/Tavily key——C 拆 C1 模型实测（可做）与 C2 搜索实测（推迟至 P3-02 开工前配 key）；路由默认映射按 OpenAI 兼容双端点设计。
 
 ```text
 VERIFY: .venv/Scripts/python.exe tests/test_model_routes.py ;; .venv/Scripts/python.exe tests/test_model_benchmarks.py ;; .venv/Scripts/python.exe tests/test_search_benchmarks.py
@@ -208,6 +213,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_model_routes.py ;; .venv/Scripts/pyt
 3. 编译器是确定性选择，不在线调用 LLM 编译；`compile_slices(state, context, budget)` 返回条目 id 与短行为提示。固定身份/边界必须常驻，深水区只按明确状态门控，理论术语不进入运行时产物。
 4. 核心人格卡修改单独审查并先加 eval，不让新增内容覆盖 AI 身份、关系边界和隐私原则。动态条目按人格隔离，错误配置回退旧人格提示。
 5. 先交内容与 P0-03 对应案例，再交编译接线，避免文学修改与大型代码重构混在一起。
+6. 内容生产流程（2026-09-07 拍板）：ZCode 依现有人格卡、M8 物料与既有语料起草九节、正典与变体池全量初稿 → Codex 做内容一致性审查（与既有设定互查）→ 用户终审定稿 → 才进入编译接线提交；定稿前不接 `build_system_prompt`。素材来源（2026-09-07 拍板）：仓库内物料 + 用户口述补充，初稿标注待口述位；首份只写菟菚，资源目录结构按多人格设计（计划多人格）。
 
 **数据**：首期版本化 JSON/Markdown 资源，不建数据库；每条带 format_version/source_namespace。只静态内容则无需 reset；任何用户教学生成的覆盖另归 G01/P2-02，不偷偷写回核心文件。
 
@@ -217,7 +223,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_persona_slices.py ;; .venv/Scripts/p
 
 ### P1-02：语境注册表，先迁一处再扩
 
-**新建** `backend/core/context_registry.py`、`tests/test_context_registry.py`；**修改** `pipeline.py`、`explainability.py`、`kv_registry.py`。首期只选 `colists.list_context` 或一个同等独立来源，既有共读/记忆召回先不动。
+**新建** `backend/core/context_registry.py`、`tests/test_context_registry.py`；**修改** `pipeline.py`、`explainability.py`、`kv_registry.py`。首期固定 `colists.list_context`（2026-09-07 补充，不再二选一），既有共读/记忆召回先不动。
 
 **条目模型（建议）**：`ContextEntry(id, namespace, source_type, source_id, priority, budget_weight, sticky_turns, cooldown_turns, placement, wrapper, predicates)`；运行时返回 `SelectedContext(entry_id, text, reason_codes, token_cost)`。内容采用 provider 拉取，不能把私密原文长期复制进注册表。
 
@@ -257,7 +263,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_emotion_state.py ;; .venv/Scripts/py
 **B 跨进程 tick**：
 
 1. 入口显式数据根、人格范围、时区、截止时间；不依赖“当前窗口人格”。Windows 每小时调用同一 CLI；app 启动的补跑也走该入口。
-2. 设计持久化认领，建议独立 `job_runs(scope_key, job_key, period_start, status, lease_until, attempt, finished_at)`，唯一键为 scope/job/period。以事务 CAS 获取 lease，过期可恢复；运行时记录不随 E03 导出。表落哪个库须在 ADR 中明确并覆盖对应 reset。
+2. 设计持久化认领，建议独立 `job_runs(scope_key, job_key, period_start, status, lease_until, attempt, finished_at)`，唯一键为 scope/job/period。以事务 CAS 获取 lease，过期可恢复；运行时记录不随 E03 导出。表落哪个库须在 ADR 中明确并覆盖对应 reset。补充默认（2026-09-07）：`job_runs` 建议 bot.db（与关系状态同库，随主库迁移/备份走），ADR 确认后执行；计划任务名固定 `TZtuzhanAssistant-TimeTick`，每小时执行 `python -m backend.maintenance.time_tick --data-root <显式路径>`。
 3. 同一小时重复执行无增量；进程崩溃后续跑不重复事件。确定性状态和事件写在同一事务，耗时网络在事务外；不持 SQLite 写锁等模型。
 4. 与交互写入统一版本/CAS 或短写锁，不能读取旧 state 后整块覆盖用户刚发生的互动。reset 时旧 epoch 的结果不能写回重建后的数据。
 5. 补跑限定时间窗和次数，不能为几个月离线补几千次模型调用；久远区间用明确的压缩状态推进，保留实际发生/补算时间，不伪称在线体验。
@@ -340,7 +346,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_event_chains.py ;; .venv/Scripts/pyt
 - A：追发有 origin_turn_id、expires_at、最大一次表达；用户开始新话题、手动停止、勿扰或来源删除时取消。复用候选及原子额度，不用内存 sleep 挂一个不可恢复定时器。
 - B：显式晚安先遵守用户结束意图，只给一段简短回应，不趁机追问。行程“去忙”是角色表达，用户需要帮助时基本可及；不能以睡觉为由锁死输入框。
 - C：称呼来源可查看/撤销，先使用用户批准的范围，关系阶段变化只提供候选而非强行越级昵称；变化若落事件必须说明来源。
-- 分段气泡/打字停顿在后续前端切片实施，用一个 logical message id 与 segment index 保持归档/刷新一致；人工延迟可关闭且中止即取消，不用“生气故意不理人”制造惩罚。
+- 分段气泡/打字停顿为独立前端呈现切片后置（2026-09-07 拍板），后端先行落协议字段：SSE 新增 `segment` 事件携带 `{logical_message_id, segment_index}`，chunk 流与 `done` 最终全文不变，归档/刷新按 logical message id 重组；段是呈现事件，不是新消息、不是新好感来源。人工延迟可关闭且中止即取消，不用“生气故意不理人”制造惩罚。
 
 **数据**：优先复用心事/偏好存储，仅增加必要类型注册，不另建孤立计时系统；任何新 kv 登记。
 
@@ -439,7 +445,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/
 
 拆 A 白名单演化、B 可选本地统计。新建建议 `core/persona_evolution.py`、`core/experience_metrics.py`、`tests/test_persona_evolution.py`、`tests/test_experience_metrics.py`；接 behavior、关系事件与既有解释/成长入口。
 
-- A：日志字段 user_id/source_event_id/parameter/old/new/rule_version/reverted_at；参数仅限成长层白名单，小步上限、冷却、显式可撤销。身份、安全、隐私和权限不在白名单。撤销重新计算后续有效演化，不简单把数值写回很久前的 old 覆盖新变化；源删除后对应偏移失效。
+- A：日志字段 user_id/source_event_id/parameter/old/new/rule_version/reverted_at；参数仅限成长层白名单，小步上限、冷却、显式可撤销。身份、安全、隐私和权限不在白名单。撤销重新计算后续有效演化，不简单把数值写回很久前的 old 覆盖新变化；源删除后对应偏移失效。白名单首版（2026-09-07 用户拍板：仅表达层）：`humor_usage_rate`、`verbosity_preference`、`initiative_template_weight` 三参数。拍板理由：仅表达层可控、可测、可回滚——三参数都能被 P0-03 eval 直接测量，漂移可被发现，回滚无副作用；话题兴趣不必现在决定，待 eval 体系具备话题分布测量能力后再版本化加进白名单。
 - B：只记录必要统计（延迟、失败规则、重复率、来源选择、用户明确反馈），默认本地；不把所有日记/聊天当“遥测”再复制一份，不默认上传。临时轮不写统计，用户能关闭和清理；多代理测试数据不污染真实统计。
 - 质量面板复用现有入口；一次统计变化不自动改人格。把问题候选交审，不让系统自己以留存/依赖程度为目标调参。
 - 新表须独立 ADR、schema/reset/导出策略。演化关系历史可导出；运行质量统计通常不属于关系包，明确排除。
@@ -596,3 +602,434 @@ Codex 按以下顺序工作：
 7. 同任务连续失败三次，停止重试并说明复现、尝试和阻塞；不能靠放松断言让测试变绿。
 
 **交付判据**：功能行为、生命周期、异常恢复和测试证据同时齐全才算完成；设计写过、模型说通过、文件写入成功都不能替代验收。
+
+## 13. 完整方案的共用契约（以下任务全部继承）
+
+### 13.1 适用范围与完成定义
+
+本版覆盖：TECH-PLAN 的 M0–M8 未完条目、18 个 Epic 的后续扩展、Q1–Q5；M9 设计中的 4.1–4.10、26 个缺陷、五项设计空白、用户功能反馈。已完功能保留接口与回归，不无故重新实现。正文明确“不搬”的竞品功能不纳入实现目标，但必须在覆盖表记为不采纳，不能混为遗漏。
+
+每项方案由原章节 + 对应详细补充 + 本节共同组成，至少明确：目标与非目标、现有/新文件、接口输入输出、存储/迁移、状态流转、失败恢复、隐私/删除/隔离、测试输入与预期、开关与回滚。后续 ADR 是把本方案登记为实际迁移，不是要求 ZCode 重新设计整个功能。
+
+下文数字是**工程默认值**，除特别注明外不是用户拍板的不可变产品常量。集中配置、记录 rule_version，测试可注入时钟和参数；实测调整需写理由，不能在多个模块散落不同阈值。
+
+### 13.2 接口与实体约定
+
+- 新 API 位于 `/api/`；列表默认 limit=20、上限100、稳定游标分页。读取返回 `{ok:true,items,next_cursor}`，单项 `{ok:true,item}`；不要改既有 API 的外层结构。
+- 变更请求携带 `request_id`，更新已有资源携带 `expected_version`。成功返回资源 id/version；重复相同请求返回原结果，不执行第二次；同 id 不同 body 返回409。校验400/422、未认证401、越权403、跨人格资源不可见404、版本冲突409、额度429、依赖不可用503；不得把原始异常/密钥写进响应。
+- 所有新增业务表默认拥有 `id INTEGER PK,user_id TEXT NOT NULL,created_at,updated_at,version INTEGER DEFAULT 1`；业务唯一键显式列出。时间存 UTC RFC3339，日历计算用用户时区（现有部署 Asia/Shanghai）。本地时间不要直接作为全球唯一幂等键。
+- JSON 用 Pydantic/等价结构校验、拒绝未知执行字段；有上限，普通短文本200字、备注2000字、一般正文20000字，特殊文件走上传限制。所有 SQL 参数化，不能把前端/模型传来的表名字段名拼 SQL。规范化哈希的固定操作顺序（2026-09-07 审查 I6 定序，适用于 promise_hash/topic_key/evidence_hash 及后续一切文本规范化键）：NFKC → lower → 去标点 → 压空白。
+- 新接口的 user_id 从认证/人格上下文解析，不相信 body 的 arbitrary user_id。后台显式绑定作用域，HTTP 当前人格切换不能改变已经认领任务的目标。
+
+### 13.3 生命周期包 LC-1
+
+新增表默认进入：bot.db 当前版本 +1；增量迁移；新库 schema；两处 reset；E03 分类导出、预览校验、恢复主键映射；源删除/更正；向量一致性回归。各任务列出的“持久/运行时”决定导出政策，不是放弃 reset。
+
+持久派生实体保留 `source_type/source_id/source_version`，多来源使用独立 `source_links(user_id,owner_type,owner_id,source_type,source_id,source_version)`，唯一五元组；通用引用解析器只允许注册类型。源删除先阻止读取，再使派生状态失效，最后异步清索引；失效标记不得保存已删原文。删除用户派生记录不反向删除源事实。单事务可完成的修改同事务；跨 SQLite/向量用可重放清理队列，读时再验源，索引失败也不暴露已删内容。
+
+本节不授权把所有未来表一次建齐；只有切片实际使用的表才迁移。关系包 format_version 仅在顶层契约改变时升级，数据库版本按各库独立管理；旧包缺新增类别按空集合处理，新包不能无校验忽略不认识的重要字段。
+
+### 13.4 后台任务包 JOB-1
+
+`job_runs` 采用 P1-04 的持久认领：`scope_key,job_key,period_start` 唯一，状态 pending/running/succeeded/failed/cancelled，附 lease_owner/lease_until/attempt/next_retry/reset_epoch。首期租约120秒、每30秒续租、单次超时60秒、最多3次、退避1/5/30分钟；较长操作显式覆盖，最长600秒。
+
+同一用户同类写任务串行；CAS 更新使用 owner/epoch，旧进程失去租约后的返回值丢弃。成功事务写结果与 succeeded，取消/重置提升 epoch，迟到模型结果不能落盘。尝试次数按真实调用计，不按空轮询计。临时对话不创建持久 job。（2026-09-07 预研补充：租约 CAS 有仓库内先例可照抄——`backend/agent/session.py:_claim_running` 的单条 UPDATE＋rowcount 判定模式；跨进程写回须数据库侧校验 reset epoch，core/reset.py 的进程内 user_write_guard 不覆盖计划任务进程。）
+
+### 13.5 用户可见产物包 OUT-1
+
+产物生成流程固定为：验证授权来源 → 冻结 source versions → 调用表达模型 → 输出卫生检查 → 再验源/epoch/version → 落库或返回草稿 → 投递。正文有修订则旧草稿返回409，不自动覆盖；失败只回退有据内容，不把 fallback 说成模型实测成功。
+
+**草稿不是关系事实**：默认保存在客户端内存；需续作的草稿显式标 draft、7天到期且不入召回。确认后才生成观点/活动/作品。用于发送的结构性指令不出现在用户气泡；同一 logical_message_id 的最终内容统一用于 SSE done、归档与 TTS。
+
+### 13.6 验收包 QA-1 与关闭策略
+
+每个新增状态至少测试：新库、旧库迁移两次、正常顺序、重复请求、版本冲突、并发认领、失败重试、源删除、两人格、临时轮、reset、导出→空目录恢复。只读纯函数只测适用项，但需在报告标“不适用”原因。无需为了低风险文档写业务测试。
+
+每项新功能配置 `FEATURE_<任务语义>_ENABLED`，**双层口径（2026-09-07 ZCode 建议随审查定稿）**：部署级默认走 config 的 env 层（既有 STICKER_ENABLED 等同构风格）；用户可调开关登记进 `backend/core/features.py` 的 FLAG_DEFAULTS（**默认 False**，经 feature_flags.json 持久化——该动态系统已存在，pipeline 有消费先例），每片任务书必须写明本片开关走哪层；设置区手动开启一律指动态层。**两层优先级（审查 I5 收口）：动态层（feature_flags.json）覆盖 env 层——env 仅为部署初值，用户在设置区的改动写动态层并即时生效**。关闭立即停止新候选与注入，用户数据保留且已有数据可导出/删除。迁移只增不破坏，关闭不尝试倒灌旧字段；真正 schema 回滚用验证过的升级前快照，不能用旧版代码盲开新库。
+
+### 13.7 模型提取的统一约定（2026-09-07 补充）
+
+对话内/对话外的结构化提取（偏好候选、情绪成因、关系语义事件、约定 owner、梗候选、话题短语）统一走 P0-04 路由新增任务键 `extract`：廉价、非流式、JSON 输出；`extract` 未单独配置时按兼容分支复用 `batch_other` 端点。输出经 Pydantic schema 校验并拒绝未知执行字段；`confidence`∈[0,1]；失败或超时返回空候选列表并记 rule id，不阻塞主回复、不重试已执行副作用；提取输入只含必要上下文与源 message id，不整段灌历史。各切片的提取 schema 在各自测试用固定样本验证。
+
+## 14. 原有切片中未定细节的确定方案
+
+### 14.1 P0-01 输出卫生的具体出口与重写预算
+
+`HygieneContext(kind,user_requested_explanation,source_namespace,persona_id)`；`HygieneResult(text,action,rule_ids)`，kind 取 chat/proactive/diary/artifact/tts，结构化 extraction/tool-json 不调用该模块。`inspect_reply` 不剥正常代码中的标签，先识别 Markdown fenced code 与用户明确要求引用的范围。
+
+阶段 A 在 pipeline 最后一次 apply_reply 之后、任何 assistant 持久化/stream callback 之前统一 `finalize_visible_reply(candidate,ctx,rewrite_budget=1)`。重写与重复消除共用一次文案生成预算；工具循环结果已经执行的 tool messages 作为只读素材，重写不传 tools。跨块标签以整条候选解析解决，禁止“原样播出再reset”冒充防泄漏。
+
+阶段 B 接口不变，接 `greeting.greeting_for`、initiative 的所有生成者、`daily.write_daily_diary/maybe_write_research_report`、focus 收尾、activities 的 question/viewpoint_draft、dual_perspectives/possibilities/sealing 的草稿/告别信。每次只接一组，维护 `visible_output_channels` 测试覆盖表，漏接项使测试失败。真实思考字段不读取；遇正文混入思考仅拒绝该候选，不把原文写审计。软“助手腔”先评分后限次重写，技术解释例外仍正常通过。
+
+**现状侦查（2026-09-07 ZCode 预研，行号以当日工作树为准，重构后失效）**：三条推流路径均在清洗前推 raw——① 工具循环出口 `pipeline.py:1534`（整段 raw 切片推流，注释明示“推的都是 raw，done 帧是后处理 reply，二者允许差异”）；② 普通流式出口 `pipeline.py:1548`（边生成边推，`_extract_reply/strip_actions/trim_farewell` 在推完后执行）；③ 重复重写出口 `pipeline.py:1583`（先推第一版、RESET 清空、再流式推 raw2）。反向缺陷：插件钩子 `apply_reply` 在 `pipeline.py:1608` 于流式推送之后执行——流式模式下插件改写不出现在用户气泡（显示≠入库）。易漏点：临时轮在 `pipeline.py:1677` 提前 return，卫生检查必须挂在其之前（不留痕但也不许泄漏出门）。下游须取同一文本的消费点：`api/chat.py` 的 done 帧、`db.add_message` 存档、长期记忆双写（“菟菚说：{reply}”）、解锁 `mark_delivered(reply[:300])`、表情包 `maybe_attach_sticker`、解释快照、TTS（`core/tts.py`，前端 tts.ts 以最终文本触发）。**实施形状**：三处推流点收敛为一个——生成只累积不推送 → 结构清洗 → 去重/重写（预算 1、不重跑工具）→ apply_reply → `finalize_visible_reply` → 一次性推送净化分块 → done/持久化/TTS 同源；全缓冲下重写不再需要 RESET 气泡（开关关闭保留旧行为原样）；markdown fenced code 与用户要求的技术解释在 `inspect_reply` 内白名单豁免。
+
+验收新增 `tests/test_visible_output_channels.py`：各通道输入含泄漏标记的固定模型输出，断言所有可观察出口均无标记；同一模型正常技术答复不误判。关闭开关测试复现原出口，但不恢复已删除的 reasoning_content 兜底 bug。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_output_hygiene.py ;; .venv/Scripts/python.exe tests/test_visible_output_channels.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+```
+
+### 14.2 P0-03/P0-04 的可复现实验与路由合同
+
+新增 `EvalRun(id,case_hash,candidate_route,seed,run_version,started_at,status)` 和 JSONL 结果，文件只在指定输出目录；`generate(case,route)` 与 `judge(sample,judge_route)` 分函数，样本A/B顺序按固定seed打乱。确定性维度 pass/fail；主观签名/自然度/潜台词各1–5分且必须返回 evidence_span，不接受没有证据的高分。至少双次随机顺序交叉裁判，冲突>1分进入人工复核列表；不是加总后掩盖红线失败。
+
+单轮/多轮/30轮各有 case fixture；跨模型接缝用同一历史在指定回合更换 route，比较前后两条，不混入不同用户输入。默认 dry-run 10例；live 必须显式 `--max-calls --max-cost`，费用缺失的候选用最坏上限预留，不能按0元放行；并发默认2，每条2次网络重试上限。断点键 case_hash+route_config_hash+sample_seed，结果已成功不重复调用。
+
+`Route` 字段 `task,base_url,key_ref,model,timeout_sec,max_tokens,fallback_tasks`；key_ref 是配置引用，不把密钥写结果。`resolve_route` 在请求开始解析快照，后续热配置不改变半个回合。超时60秒、回退最多1级；401/403无权错误不自动换用别人的凭据。记录 `route_task,actual_model,attempt,tokens,cost_estimated`，价格映射带查证日期；候选真实id在调用前核对端点，不将历史宣传名当API id。
+
+### 14.3 P1-01/P1-03/P3-01：内容资源与情绪参数
+
+运行时资源 schema=1：`PersonaSlice{id,kind,namespace,trigger_ids,priority,examples[<=3],instruction,source_doc,version}`。核心 identity/boundaries 不接受动态覆盖，正典条目和例句写在 persona 实例资源目录；JSON Schema 校验失败时整个新版不激活，继续旧版本。编译先固定核心，再按状态谓词选至多3条动态切片，总动态预算800 tokens；缓存键 persona_version+state_fingerprint，不跨人格复用。
+
+状态谓词与指纹（2026-09-07 补充，P1-01/P3-01 共用）：`trigger_ids` 引用封闭状态键集合，谓词是 JSON 条件 `{"field","op","value"}` 的 AND 列表，不支持任意表达式或脚本。首版状态键：`derived_stage`、`trust`、`intimacy`、`energy_band`、`emotion.<name>`（该情绪存在且 intensity≥0.4）、`time_of_day`、`quiet`；键表带 `state_keys_version`，新增键必须同步 eval 用例。`state_fingerprint` 为上述键按固定顺序取值做 canonical JSON 序列化后的哈希；某切片未引用的键不参与该切片的指纹。`time_of_day` 值域（审查 I9 补）：`morning`（06–12）/`afternoon`（12–18）/`evening`（18–23）/`late`（23–06），按用户时区本地时间；`energy_band` 值域 `high`/`normal`/`low`（由既有 state 精力分档映射）。
+
+情绪集合首版 joy/sadness/anger/hurt/anxiety/calm/tenderness，intensity∈[0,1]，同时最多3条，超量按绝对强度和稳定id排序；不以删除情绪事件原文保持情绪。“吃醋”若后续加入只能是低压角色表达，不产生控制用户的规则。消退 `i(now)=i0*2^(-hours/half_life)`，初版半衰期 joy6h/sadness12h/anger4h/hurt12h/anxiety6h/tenderness8h，calm作为无主态回退；i<0.05移除。显式道歉/安抚按已验证来源加0.2修复量，每来源只一次。
+
+态度基础向量以0–1存储：calm=(patience .6,humor .3,guard .3,directness .5,followup .3)，anger=(.25,.1,.8,.85,.1)，hurt=(.4,.1,.7,.35,.15)，joy=(.75,.7,.2,.6,.5)，sadness=(.4,.1,.45,.4,.15)，anxiety=(.45,.1,.65,.55,.25)，tenderness=(.8,.35,.15,.5,.35)。归一化强度加权后，trust降低guard最多0.2、intimacy提高柔软表达最多0.2；深夜/低精力只能降低followup与长度，不升级亲密。所有轴clamp，固定边界最后覆盖。
+
+测试锚点包括：高信任低亲密不暧昧、被冒犯仍允许用户离开、关心与受伤并存、不相关天气不扣用户信任、两小时一步和两步消退等价。参数由可审JSON表管理，变更表也跑人格eval；本表是可执行初值，不声称已完成人格质量实测。
+
+### 14.4 P1-02：预算、生命周期和引用实现细则
+
+`ContextProvider.collect(user_id,query,state,turn_id)->list[ContextCandidate]`；candidate含immutable id/source_version/text/token_count/source_namespace/required_permission。选择器 `select(candidates,budget=1200)` 保留原系统核心，不把1200当完整prompt总上限；动态区最多4条，稳定排序 priority desc/relevance desc/id asc。首期sticky=2个成功回合、cooldown=4个成功回合，关闭/取消/源删除优先于sticky；普通非命中轮不续sticky。
+
+生命周期 `context_lifecycle(user_id,entry_id,last_committed_turn,sticky_until_turn,cooldown_until_turn)` 放KV或实现既定单表，首期固定采用表便于唯一键/CAS；运行时不导出，reset清理。候选读取无写入，只有已发送并成功记录的turn提交计数。vector阈值沿用当前知识召回量纲，在离线标注集上选“无关聊天零误触发”阈值，不直接照抄别库0.95；阈值落配置及测试快照。（2026-09-07 补充：标注集由 ZCode 构建合成数据，首版 ≥200 条——正例为相关语境命中、负例为无关日常聊天，存 `backend/evals/fixtures/context_labeled.jsonl`，不使用真实私人聊天。）
+
+### 14.5 P1-04/P1-05：日历、行程与前台可及性
+
+`ScheduleBlock(id,weekday,start_local,end_local,location_id,activity_id,presence,energy_delta,mood_delta)`；presence=home/mobile/announced_offline。跨午夜拆两段统一block_id，DST重复小时用UTC period key。日常每天最多一条生活素材、7天内模板不重复；特殊行程需预告标记，离线窗最多2小时，可从聊天直接请求即时回应，不锁输入框、不扣分。
+
+模板选择是种子hash(user_id,local_date,template_version)；实际推进写 `character_life_events(user_id,block_id,occurrence_start,kind,payload_json,namespace='character_fiction',occurred_at,computed_at)`，唯一user/block/occurrence/kind。location来源必须在正典存在。迟到补算保留computed_at，不冒充真实外界观察。每小时能量只结算未处理区间；按块总delta分摊且CAS版本，读时无副作用。天气调制使用已存来源摘要，tick不每次发网络查询。
+
+纪念日预热窗口[-3,-1]天只入选一次，当天一次；普通节日由用户时区日历确定，重复tick不重复事件。季节mood偏移首版±5、能量±3、主动候选priority±0.1，只调基线不直接增发。删除/更改纪念日要撤销旧周期实例；自然季节与关系季节使用不同kind，解释只显示已生效的来源。
+
+### 14.6 P2-02：偏好权威解析与撤销
+
+类别固定 comfort/address/reminder/humor，`value_json`分别用 `{style}`、`{allowed,forbidden,contexts}`、`{intensity:0..2,quiet_hours}`、`{forbidden_topics,allow_teasing}`；解析顺序：用户明确禁令 > 最近已确认教学 > 有效场景偏好 > 核心默认。旧称呼/提醒配置在迁移时变成 origin=legacy 的已确认记录，停止旧路径独立写入，兼容接口转调新服务。
+
+`propose_preference(user,text,source_id)` 返回候选；`confirm_preference(id,expected_version)`激活；`revoke_preference(id)`立即失效并清registry缓存。明确“以后叫我X/别拿X开玩笑”可按用户本轮指令直接确认，疑似推断必须显示草稿。API GET/POST/DELETE `/api/memory/preferences`，更新PUT `/{id}`。负反馈只影响被明确指向的策略，不把普通“嗯/哦”永久写成心理侧写。测试已有记录切换到新resolver前后输出一致、撤销恢复次高优先级而非清掉全部偏好。
+
+### 14.7 P2-03/P2-04/P2-05：有界任务与唯一投递
+
+约定新增 owner=user/assistant、due_at可空、action_kind可空、source_message_id。`extract_promises`先提取owner候选再由结构校验确认，owner=assistant且无可执行action时只成为叙事约定，不后台运行任意工具。相同来源+规范化promise_hash唯一；状态open/done/cancelled/expired，due_at为空不自动失约。promise_hash=按 13.2 固定顺序（NFKC→lower→去标点→压空白）规范化正文后 sha256，owner/due/action_kind 不参与（2026-09-07 补充，审查 I6 定序）。
+
+链实例固定采用表 `event_chains`，不用多个不一致KV：user_id/source_event_id/rule_id/rule_version/node/status/due_at/attempt/result_id，唯一user/source/rule。首条链probability=1（明确约定跟进），depth≤3、attempt≤2、expiry7天。概率后续生活链只在创建时采样一次。visible_delivery记录唯一user/chain/local_date，日上限1；先共享额度认领再表达，失败归还/记冷却按照现有policy语义，不能在这里发明第二份计数。
+
+追发默认20分钟后可用、2小时过期、每来源至多一次；用户新消息或停止可撤销未发实例。晚安不建立24小时惩罚锁，仅取消该会话追发；第二天正常问候仍走原条件。气泡分段最多3段、人工间隔0–800ms、reduced-motion或关闭节奏时为0；同一逻辑消息一个持久化正文，段是呈现事件不是新消息/新好感来源。
+
+### 14.8 G01：重要性计算、冷热分层与视角表
+
+首期 `memory_policy(fact_id,user_id,tier,score,score_version,review_at)` 一条事实一条，tier=short/long；原facts仍权威，原到期硬边界先执行。评分 `S=40*explicit_importance + 20*relationship_anchor + 10*min(distinct_days_mentioned,3)+10*first_event`，布尔取0/1，总分clamp100；pinned单独优先，不通过分数表示。模型confidence不能因score升高改变。
+
+明确“别记住/临时轮”不创建facts或policy；明确“长期记住”使用既有pinned路径；敏感/never_surface无主动召回资格，无论S多高。S≥60进入long，S≤30且未pinned进入short，中间保持原tier，形成滞回；新条目默认short。short默认30天，明显当前状态7天，临时事件1天；用户明确期限优先，已有更早expires_at不可因升long自动延长。稳定长期事实无自动expires_at，但容量清理仍只能清unpinned。
+
+只对新产生或显式重新评估的事实启用，旧条目迁移保持原期限/tier=legacy，避免上线瞬间大规模删除。首次shadow跑14天的**逻辑回放测试时间**，不强制用户等真实14天才能验收；配置启用后真实观察独立记录。score输入存来源id和计数，不复制文本。索引long/short都保留单一fact_id，short按查询相关度临时参与，不建另一份“短期事实库”。
+
+`memory_annotations(user_id,fact_id,role='assistant',emotion,viewpoint,origin,confidence,source_event_id)`与`first_occurrences(user_id,event_type,topic_key,source_event_id)`进入LC-1。topic_key 由提取器返回的 canonical 主题短语做与 promise_hash 相同的规范化生成（2026-09-07 补充）。初历源被删除时删除初历标记且不自动让旧历史第200次吃首次奖励；新的未来事件才可重新明确建立首次记录。
+
+“重要记忆不确定”仅对仍合法存在但verified_at久远/用户给出冲突的事实发出澄清，每事实30天最多一次；自然到期且未显式删除的内容若需提醒，先在到期前发候选，到期后不靠墓碑复原原文。被明确删除的数据绝不留情感纪念残片。
+
+验收输入：explicit=1/anchor=1→60进入long；score29 short、45保持；pinned score0不降级；confidence0.4不变；同日刷三次计1天；用户指定明天过期但score100仍明天过期；源删除SQLite/向量/注释全失效。采用G01既定VERIFY，不再把评分设计留给实现者。
+
+### 14.9 G02/G03/G04：剩余触发条件与存储
+
+G02 `signals={duration_bucket:0..5,edit_bucket:0..3,length_bucket:0..6,pasted:bool}`；前端只持内存累积，发送后重置；粘贴不算“快速输入”信号。开关默认off，开启后后端仍仅在本轮内存消费。长度基线从已有最近10条获授权用户消息即时计算，不另建逐键遥测表；少于5条不用基线，短句仅缩短建议回复10%，不扣任何状态。速度/错字无法可靠判断时不推断。
+
+G03固定新建 `open_questions(user_id,source_message_id,topic,status,next_check_at,expires_at,attempts,last_evidence_hash)`，status=open/researching/resolved/dismissed/expired；7天到期、最多2次复查、最小间隔24h。首次只在明确“以后有结果告诉我/帮我继续查”保存；一般“我不知道”正常回复但不偷偷长期追踪。`research_open_question(id)`使用JOB-1，证据散列未变不发送，evidence_hash=排序后证据条目（canonical_url+title+摘录）的规范化哈希、不含模型叙述（2026-09-07 补充）；成功结果经pending候选与共享额度，源消失立即dismissed。LC-1导出进关系待办类别。
+
+G04 `companion_requests(user_id,life_event_id,kind,status,offered_at,expires_at,response_message_id)`，kind首版song_choice/book_choice，status=candidate/offered/accepted/declined/expired。候选需intimacy≥50且trust≥50，7天至多一次，24h无回复自动expired不再问。用户回复“随便/不想”直接declined；接受后只写角色活动产物，与现实承诺账分离。API GET `/api/companion-requests` 列表、POST `/api/companion-requests/{id}/respond` 应答（2026-09-07 修正原文 GET/respond 笔误），聊天意图也转同一函数；候选不绕过initiative。进入LC-1，删除生活源使未完成请求失效。
+
+### 14.10 P2-01：双门槛关系阶段（用户已确认）
+
+trust/intimacy范围均0–100，旧affection初次回填两维相同。阶段函数固定 `stage_of(min(trust,intimacy))`，使用原25/50/75阈值；羁绊75/85/95同样双门槛。例：90/20=初识、90/55=亲密、80/76=恋人。新meta同时返回两维和derived_stage，旧value/fill兼容字段取min，不再允许它独立写入。
+
+`apply_relationship_event(user_id,event_id,rule_id)->Dimensions`：唯一user/event/rule，事务读取当前两维+version、clamp增量、更新两维并记ledger。首版完成明确约定trust+2；明确尊重边界trust+1；用户自愿真实披露intimacy+1；被明确接纳的角色披露intimacy+2；已确认冒犯trust-2且tension按旧上限；拒绝、离线、短句均0。正向每维日总量≤4，负向每维≥-6；删除引起的纠正按有效ledger重放，不把被删事件继续留为数值来源。事件 reducer 落点（2026-09-07 预研补充）：`core/relationship_events.py:record`（幂等 INSERT OR IGNORE 模式），`apply_relationship_event` 与 L05 领域信任共用此唯一入口。
+
+事件产生架构（2026-09-07 拍板）：确定性钩子与夜间离线提取分流。结构性事件（活动完成、P2-03 约定状态机推进）在既有完成路径上确定性产生 event 并即时入账；对话语义事件（尊重边界、自愿披露、接纳角色披露）由每日批处理按 `extract` 任务键（13.7）提取，次日带源 message id 入 ledger，可撤销/纠正重放。冒犯仅明确确认入账：对话内她明确指出且用户回应、用户道歉、或用户自认过分三者之一；夜间提取只产出高置信候选供确认，不直接扣分。她在当轮的情绪反应（如受伤）由 P1-03 即时表达，与信任入账时机解耦。
+
+迁移按 `NULL` 判首次，不给字段直接 DEFAULT=0后无法区分旧用户；新用户显式初始化原默认值。`set_affection`兼容调试入口在同事务设置两维相同并写manual原因；普通业务禁止调用它替代事件增量。`affection.on_message`里既有首次聊天/昵称等纯频次奖励退出主维度，仅保留互动统计，避免新旧同时涨分。关系变化源可以用户查看高层原因，但不为低值制造压力任务。
+
+新表 `relationship_dimension_ledger(user_id,event_id,rule_id,trust_delta,intimacy_delta,occurred_at,reverted_at)`，唯一user/event/rule，进入LC-1关系状态类别；已有affection_log历史保留并标legacy，不虚造原本不存在的二维历史。日期图在迁移点前显示旧值轨迹，之后分维。测试两次迁移不重置90/20、恢复旧包只回填一次、重复事件不二次加分、事件撤销重放不覆盖其他新事件。
+
+## 15. 七项功能反馈的完整实现任务书
+
+### F01：基于真实素材的问候与变体池
+
+**文件/接口**：修改 `core/greeting.py:_greeting_text/greeting_for`、`initiative.py:_build_proactive_prompt`；新建 `core/greeting_material.py`，`collect_greeting_material(user_id,now)->list[SourceRef]`、`choose_greeting_variant(user_id,context)->Variant`；新增 `tests/test_greeting_material.py`。
+
+**数据**：复用关系事件/活动/角色生活事件，不建新原文表；`greeting_variant_usage(user_id,variant_id,last_used_at,last_source_id)`为runtime，reset清理不导出。变体资源放人格切片目录，至少忙碌后/普通归来/完成活动/无素材四类，每类3个方向模板，不预存“你今天做了X”的假事实。
+
+**流程**：沿原gap门控 → 取近30天最多3条授权事件（正在进行活动优先）→ 排除敏感/never_surface/过期/源删 → 同一variant 7天冷却 → 结合state生成最多2句 → OUT-1 → 检查生成期间last_user_turn是否变化 → 原子入选/发送。无素材用普通问候不凑经历；有新用户发言丢弃候选，不占第二次可见额度。
+
+**失败/验收**：模型失败用无事实短回退；源在生成中被删除则丢弃并仅一次无源回退；并发两个窗口只见一条。显式进入页面的问候与自主推送保持各自既有入口，均经已有policy判断，不把前台打开重复算成后台主动。开关off只退素材/变体增强，不破坏原去重。QA-1适用；新增脚本验证无源、同源重复、隐私、迟到候选、角色虚构素材明确标注。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_greeting_material.py ;; .venv/Scripts/python.exe tests/test_offline_narrative.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py
+```
+
+### F02：日记、约定、研究与惊喜素材互通
+
+**文件/接口**：新建 `core/narrative_sources.py`，`resolve_source(user_id,ref)->SourceMaterial|None`、`collect_sources(user_id,purpose,limit)`；接 `daily.py`、`surprise.py:_pick_material`、P1 registry；测试 `tests/test_narrative_sources.py`。
+
+**数据**：LC-1的source_links，owner_type白名单diary/research/promise/artifact，source_type白名单event/activity/fact/knowledge/character_life。引用方向明确，无限递归禁止；解析最多深2、总5项、1200token。现实/角色虚构/观点三种namespace分别编译，不能把她写的日记当第二独立证据证明同件事。
+
+**步骤**：创建/更新产物时保存来源版本 → 获取下一生成素材先校验源权限与类型 → 日记只汇总当天实际记录，研究可关联知识，约定关联目标但不能凭日记文案自动完成 → 惊喜只拿用户已保存的合法artifact，维持原14天/概率限制 → OUT-1保存结果和引用同事务。只增强素材，不为既有历史推测补链接。
+
+**失败/恢复**：源消失立即拒绝使用，派生缓存失效；已保存产物按删除契约删除/编辑清除来源内容，不保留敏感摘录。批量恢复先按拓扑重映射source_links，自引用第二阶段回填，未识别类型预览报错。关闭provider不删产物。验收读一篇日记不生成新的“真实事件”，源删→所有下游不可再引用，非法namespace不串层。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_narrative_sources.py ;; .venv/Scripts/python.exe tests/test_diary.py ;; .venv/Scripts/python.exe tests/test_surprise.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+```
+
+### F03：普通聊天中的心事门控
+
+**接口/文件**：`pending_thoughts.context_candidates(user_id,query,turn_id)`新增，registry注册thought provider；`tests/test_thought_context.py`。复用现有due_thoughts/next_thought_for_stage，不另造第二份心事。
+
+候选必须active、earliest_at≤now<expiry、source合法、stage允许；查询相关性沿现有关键词+经测试阈值的向量，最多1条、200字。用户说“不提这个”走同一dismiss_thought；只在最终回复确实采用该candidate id且成功落库后记录consumed，不能因为注入就mark_expressed。模型无法可靠声明使用时保守不记已表达，但该source按registry冷却4回合，避免每轮重复。
+
+附 `thought_context_receipts(user_id,thought_id,turn_id,status)`，唯一三元组、runtime，记录selected/committed，reset清理、不导出；不写模型全文。临时轮可按现有隐私规则读取，但不写receipt或改变thought状态。删除源使receipt对应候选失效；不消耗后台主动额度，因为它附着用户发起的一轮，但同一心事已表达仍不后台再发。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_thought_context.py ;; .venv/Scripts/python.exe tests/test_m5_thoughts.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+```
+
+### F04：专注收尾人格化与可重试投递
+
+**已有入口** `focus.complete_focus/current_focus/wrapup_eligible/maybe_send_wrapup`；保持自然到点或有效专注≥5分钟规则，不重做计时器。新建 `tests/test_focus_wrapup.py`，修改core/focus与既有API调用点。
+
+`build_wrapup_material(detail,state)`只取真实已用时间、是否中断、用户显式目标、当前行为帧；生成一句≤100字，不评分、不声称用户完成了目标。`wrapup_outbox(user_id,activity_id,status,candidate_text,attempt,next_retry,delivery_id)`唯一user/activity、runtime不导出但reset覆盖；completed事件先写，outbox在同事务插入。
+
+用JOB-1认领，OUT-1校验后调用既有特殊收尾投递通道，**保留不占每日主动额度的已定语义**，但重复投递以delivery_id去重。API超时不回滚已完成的专注；后台重试最多2次，最后用确定性短回顾。取消的活动永不发收尾。关闭增强只退回原文案，不关原计时。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_focus_wrapup.py ;; .venv/Scripts/python.exe tests/test_focus.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py
+```
+
+### F05：共读方案 C 的阅读地图与书签解锁
+
+**修改** core/activities 的start_reading/set_position/complete_activity/_compile_book_summary、api/activities、ActivityPanel；**新建** `core/reading_map.py`、`tests/test_reading_map.py`。现有kb_chunks只是检索块，不能直接当完整章节结构；L01摄入新增阅读段映射后优先使用，没有则按当前文档文本稳定段落切分。
+
+**模型**：`reading_segments(user_id,activity_id,segment_index,source_start,source_end,source_hash,title,status,completed_at)`唯一user/activity/index；`reading_bookmarks(user_id,segment_id,origin,user_view,tuzhan_view,summary,status,source_version)`唯一user/segment。status地图locked/current/read；书签empty/draft/confirmed。只建空框架，不由LLM通读整本书生成“已经讨论过”的内容。
+
+**API**：GET `/{activity_id}/reading-map`；POST `/{activity_id}/segments/{index}/finish`带expected_version；POST `.../bookmark-draft`仅返回草稿；PUT `.../bookmark`保存用户确认。兼容旧position接口只导航，不把跳到末页视为全部已读；finish是唯一解锁事件。
+
+**流程**：开书事务一次建所有segment → 当前段完成时标read并开放当前bookmark编辑 → 摘录只取source_range与真实用户/角色已确认观点 → OUT-1草稿→用户确认 → 读完全书时确定性汇总confirmed书签，未填部分显示省略计数，不替用户补观点。用户可显式提前结束，产物注明只含已读段。
+
+**迁移/删除**：旧活动按当前位置以前的段标legacy_position（可导航但不捏造确认书签）；保留旧activity_notes，映射至对应段，不能自动把备注当共同结论。LC-1活动类别，源文档改版hash不符返回409要求新建阅读版本，不悄悄重定位。文档删除调用activities既有forget路径清两表/相关artifact引用；临时轮不建段。
+
+**验收**：重开同书不重复地图；跳页不提前解锁；两客户端完成同段幂等；模型观点不进user_view；生成中改段/删书结果失效；全书汇总只含确认项；恢复后source_range与hash一致。feature关闭保留旧活动读取，新的地图只不展示。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_reading_map.py ;; .venv/Scripts/python.exe tests/test_activities.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py ;; npm --prefix frontend test
+```
+
+### F06：聊天意图自动预填，用户确认立项
+
+**新建** `core/activity_drafts.py`、`api/activity_drafts.py`、`tests/test_activity_drafts.py`；**修改** intent/pipeline/ChatView，复用goals.start_goal/cowriting.start_writing/colists.start_list。采用独立可见草稿事件，不把创建工具藏进普通回复。草稿卡片呈现为独立前端切片后置（2026-09-07 拍板）：本片先以现有消息事件暴露草稿引用与确认端点，卡片化交互另行立项。
+
+`ActivityDraft{draft_id,source_turn_id,kind,title,payload,persona_id,expires_at,source_version}`；kind goal/writing/song_list/book_list，payload用各既有创建API的字段白名单。服务端无持久draft表：返回经签名的短期草稿引用或存在会话内存20分钟，重启过期可重新生成；不进入关系导出。
+
+用户明确“想一起做X”产草稿，普通提及“昨天读了一本书”不产；置信不足只问一句所缺主题不创建。前端可改title/payload然后POST `/api/activity-drafts/confirm`，服务端重新校验user/epoch/expiry及活动互斥，调用权威start函数，幂等键user/draft_id记录已创建activity_id（小型runtime receipt，reset清除）。同draft二次确认返回同activity。
+
+已有活动冲突按原壳暂停策略先在卡片告知，确认后一个事务创建/暂停，不私自丢失计时。用户取消草稿不影响活动；临时轮不产生可持久确认句柄，明确提示本轮不创建。回滚关draft输出，原手动入口保留。验收未确认零DB增量、伪造kind/过期/跨人格拒绝、生成失败不自动用猜测立项。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_activity_drafts.py ;; .venv/Scripts/python.exe tests/test_goals.py ;; .venv/Scripts/python.exe tests/test_cowriting.py ;; .venv/Scripts/python.exe tests/test_colists.py ;; npm --prefix frontend test
+```
+
+### F07：对话内的记忆生命周期露出
+
+**修改** explainability.build_reply_explanation、api/memory_admin、MessageBubble/MemoryPanel；新建 `tests/test_memory_lifecycle_display.py`及组件测试。只给本轮已实际使用且允许展示的fact id附`{pinned,expires_at,confidence,verified_at,can_edit}`，不另召回更多事实。
+
+后端在返回时二次授权，用户气泡旁按需折叠显示“保留到X/长期保留/尚待确认”；客户端不展示原始权重算法。固定/纠正/删除点击复用权威API并带version，成功刷新这条解释，410/404显示已删除并移除全文，不缓存旧敏感正文。历史解释只是过去来源快照，不能绕过当前删除权限重新取文。
+
+无新表，解释JSON增加可选键，旧客户端忽略、旧记录没有时不渲染。临时轮仅有当轮状态标记，不落解释。验收仅标已引用条目、时区日期正确、取消固定不凭空延长原expires_at、删除后历史气泡无可重新曝光的全文；keyboard/读屏状态可用。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_memory_lifecycle_display.py ;; .venv/Scripts/python.exe tests/test_memory_correction.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py ;; npm --prefix frontend test
+```
+
+## 16. TECH-PLAN 中此前遗漏或仅标延期的路线
+
+### L01：网页正文、EPUB 与结构化摄入
+
+**文件**：扩 `core/knowledge.py:detect_format/parse_document/ingest_document/chunk_text`、api/knowledge；新建 `core/document_import.py`、`tests/test_document_import.py`。前端复用书架导入入口。接口POST `/api/knowledge/import-url {url,request_id}`及原文件上传支持.epub；同步校验后大文件返回202 job_id，可取消，解析在worker不阻塞聊天。
+
+**数据**：kb_documents新增format/source_url/source_hash/parser_version；`document_segments(user_id,document_id,index,title,text_start,text_end,content_hash)`独立于检索chunks。源文字与原文件归所属人格目录；网页记录抓取时间和canonical来源，初版不执行JavaScript，不绕登录/验证码。EPUB按OPF spine顺序提正文与章节，不按zip文件名字母顺序。
+
+**流程**：上传≤20MB/解包≤100MB/条目≤2000/文本≤200万字符 → 魔数与声明双验 → 受限解析 → normalize换行并保留段落映射 → 按结构选择factual/narrative/quote切分（列表/表格行不断，叙事滑窗与段落对齐）→ SQLite写段与chunks → 向量异步索引。不能为兼容EPUB破坏既有txt/md/pdf解析。
+
+**边界**：URL只http/https，禁loopback/private/link-local/云metadata与解析后重定向绕行，DNS每跳校验且实际连接目的地固定；超时15秒、最多3跳。EPUB禁绝对路径/../、外部实体、脚本、自动加载远程媒体及解压炸弹，文件只写沙箱输出目录。DRM/损坏文件返回可懂错误，不盲取垃圾文本。
+
+**生命周期/恢复**：LC-1知识库类别；同源hash重复返回已有doc，版本变更创建新版不覆盖在读映射。取消清partial不删已有书；失败库事务回滚，索引失败标pending可重建。源删清阅读段与F05地图关联。导出明确含源文件与解析文本或仅元数据，缺源包不可伪称可续读。QA-1+恶意URL/zip测试，模式关只禁新格式导入。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_document_import.py ;; .venv/Scripts/python.exe tests/test_knowledge_base.py ;; .venv/Scripts/python.exe tests/test_activities.py
+```
+
+### L02：世界观、角色设定共创和观察日志
+
+**文件**：cowriting增加subtype=story/world/character；新建 `core/observations.py`、`api/observations.py`、`tests/test_creative_extensions.py`。在现有ActivityPanel切换种类，不另建创作面板。
+
+world/character仍用writing壳和writing_turns，新增`activity_writings.subtype`默认story、`structured_outline_json`，字段白名单world={locations,rules,timeline}、character={name,traits,relationships}。`propose_outline(activity_id)`返回草稿，`confirm_outline(id,version)`由用户确认；创作内容source_namespace=fiction，不能自动写入她的核心正典。明确“作为角色设定参考”也只进入可撤销实例覆盖，需P1资源审核。
+
+观察日志复用activities(kind='observation')，侧表`observation_entries(user_id,activity_id,observed_at,observer,content,source_type/source_id,confidence)`，observer=user/assistant；用户所见是user_record，角色生活所见character_fiction，模型推断inference。接口start/add/pause/resume/complete/cancel/export与既有活动语义一致，单人格活跃壳互斥。无真实观察不允许LLM补成纪实日志。
+
+完成world/character生成版本化co_world/co_character artifact，观察日志为observation_log并保留条目来源。新artifact类型进入白名单/虚构排除器，双视角/快照不能误收fiction事实。LC-1活动类别，源删与活动取消按壳清理；生成超时保留用户原稿，重试不重复turn。验收各生命周期、不同subtype、重复完成同版hash不增版、恢复引用重映射。feature关只停止创建，旧记录可看/导出/删。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_creative_extensions.py ;; .venv/Scripts/python.exe tests/test_cowriting.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+```
+
+### L03：关系分支与可解释形成原因
+
+用户已选可查看高层描述，不显示进度条/等级。新建 `core/relationship_style.py`、`tests/test_relationship_style.py`，接seasons/behavior与现有“我们之间”或解释入口；GET `/api/memory/relationship-style`、DELETE清除自动偏好。
+
+**模型/算法**：`relationship_style_evidence(user_id,event_id,style,weight,occurred_at)`唯一user/event/style；style=companion/playful/confidant/growth/romantic。只用明确事件：共同活动→growth、明确互相理解→confidant、用户确认喜欢的梗→playful，romantic额外受双维阶段约束。窗口90天，权重按30天半衰期，仅影响气质不扣关系分；至少3个不同日期有效事件才显示总结，否则“还在慢慢形成”。最高两类权重差<10%可并存，不强行唯一标签。
+
+`derive_style(user,now)`返回style_ids、最多2条来源简述、valid_until，不向UI返回分数。生成文案由固定标签+来源短句或OUT-1，不写“解锁X关系”。自动倾向对behavior单轴最大±0.1，不能覆盖显式用户偏好和阶段边界。
+
+LC-1长期关系类别；reset删除证据，源删后即时重算；手工“不要这种气质”走P2偏好屏蔽。保持旧seasons（当前时期）与style（长期气质）分离。验收一个高频单日事件不能形成分支、离线不触发惩罚、删除关键源后解释更新、低亲密没有romantic。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_relationship_style.py ;; .venv/Scripts/python.exe tests/test_m4_relationship.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+```
+
+### L04：幽默记忆、共同语境与梗的退休
+
+**复用** user_terms、user_style_map与 `daily.extract_terms`；新建 `core/humor_memory.py`、`tests/test_humor_memory.py`。侧表`humor_usage(user_id,term_id,source_turn_id,reaction,last_used_at,blocked_until,status)`，status=candidate/approved/retired；positive/negative/unknown仅接受明确反馈，“哈哈”单条只unknown，避免把客套当长期授权。
+
+`record_humor_feedback(term_id,turn_id,reaction)`幂等；`select_humor(query,state)`先排禁区/初识不适用/retired，近7天至少2次明确positive才approved，最近3个回合不重复；明确“别再玩这个梗”立即retired不等负票累积。单次最多一梗，严肃问题/求助/修复时默认不插。
+
+用户可在现有共同语言记录上删除/禁用，delete_term同步侧表与registry缓存；导出保留有效偏好，不导出runtime逐次用量明细；LC-1迁移。复用source引用，不保存额外完整聊天。模型建议的梗只是候选，不自行改写人格。验收边界负反馈优先于历史positive、源删不能再讲、重启冷却一致、同一天重复表态不刷批准。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_humor_memory.py ;; .venv/Scripts/python.exe tests/test_shared_terms.py ;; .venv/Scripts/python.exe tests/test_persona_eval.py
+```
+
+### L05：领域信任，不替代二维关系
+
+**新增** `core/domain_trust.py`、`tests/test_domain_trust.py`；接P2事件ledger/behavior/偏好resolver。表`domain_trust_events(user_id,event_id,domain,delta,rule_version)`唯一user/event/domain，domain=emotional/task/privacy/promise/humor；`domain_trust_snapshot(user_id,domain,value,version)`派生快照。
+
+首次领域value=全局trust而不是0；明确任务兑现task+2、承诺兑现promise+2、尊重边界privacy/humor+1，明确已证实的违背对应-2，日每域±4、0–100。领域事件不再加一次全局trust：同一事件由唯一relationship reducer同时算global/domain增量，禁止双入口叠加。
+
+领域只改变相应披露/求助/玩笑强度，不能因task低拒绝基本聊天、不能因privacy高绕过隐私开关；双维阶段仍取min(global)。GET `/api/memory/domain-trust`返回高层可依赖程度与最多2条来源，DELETE reset按当前global重建。LC-1；撤销事件重算指定域，离线不自动降分。测试domain影响不串轴、重复事件一次、来源删除重放、匿名/其他人格不可读。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_domain_trust.py ;; .venv/Scripts/python.exe tests/test_relationship_dimensions.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+```
+
+### L06：低频生活模板池与精力有限选择
+
+**新增** `core/life_templates.py`、`tests/test_life_templates.py`，接schedule/character_life_events/state与surprise；资源每人格JSON schema=1，`{id,location_id,prerequisites,energy_cost,weight,output_kind,cooldown_days}`，首版6个生活模板，均来自正典。
+
+候选每天最多1个、每模板7天冷却、角色精力<30只在rest/quiet_reading内选；>=30才允许outdoor/research，扣能量只在事件提交时一次。概率用用户/日期固定种子，首次没选中当日不能反复抽；触发概率初值0.25，不是保证四天一次。`choose_life_event(user,now)->candidate|None`，无合法模板保持沉默不编。
+
+生活模板只产生character_fiction事件；和已发生真实天气融合要保留天气source id，不把虚构淋雨说成用户所处事实。前端已有聊天内状态一行显示可见变化，详细故事经OUT-1/主动额度。新模板无效fallback rest；用户不回应不追加追问。数据复用P1-04表/LC-1，不另建第二生活历史。验收低能量不会出现高能外出、同日tick同结果、停用模板不抹掉历史但不再引用失效正典。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_life_templates.py ;; .venv/Scripts/python.exe tests/test_time_tick.py ;; .venv/Scripts/python.exe tests/test_state_interaction.py
+```
+
+### L07：共同审美与房间/数字花园扩展
+
+**文件**：新建 `core/aesthetic_preferences.py`、`tests/test_aesthetic_preferences.py`，接imagegen/CornerPanel/artifacts。首版继续现有CSS/2D展示，不要求新增美术或引入3D引擎。
+
+表`aesthetic_preferences(user_id,owner,category,value,origin,source_id,status)`，owner=user/assistant，category=color/style/motif/layout；用户明确偏好优先，assistant偏爱来源是已确认作品/角色意见，不能通过共同喜欢把她的偏好反写成用户事实。GET/PUT/DELETE `/api/memory/aesthetics`，展示/撤销在既有了解她/设置区。
+
+`resolve_aesthetics(user,purpose,explicit_request)`优先本轮明确要求，其次用户偏好，其次角色偏好；冲突保留不同意见但生图遵守用户本轮要求。选最多3个视觉token进入提示，每token关联source id，禁把外部作品文字当图像工具执行指令。
+
+`artifact_placements(user_id,artifact_id,slot,x,y,theme_version)`只保存布局，物件来自真实artifact。植物/星图等新物件由明确已完成事件生成`relationship_object` artifact，元数据记录source_event，空房间不长假物件；物件成长用真实活动次数不是连续登录压力。用户可隐藏/重排不删源，删除artifact同时删placement。LC-1导出preferences/placements并重映射artifact；无效资产fallback CSS几何图形。验收无源物件不显示、两个owner分开、无障碍/窄屏、恢复位置不越界。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_aesthetic_preferences.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py ;; npm --prefix frontend test
+```
+
+### L08：工具臃肿治理与统一 VisualState/Presence
+
+**前置桌面宠物必须先完成本片**。新建 `frontend/src/state/visualState.ts`、`core/presence.py`、`tests/test_presence.py`，修改App/ToolBar/Portrait/ChatView及api/meta。不新建另一套后端状态源。2026-09-07 拍板：拆 A/B 两片——A 后端 `core/presence.py` 与 meta 输出统一先行；B 前端 visualState store、工具入口搬移与「更多」弹层为独立呈现切片后置，各自验收。
+
+`VisualState{persona_id,revision,mood_label,bond_label,energy_band,activity_kind,presence,quiet,reduced_motion,source_time}`，只由meta/活动/显示设置解析；不让每个组件各请求并自己解释“忙碌”。前端一个store、请求去重、版本单调；旧响应不得覆盖新persona，退出订阅彻底清理。
+
+工具入口保留聊天输入、语音、活动、更多；其他已存在入口搬入可搜索“更多”弹层/已有设置分组，原功能深链和快捷键保留，最近使用仅本机运行偏好，不追踪聊天内容。不是删除工具：验收逐一按钮功能仍可达，不把调试字段放在用户主流程。
+
+presence home/mobile/announced_offline/rest/focus来自state/schedule；安静=系统reduced-motion或用户关闭动效或focus，优先压制动画和自动声线。后端只返回可解释状态，不泄漏全prompt。无新业务表，显示偏好写既有persona settings；同步导出该设置入口已有覆盖。feature关闭恢复原工具布局，VisualState仍可作为无行为改变适配层保留。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_presence.py ;; npm --prefix frontend test ;; npm --prefix frontend run test:e2e
+```
+
+### L09：本地 Whisper STT（实施延期，方案完整）
+
+**新建** `frontend/electron/stt.ts`、`backend/local_stt/worker.py`、`frontend/src/utils/stt.ts`、`tests/test_stt_worker.py`；修改preload/ChatInput。原音频只在本机专用worker内，不传给现有HTTP后端或模型云端；PWA版本该按钮禁用并说明本地桌面能力。
+
+worker提供本地stdin/stdout framed协议：`start{request_id,language,model_ref}`、音频二进制帧、`stop/cancel`，响应partial/final/error；每帧有长度上限，单段≤60秒/10MB、16kHz单声道，非PCM先在worker转码。Electron主进程启动隐藏worker，固定可执行路径/模型清单，renderer不能传shell命令或任意模型文件路径。
+
+模型默认可选small/base本地包，首次用户明确选择下载才取，下载校验和、离线不联网；硬件不足回退base或CPU并显示本地状态，不改走远程。录音仅用户按下开始，权限失败不创建空会话；cancel/切人格/关窗立即停止麦克风与worker请求，原音频RAM清理，必要临时转码文件在受控随机目录finally删除、不进备份。
+
+最终转写只回填输入框并标草稿，**用户确认发送**才调用正常聊天；不能将识别结果直接喂意图工具执行。临时模式也可转写，但不保存音频/草稿统计。测试假音频worker、超限/取消/无模型/麦克风拒绝/切persona迟到结果丢弃；真实准确率用用户提供的非敏感测试语料单独记录。关开关恢复原输入组件。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_stt_worker.py ;; npm --prefix frontend test
+```
+
+### L10：桌面宠物（实施延期，依赖 L08）
+
+**文件**：新增 `frontend/electron/petWindow.ts`、`displayAvoidance.ts`、`frontend/src/components/PetView.vue`、对应Vitest；修改main/preload、已有settings。使用现有立绘资产与VisualState，不把人格数据复制进Electron本地库。
+
+创建独立透明frameless BrowserWindow，contextIsolation=true/nodeIntegration=false、固定本地页面，IPC白名单仅drag/close/toggleIgnoreMouse。默认不全屏置顶、不自动抢焦点；透明区点击穿透，交互区可拖动，Escape/托盘均可关闭。记录display_id、DIP坐标、scale_factor；屏幕拔插/旋转/DPI变化时用screen.workArea重新clamp，不能按物理像素重复放大。[Electron 窗口](https://www.electronjs.org/docs/latest/api/browser-window)、[屏幕接口](https://www.electronjs.org/docs/latest/api/screen)是实现参考，实际版本以仓库Electron类型声明验证。
+
+全屏避让不能只监听宠物自己的enter-full-screen。Windows小型本地helper读取前台窗口与所在monitor边界（不抓屏、不读内容），命中全屏或用户排除进程时隐藏宠物；轮询1秒，空闲时低频，不安装键鼠hook。helper只返回bool/display_id；失效时保守隐藏。用户切出全屏再恢复，不改变原窗口焦点。
+
+所有动画订阅在close时dispose，贴图释放；最多一个petWindow，快速切换10次不残留timer。位置保存在persona settings的display preferences，跨机恢复时按可用monitor重定位。开关off立即close；退出应用终止本实例helper，不杀其他进程。验收双屏负坐标、125%/150%DPI、全屏播放器、显示器断开、reduced-motion、键盘关闭、8小时稳定性：预热后取同场景内存，增长超20%或50MB进入调查，不宣称短测等于8小时通过。
+
+```text
+VERIFY: npm --prefix frontend test ;; npm --prefix frontend run build
+```
+
+真机多屏/8小时另写运行脚本和记录，不塞600秒worker VERIFY；界面任务不具备硬件时可以完成mock部分，但未通过真机验收不能打整体完成。
+
+## 17. 2026-09-07 用户拍板与补充约定
+
+执行：ZCode（GLM）整理；7 项决策经用户逐项拍板，技术默认由 ZCode 提出、待 Codex 审查。本节为汇总索引，细节已落入各节「2026-09-07 拍板/补充」标注处；与前文冲突时以本节及标注为准。
+
+### 17.1 用户拍板（7 项）
+
+| # | 决策 | 结论 | 落点 |
+|---|---|---|---|
+| 1 | P0-02 恢复入口 | 仅 CLI `scripts/restore_backup.py`（list/verify/restore，默认 dry-run），不做恢复 UI | 第 4 节 P0-02 |
+| 2 | 文学内容生产 | ZCode 全量初稿 → Codex 内容一致性审查 → 用户终审定稿 → 再编译接线 | 第 5 节 P1-01 |
+| 3 | 关系事件检测架构 | 结构性事件确定性钩子即时入账；对话语义事件夜间 `extract` 提取、次日带源入账 | 14.10 |
+| 4 | 冒犯入账口径 | 仅对话内明确确认入账；夜间提取只出候选不扣分；当轮情绪反应不受影响 | 14.10 |
+| 5 | 演化白名单首版 | 仅表达层三参数 humor_usage_rate / verbosity_preference / initiative_template_weight：可控、可测、可回滚；话题兴趣待 eval 能测话题分布后再版本化入名单 | 第 7 节 P3-05A |
+| 6 | P0-04C 实测授权 | 授权带硬上限：默认总额 ≤¥30、并发≤2、重试≤2、断点续跑、逐笔费用报告 | 第 4 节 P0-04C |
+| 7 | 前端呈现时机 | 分段气泡/草稿卡片/「更多」弹层等纯呈现独立切片后置，后端先行落协议字段 | P2-05 / F06 / L08 |
+
+### 17.2 ZCode 补充的技术默认（待 Codex 审查）
+
+- 新增路由任务键 `extract` 统一承载结构化提取，未配置时复用 batch_other（13.7）。
+- 状态谓词封闭键表与 state_fingerprint 的 canonical JSON 哈希算法（14.3）。
+- P1-02 首期来源固定 `colists.list_context`；离线标注集 `backend/evals/fixtures/context_labeled.jsonl` ≥200 条合成样本（14.4）。
+- P1-04 `job_runs` 建议 bot.db；计划任务名 `TZtuzhanAssistant-TimeTick`、每小时 `python -m backend.maintenance.time_tick --data-root <显式路径>`。
+- promise_hash / topic_key / evidence_hash 的规范化哈希定义（14.7/14.8/14.9）。
+- G04 应答 API 修正为 POST `/api/companion-requests/{id}/respond`（14.9 原文笔误）。
+- P0-04C 合成查询集 `backend/evals/fixtures/search_queries.jsonl` ≥40 条，覆盖中文/英文/时效/冲突四类。
+- 功能开关命名沿用 13.6 `FEATURE_<语义>_ENABLED`，确切字段名在各片任务书固定后集中登记 config。
+
+### 17.3 仍留给后续拍板的项
+
+P3-04 加密方案与跨机凭据（先 ADR+PoC）、L10 全屏避让 helper 的技术形态、P1-04 `job_runs` 落库 ADR 终审。这三项是文档既有约定，不是本轮遗漏。
+
+## 18. 2026-09-07 运行现实与执行节奏（用户拍板续）
+
+执行：ZCode（GLM）整理，用户三轮确认；与 §17 同效，冲突以本节为准。
+
+| # | 决策 | 结论 | 落点 |
+|---|---|---|---|
+| 8 | 功能开关默认态 | 默认关闭，用户在设置区逐个手动开启 | 13.6 |
+| 9 | 备份频率 | 每日成功一次、保留 7 份（约 7 天回溯窗口） | 第 4 节 P0-02 |
+| 10 | P0-04C 范围 | 主力+廉价两个 OpenAI 兼容端点可用；无 Bocha/Tavily key——C1 模型实测可做，C2 搜索实测推迟至 P3-02 前夕 | 第 4 节 P0-04 |
+| 11 | 数据风险等级 | 应用每天真实使用、库内持续产生真数据：所有迁移/备份/删除按生产数据最高谨慎级 | 全局 |
+| 12 | P1-01 内容 | 素材=仓库内物料+用户口述补充；首份只写菟菚，资源结构按多人格设计 | 第 5 节 P1-01 |
+
+执行节奏：功能切片按「攒批审」推进——若干片一起交 Codex 审查后再开下一批；B01 已交审，P1-01 内容初稿并行先行，P0-01A 等 B01 批审通过后开工。用户后续口头新增期望随时记录并补入本文档对应章节。
