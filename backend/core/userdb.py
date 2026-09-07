@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 14
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -467,6 +467,17 @@ CREATE TABLE IF NOT EXISTS unlocks (
     UNIQUE (user_id, key)           -- 同 key 一生只解锁一次
 );
 CREATE INDEX IF NOT EXISTS idx_unlocks_user ON unlocks(user_id, delivered_at);
+-- P1-02 语境注册表生命周期：按成功提交的 turn 记 sticky/cooldown（运行态，
+-- 不导出；user_id 已含人格 scope，天然按人格隔离）。
+CREATE TABLE IF NOT EXISTS context_lifecycle (
+    user_id            TEXT NOT NULL,
+    entry_id           TEXT NOT NULL,
+    last_committed_turn INTEGER NOT NULL,
+    sticky_until_turn  INTEGER NOT NULL,
+    cooldown_until_turn INTEGER NOT NULL,
+    updated_at         TEXT NOT NULL,
+    PRIMARY KEY (user_id, entry_id)
+);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -938,12 +949,13 @@ class UserDB:
 
     # ---- messages ----
     @_locked
-    def add_message(self, user_id: str, role: str, content: str) -> None:
-        self.conn.execute(
+    def add_message(self, user_id: str, role: str, content: str) -> int:
+        cur = self.conn.execute(
             "INSERT INTO messages (user_id, role, content, ts) VALUES (?, ?, ?, ?)",
             (user_id, role, content, datetime.now().isoformat(timespec="seconds")),
         )
         self.conn.commit()
+        return int(cur.lastrowid or 0)
 
     @_locked
     def recent_messages(self, user_id: str, limit: int):
@@ -1440,7 +1452,7 @@ class UserDB:
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
                 "activity_viewpoints", "activity_goals", "goal_progress",
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
-                "relationship_events", "artifacts",
+                "relationship_events", "artifacts", "context_lifecycle",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",

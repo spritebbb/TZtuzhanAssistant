@@ -666,8 +666,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
     # 1.0) 用户消息先存档：即使后续 LLM 调用失败，对话历史也不丢、
     # 失败重发时不至于重复计好感（assistant 消息在生成成功后补存）。
+    # message id 即本轮 conversation turn id（P1-02 语境生命周期按它计数）。
+    turn_id = 0
     if not ephemeral:
-        db.add_message(user_id, "user", text)
+        turn_id = db.add_message(user_id, "user", text)
 
     # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
     # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
@@ -840,11 +842,24 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.exception("[pipeline] 共同创作上下文读取失败，按无活动继续")
 
     # 3.0.1e) M3.4 共同清单：只在聊到歌/书/推荐时注入真实清单摘要。
+    # P1-02 语境注册表（开关默认关）：开启时由注册表统一选择与生命周期管理，
+    # 关闭时保持 colists.list_context 旧路径；两路互斥，不会双注入。
     list_ctx = ""
+    context_selection = None
     try:
-        from .colists import list_context
+        from .features import flag as _flag
 
-        list_ctx = await asyncio.to_thread(list_context, user_id, text)
+        if _flag("context_registry_enabled"):
+            from .context_registry import collect_context
+
+            context_selection = await asyncio.to_thread(
+                collect_context, user_id, text, turn_id=turn_id
+            )
+            list_ctx = context_selection.assemble()
+        else:
+            from .colists import list_context
+
+            list_ctx = await asyncio.to_thread(list_context, user_id, text)
     except Exception:
         logger.exception("[pipeline] 共同清单上下文读取失败，按无活动继续")
 
@@ -1743,6 +1758,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 memory_rows=memory_rows,
                 search_used=bool(search_hits),
                 media=("generated_image" if drawn_image_path else "sticker" if sticker_path else "none"),
+                contexts=(context_selection.explain()
+                          if context_selection is not None else ()),
             )
             await explain_cb(snapshot)
         except Exception:
@@ -1754,6 +1771,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
     # 普通对话存档（user 消息已在 1.0 存档，这里只补 assistant 回复）
     db.add_message(user_id, "assistant", reply)
+    # P1-02 语境生命周期：回复成功提交后才刷新 sticky/cooldown（幂等，同一轮
+    # 不多扣；只续本轮话题真正命中的条目）。注册表关闭时 selection 为 None。
+    if context_selection is not None and context_selection.fresh_entry_keys:
+        try:
+            from .context_registry import commit_context_turn
+
+            commit_context_turn(user_id, turn_id, context_selection.fresh_entry_keys)
+        except Exception:
+            logger.exception("[pipeline] 语境生命周期提交失败（不影响回复）")
     lm1_id = db.add_long_memory(user_id, f"用户说：{text}")
     lm2_id = db.add_long_memory(user_id, f"{persona_name}说：{reply}")
     db.set_first_chat_done(user_id)
