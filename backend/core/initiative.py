@@ -859,17 +859,25 @@ def _build_promise_followup_prompt(user_id: str, promise: dict) -> list[dict] | 
         affection=affection_val,
         user_id=user_id,
     )
+    if promise.get("owner") == "assistant":
+        # P2-03 对称约定：她自己许下的事到点了——坦白进展或已完成，
+        # 不找借口不装没事人；用户不需要为此做任何事，也不许扣用户分。
+        ask = (
+            f"你之前亲口答应过一件事：{promise['content']}。"
+            "现在到了你说好的时候。主动向对方交代这件事——做完了就自然地说结果，"
+            "没做完就坦白进度和下一步补救，别找借口、别装作忘了、更别反过来催对方；"
+            "一句到两句就够，符合当前人格卡的性格与说话方式，别加括号动作。"
+        )
+    else:
+        ask = (
+            f"你一直记着一件事：{promise['content']}。"
+            "现在到了该问问的时候了。主动开口自然地提起这件事——"
+            "像朋友随口问起，不像催债、不像提醒事项、别一板一眼；"
+            "一句到两句就够，符合当前人格卡的性格与说话方式，别加括号动作。"
+        )
     return [
         {"role": "system", "content": sys_prompt},
-        {
-            "role": "user",
-            "content": (
-                f"你一直记着一件事：{promise['content']}。"
-                "现在到了该问问的时候了。主动开口自然地提起这件事——"
-                "像朋友随口问起，不像催债、不像提醒事项、别一板一眼；"
-                "一句到两句就够，符合当前人格卡的性格与说话方式，别加括号动作。"
-            ),
-        },
+        {"role": "user", "content": ask},
     ]
 
 

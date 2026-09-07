@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 18
+_SCHEMA_VERSION = 19
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -161,10 +161,16 @@ CREATE TABLE IF NOT EXISTS promises (
     user_id    TEXT NOT NULL,
     content    TEXT NOT NULL,               -- 约定内容（一句短话）
     follow_up  TEXT NOT NULL DEFAULT '',    -- 该跟进的日子 YYYY-MM-DD，空=未明确时间
-    status     TEXT NOT NULL DEFAULT 'pending',  -- pending / done / cancelled
+    status     TEXT NOT NULL DEFAULT 'open',  -- open / done / cancelled / expired
     source     TEXT NOT NULL DEFAULT '',    -- 来源对话片段（溯源）
     created_at TEXT NOT NULL,
-    done_at    TEXT
+    done_at    TEXT,
+    owner      TEXT NOT NULL DEFAULT 'user',   -- P2-03：谁许下的（user/assistant），旧行=user
+    due_at     TEXT,                           -- 到期（可空；空不自动失约）
+    action_kind TEXT,                          -- 可执行动作类别；空=纯叙事约定
+    namespace  TEXT NOT NULL DEFAULT 'user_real',  -- 角色虚构约定标 character_fiction
+    source_message_id INTEGER,
+    promise_hash TEXT                          -- NFKC→lower→去标点→压空白 后 sha256
 );
 -- token 用量（D5 成本面板）：每次 LLM 调用一行
 CREATE TABLE IF NOT EXISTS usage_log (
@@ -599,6 +605,20 @@ class UserDB:
             )
         except sqlite3.OperationalError:
             pass
+        # P2-03：promises 补对称约定列；旧 pending 状态统一迁移为 open
+        for col_decl in (
+            "owner TEXT NOT NULL DEFAULT 'user'",
+            "due_at TEXT",
+            "action_kind TEXT",
+            "namespace TEXT NOT NULL DEFAULT 'user_real'",
+            "source_message_id INTEGER",
+            "promise_hash TEXT",
+        ):
+            try:
+                self.conn.execute(f"ALTER TABLE promises ADD COLUMN {col_decl}")
+            except sqlite3.OperationalError:
+                pass
+        self.conn.execute("UPDATE promises SET status='open' WHERE status='pending'")
         # P2-01：users 补 trust/intimacy 两列（NULL=未迁移，首次回填=旧 affection）
         for col in ("trust", "intimacy"):
             try:
@@ -1629,16 +1649,38 @@ def get_all_important_dates(user_id: str) -> list[dict]:
 # ---- promises（约定与跟进：双方许下的事，到点菟菚主动问起）----
 
 
-def save_promise(user_id: str, content: str, follow_up: str = "", source: str = "") -> int | None:
-    """保存一条约定。同用户存在相同内容的 pending 约定时不重复插入（返回 None）。"""
+def normalize_promise_hash(content: str) -> str:
+    """约定规范化哈希（13.2 固定顺序）：NFKC → lower → 去标点 → 压空白 → sha256。
+
+    owner/due_at/action_kind 不参与（14.7）。
+    """
+    import hashlib
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(content or "")).lower()
+    text = "".join(ch for ch in text if ch.isalnum() or ch.isspace())
+    text = " ".join(text.split())
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def save_promise(user_id: str, content: str, follow_up: str = "", source: str = "",
+                 *, owner: str = "user", due_at: str | None = None,
+                 action_kind: str | None = None, namespace: str = "user_real",
+                 source_message_id: int | None = None) -> int | None:
+    """保存一条约定。同用户存在相同 hash 的 open 约定时不重复插入（返回 None）。"""
     content = content.strip()[:100]
     if not content:
         return None
+    if owner not in ("user", "assistant"):
+        owner = "user"
+    if namespace not in ("user_real", "character_fiction"):
+        namespace = "user_real"
     follow_up = follow_up.strip()[:10]
+    promise_hash = normalize_promise_hash(content)
     with db._lock:
         row = db.conn.execute(
-            "SELECT id, follow_up FROM promises WHERE user_id = ? AND content = ? AND status = 'pending'",
-            (user_id, content),
+            "SELECT id, follow_up FROM promises WHERE user_id = ? AND promise_hash = ? AND status = 'open'",
+            (user_id, promise_hash),
         ).fetchone()
         if row:
             # 已存在：补全此前缺失的跟进日期
@@ -1649,8 +1691,12 @@ def save_promise(user_id: str, content: str, follow_up: str = "", source: str = 
                 db.conn.commit()
             return None
         cur = db.conn.execute(
-            "INSERT INTO promises (user_id, content, follow_up, source, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, content, follow_up, source[:200], datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO promises (user_id, content, follow_up, source, created_at, "
+            "owner, due_at, action_kind, namespace, source_message_id, promise_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, content, follow_up, source[:200],
+             datetime.now().isoformat(timespec="seconds"),
+             owner, due_at, action_kind, namespace, source_message_id, promise_hash),
         )
         db.conn.commit()
         return int(cur.lastrowid)
@@ -1660,7 +1706,7 @@ def get_due_promises(user_id: str, day: date) -> list[dict]:
     """到点该跟进的约定：pending 且 follow_up 已到期（≤ day）。"""
     with db._lock:
         rows = db.conn.execute(
-            "SELECT * FROM promises WHERE user_id = ? AND status = 'pending' "
+            "SELECT * FROM promises WHERE user_id = ? AND status = 'open' "
             "AND follow_up != '' AND follow_up <= ? ORDER BY follow_up",
             (user_id, day.isoformat()),
         ).fetchall()
@@ -1668,10 +1714,14 @@ def get_due_promises(user_id: str, day: date) -> list[dict]:
 
 
 def get_open_promises(user_id: str, limit: int = 5) -> list[dict]:
-    """所有未完成的约定（不限日期，供对话内自然提起）。"""
+    """所有未完成的约定（不限日期，供对话内自然提起）。
+
+    读取前惰性推进到期状态机（P2-03）：due_at 已过的 open 约定标记 expired。
+    """
+    expire_due_promises(user_id, date.today().isoformat())
     with db._lock:
         rows = db.conn.execute(
-            "SELECT * FROM promises WHERE user_id = ? AND status = 'pending' "
+            "SELECT * FROM promises WHERE user_id = ? AND status = 'open' "
             "ORDER BY CASE WHEN follow_up = '' THEN 1 ELSE 0 END, follow_up LIMIT ?",
             (user_id, limit),
         ).fetchall()
@@ -1685,6 +1735,34 @@ def mark_promise_done(promise_id: int) -> None:
             (datetime.now().isoformat(timespec="seconds"), promise_id),
         )
         db.conn.commit()
+    # P2-03：关系入账按 promise id 幂等（ledger 唯一键防重复加分）。事件记录
+    # 由调用方负责（initiative 走 record_promise_completed，单一事件类型）。
+    try:
+        row = db.conn.execute(
+            "SELECT user_id, owner FROM promises WHERE id = ?", (promise_id,)
+        ).fetchone()
+        if row is not None and row["owner"] == "user":
+            from .affection import apply_relationship_event
+
+            apply_relationship_event(row["user_id"], int(promise_id), "promise_confirmed")
+    except Exception:
+        pass
+
+
+def expire_due_promises(user_id: str, today: str) -> int:
+    """到期状态机推进：due_at 已过且仍 open 的标记 expired。
+
+    用户未做到不当失约（不扣分）；她自己的到期在对话里坦白并提供修复，
+    这里只推进状态。due_at 为空的永不自动失约。
+    """
+    with db._lock:
+        cur = db.conn.execute(
+            "UPDATE promises SET status='expired', done_at=? "
+            "WHERE user_id=? AND status='open' AND due_at IS NOT NULL AND due_at < ?",
+            (datetime.now().isoformat(timespec="seconds"), user_id, today),
+        )
+        db.conn.commit()
+    return int(cur.rowcount or 0)
 
 
 def cancel_promise(promise_id: int) -> None:
