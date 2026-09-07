@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """M8.7「不同版本的我们」：关系版本检查点的隐私白名单、不可变、确定性比较、
-人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema v13。"""
+人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema v16。"""
 from __future__ import annotations
 
 import asyncio
@@ -399,8 +399,8 @@ async def _test_api_list_maps_business_error() -> None:
     print("[OK] API：列表中的损坏快照映射为 400 业务错误，不冒泡 500")
 
 
-def _test_schema_v13() -> None:
-    assert _SCHEMA_VERSION == 13, "schema 应升到 v13"
+def _test_schema_v16() -> None:
+    assert _SCHEMA_VERSION == 16, "schema 应升到 v16"
     with db._lock:
         columns = {row[1] for row in db.conn.execute("PRAGMA table_info(relationship_versions)")}
     assert columns == {"id", "user_id", "label", "captured_at", "schema_version", "snapshot_json", "created_at"}
@@ -409,7 +409,7 @@ def _test_schema_v13() -> None:
 
     assert "relationship_versions" in CATEGORIES["life"]
     assert "relationship_versions" in reset_module._TABLES
-    print("[OK] schema v13：表结构、导出类别与双 reset 清单全部就位")
+    print("[OK] schema v16：表结构、导出类别与双 reset 清单全部就位")
 
 
 async def main() -> None:
@@ -422,7 +422,7 @@ async def main() -> None:
     await _test_reset_clears_table()
     _test_corrupt_snapshot_becomes_business_error()
     await _test_api_list_maps_business_error()
-    _test_schema_v13()
+    _test_schema_v16()
     print("M8.7 不同版本的我们：全部回归通过")
 
 
