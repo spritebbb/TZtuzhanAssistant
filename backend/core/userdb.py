@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 19
+_SCHEMA_VERSION = 20
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -550,6 +550,23 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     version INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_user_prefs ON user_preferences(user_id, category, status);
+-- P2-04 链式反应实例：最小引擎（明确约定→一次跟进→完成后正向回望收束）。
+-- 唯一 (user_id, source_event_id, rule_id)；运行态，reset 清理。
+CREATE TABLE IF NOT EXISTS event_chains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    source_event_id INTEGER NOT NULL,
+    rule_id TEXT NOT NULL,
+    rule_version INTEGER NOT NULL DEFAULT 1,
+    node TEXT NOT NULL,
+    status TEXT NOT NULL,            -- waiting / done / closed / expired / cancelled
+    due_at TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    result_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, source_event_id, rule_id)
+);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -1561,7 +1578,7 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
-                "relationship_dimension_ledger",
+                "relationship_dimension_ledger", "user_preferences", "event_chains",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
