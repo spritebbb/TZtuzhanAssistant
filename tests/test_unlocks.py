@@ -47,22 +47,27 @@ def _test_crossing_detection() -> None:
     assert unlock.check_and_enqueue(uid) == []
     assert unlock.next_pending(uid) is None
 
-    # 同级内波动：不出 pending
-    _set_affection(uid, 40)
+    # 同档内波动（30→29 同在熟悉早档）：不出 pending；跨小档切点（→40 过 33）会升档
+    _set_affection(uid, 29)
     assert unlock.check_and_enqueue(uid) == []
+    _set_affection(uid, 40)
+    assert unlock.check_and_enqueue(uid) == ["substage_shuxi_mid"]
 
     # 单级跨越：熟悉→亲密
     _set_affection(uid, 55)
     keys = unlock.check_and_enqueue(uid)
-    assert keys == ["stage_close"], f"应只入队亲密解锁，实际 {keys}"
+    assert keys == ["stage_close", "substage_shuxi_late"], f"应入队亲密阶段与小档解锁，实际 {keys}"
     pending = unlock.next_pending(uid)
-    assert pending is not None and pending["key"] == "stage_close"
+    # 最旧待说 = 40 时入队的小档时刻（FIFO 队列制）
+    assert pending is not None and pending["key"] == "substage_shuxi_mid"
     assert len(pending["anchors"]) >= 2, "锚点应随 pending 一起取出"
 
     # 连跨两级：亲密→恋人 + 达成眷恋，一次入队两条（队列制消化）
     _set_affection(uid, 78)
     keys = unlock.check_and_enqueue(uid)
-    assert keys == ["stage_lover", "bond_juanlian"], f"连跨两级应入队两条，实际 {keys}"
+    assert keys == ["stage_lover", "bond_juanlian", "substage_qinmi_mid", "substage_qinmi_late"], (
+        f"连跨两级应入队阶段/羁绊/两枚小档（58 与 67 切点），实际 {keys}"  # 78 未跨 85
+    )
 
     # 跌回去再涨回来：同 key 一生只解锁一次（UNIQUE 守卫）
     _set_affection(uid, 40)
@@ -140,9 +145,9 @@ def _test_queue_delivery() -> None:
     _set_affection(uid, 0)
     unlock.check_and_enqueue(uid)  # 登记基线
 
-    _set_affection(uid, 80)  # 连跨：熟悉/亲密/恋人/眷恋 → 四条排队
+    _set_affection(uid, 80)  # 连跨：熟悉/亲密/恋人/眷绊 + 沿途 6 枚小档 → 十条排队
     keys = unlock.check_and_enqueue(uid)
-    assert len(keys) == 4, f"应入队 4 条，实际 {keys}"
+    assert len(keys) == 10, f"应入队 10 条（4 阶段/羁绊 + 6 小档），实际 {keys}"
 
     # 队列制：每轮只见最久等待的一条，pending 不过期
     first = unlock.next_pending(uid)
@@ -177,8 +182,8 @@ async def _test_pipeline_injection() -> None:
     _clean(uid)
     _set_affection(uid, 0)
     unlock.check_and_enqueue(uid)
-    _set_affection(uid, 30)  # 跨「熟悉」
-    assert unlock.check_and_enqueue(uid) == ["stage_familiar"]
+    _set_affection(uid, 30)  # 跨「熟悉」+ 初识两枚小档（8/17）
+    assert unlock.check_and_enqueue(uid) == ["stage_familiar", "substage_chuyi_mid", "substage_chuyi_late"]
 
     captured: dict = {}
 
@@ -200,7 +205,11 @@ async def _test_pipeline_injection() -> None:
     body = injected[0]
     assert "好像有点习惯你了" in body, "注入应含主题"
     assert any(a in body for a in unlock._DEF_BY_KEY["stage_familiar"]["anchors"]), "注入应含锚点"
-    # 回复落账：解锁被标记 delivered，下一轮不再注入
+    # 回复落账：stage_familiar 标记 delivered；队列按 FIFO 继续消化两枚小档
+    nxt = unlock.next_pending(uid)
+    assert nxt is not None and nxt["key"] == "substage_chuyi_mid"
+    unlock.mark_delivered(uid, nxt["key"], "嗯")
+    unlock.mark_delivered(uid, "substage_chuyi_late", "嗯")
     assert unlock.next_pending(uid) is None
     slots = unlock.list_slots(uid)
     fam = next(s for s in slots if s["key"] == "stage_familiar")

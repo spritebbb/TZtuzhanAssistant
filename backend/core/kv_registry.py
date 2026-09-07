@@ -48,6 +48,7 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("reported_stage", "pipeline", "已向用户播报的关系阶段锚点", "runtime"),
     KvKeySpec("c4:last_stage_rank", "unlock", "解锁检测的上次阶段锚点", "runtime"),
     KvKeySpec("c4:last_bond_rank", "unlock", "解锁检测的上次羁绊锚点", "runtime"),
+    KvKeySpec("c4:last_substage_rank", "unlock", "解锁检测的上次小档切点锚点（P2-01）", "runtime"),
     KvKeySpec("sticker:last_message_id", "stickers", "贴纸频率控制的消息间隔锚点", "runtime"),
     KvKeySpec("state:rest", "state", "精力/休息状态机（是否在休息）", "runtime", export=True),
     KvKeySpec("state:emotions", "emotion_state", "离散情绪有界快照（P1-03，≤3 条活跃情绪）", "runtime", export=True),

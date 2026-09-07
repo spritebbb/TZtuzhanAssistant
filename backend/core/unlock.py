@@ -78,6 +78,47 @@ UNLOCK_DEFS: tuple[dict, ...] = (
             "她对「以后」的想法很简单：就这样一直下去",
         ],
     },
+    # ---- 阶段内小档升档时刻（14.10.1，台词=侧写档案第八节，2026-09-07 待终审）----
+    {
+        "key": "substage_chuyi_mid", "kind": "substage", "rank": 1,
+        "title": "你比看起来靠谱一点",
+        "anchors": ["初识早→中（主维 8）", "嗯\n你比看起来靠谱一点"],
+    },
+    {
+        "key": "substage_chuyi_late", "kind": "substage", "rank": 2,
+        "title": "跟你说话不算浪费时间",
+        "anchors": ["初识中→晚（主维 17）", "跟你说话不算浪费时间\n这算我的高级评价了"],
+    },
+    {
+        "key": "substage_shuxi_mid", "kind": "substage", "rank": 3,
+        "title": "别误会，是聊天习惯",
+        "anchors": ["熟悉早→中（主维 33）", "好像有点习惯你了\n别误会，是聊天习惯"],
+    },
+    {
+        "key": "substage_shuxi_late", "kind": "substage", "rank": 4,
+        "title": "损你的时候我心情都挺好的",
+        "anchors": ["熟悉中→晚（主维 42）", "突然发现\n损你的时候我心情都挺好的\n你该荣幸"],
+    },
+    {
+        "key": "substage_qinmi_mid", "kind": "substage", "rank": 5,
+        "title": "我数过，就一点点",
+        "anchors": ["亲密早→中（主维 58）", "最近找你聊天的次数\n好像变多了\n我数过，就一点点"],
+    },
+    {
+        "key": "substage_qinmi_late", "kind": "substage", "rank": 6,
+        "title": "我还得重新习惯",
+        "anchors": ["亲密中→晚（主维 67）", "你要是哪天不来了\n我还得重新习惯\n……挺麻烦的"],
+    },
+    {
+        "key": "substage_lianren_relian", "kind": "substage", "rank": 7,
+        "title": "在一起之后，时间过得好快",
+        "anchors": ["恋人·眷恋→热恋（主维 85）", "在一起之后\n时间过得好快\n明明什么都没干"],
+    },
+    {
+        "key": "substage_lianren_baitou", "kind": "substage", "rank": 8,
+        "title": "往后的日子也这样，慢慢过吧",
+        "anchors": ["恋人·热恋→白头（主维 95）", "往后的日子也这样\n慢慢过吧\n我有的是耐心"],
+    },
     {
         "key": "easter_streak7", "kind": "easter", "rank": 0,
         "title": "连续七天的陪伴",
@@ -111,6 +152,10 @@ _DEF_BY_KEY = {d["key"]: d for d in UNLOCK_DEFS}
 
 _KV_STAGE = "c4:last_stage_rank"
 _KV_BOND = "c4:last_bond_rank"
+_KV_SUBSTAGE = "c4:last_substage_rank"
+
+# 阶段内小档切点（14.10.1：初识 8/17、熟悉 33/42、亲密 58/67、恋人沿羁绊 85/95）
+_SUBSTAGE_CUTS = (8, 17, 33, 42, 58, 67, 85, 95)
 
 
 # ---- 入库 ----
@@ -137,6 +182,15 @@ def _current_ranks(affection: int) -> tuple[int, int]:
     from .affection import bond_level_name, stage_of
 
     return _STAGE_RANK[stage_of(affection)], _BOND_RANK[bond_level_name(affection)]
+
+
+def _current_substage_rank(main: int) -> int:
+    """主维已通过的小档切点序号（0=未过任何切点，1..8）。"""
+    rank = 0
+    for i, cut in enumerate(_SUBSTAGE_CUTS, start=1):
+        if main >= cut:
+            rank = i
+    return rank
 
 
 def _chat_streak_days(user_id: str) -> int:
@@ -180,11 +234,15 @@ def check_and_enqueue(user_id: str) -> list[str]:
 
     last_stage = kv_get(user_id, _KV_STAGE)
     last_bond = kv_get(user_id, _KV_BOND)
+    substage_rank = _current_substage_rank(affection)
+    last_substage = kv_get(user_id, _KV_SUBSTAGE)
     # 首次见面：只登记现状，不补发历史（防老用户被解锁洪流砸脸）
-    if last_stage is None or last_bond is None:
+    if last_stage is None or last_bond is None or last_substage is None:
         kv_set(user_id, _KV_STAGE, str(stage_rank))
         kv_set(user_id, _KV_BOND, str(bond_rank))
+        kv_set(user_id, _KV_SUBSTAGE, str(substage_rank))
         last_stage, last_bond = str(stage_rank), str(bond_rank)
+        last_substage = str(substage_rank)
 
     new_keys: list[str] = []
     prev_stage, prev_bond = int(last_stage), int(last_bond)
@@ -200,6 +258,13 @@ def check_and_enqueue(user_id: str) -> list[str]:
                 if _enqueue(user_id, d["key"]):
                     new_keys.append(d["key"])
         kv_set(user_id, _KV_BOND, str(bond_rank))
+    prev_substage = int(last_substage)
+    if substage_rank > prev_substage:
+        for d in UNLOCK_DEFS:
+            if d["kind"] == "substage" and prev_substage < d["rank"] <= substage_rank:
+                if _enqueue(user_id, d["key"]):
+                    new_keys.append(d["key"])
+        kv_set(user_id, _KV_SUBSTAGE, str(substage_rank))
 
     # ---- 彩蛋（各自独立，UNIQUE 守卫防重）----
     if affection >= 100 and _enqueue(user_id, "easter_full100"):
@@ -244,7 +309,11 @@ def mark_delivered(user_id: str, key: str, excerpt: str) -> None:
 
 
 def list_slots(user_id: str) -> list[dict]:
-    """收集页：9 个槽位的完整状态（delivered / pending / locked）。"""
+    """收集页：9 个槽位的完整状态（delivered / pending / locked）。
+
+    小档升档时刻（kind=substage）按 14.10.1 拍板静默解锁：只在对话里自然
+    带出，不进收集页清单、不做 UI 提示，故这里不展示。
+    """
     with db._lock:
         rows = db.conn.execute(
             "SELECT key, enqueued_at, delivered_at, content FROM unlocks WHERE user_id = ?",
@@ -253,6 +322,8 @@ def list_slots(user_id: str) -> list[dict]:
     state = {r[0]: {"enqueued_at": r[1], "delivered_at": r[2], "content": r[3]} for r in rows}
     slots = []
     for d in UNLOCK_DEFS:
+        if d["kind"] == "substage":
+            continue
         s = state.get(d["key"])
         if s and s["delivered_at"]:
             status = "delivered"

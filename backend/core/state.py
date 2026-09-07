@@ -67,6 +67,9 @@ class AgentState:
     tension: int = 0          # 关系张力 0-100；冲突后不会随普通心情漂移瞬间消失
     repair_hint: str = ""     # 最近一次修复方式，供行为层自然反馈
     last_update: str | None = None  # 上次更新时间 ISO
+    # P2-01 二维关系（0-100）：旧 affection 语义 = min(trust, intimacy)
+    trust: int = 0
+    intimacy: int = 0
     # 离散情绪（P1-03）派生快照：list[dict]（emotion/intensity/…），不落库，
     # 由 load_state 顺带投影；无活跃情绪时为空，消费方完全走旧逻辑。
     discrete_emotions: list[dict] = field(default_factory=list)
@@ -343,6 +346,12 @@ def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
 
     user = db.ensure_user(user_id) if create_if_missing else db.get_user(user_id)
     affection = int(user["affection"] or 0) if user is not None else 0
+    # P2-01 两维（NULL=未迁移，按旧 affection 回退）；阶段按双门槛 min 计算
+    if user is not None and user["trust"] is not None and user["intimacy"] is not None:
+        trust, intimacy = int(user["trust"]), int(user["intimacy"])
+    else:
+        trust = intimacy = affection
+    affection = min(trust, intimacy)
     emotion, updated = db.get_mood(user_id)
 
     # 精力：从「上次聊天到现在」的时长推疲惫度（越久越没聊 → 越累/越闷）
@@ -384,6 +393,8 @@ def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
         repair_hint=str(tension_state.get("last_repair", "")),
         last_update=updated,
         discrete_emotions=discrete,
+        trust=trust,
+        intimacy=intimacy,
     )
 
 
