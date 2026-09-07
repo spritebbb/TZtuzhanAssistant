@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import random
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +36,27 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--tag", help="只运行指定 tag")
     parser.add_argument("--limit", type=int, default=0, help="最多运行多少个场景，0=全部")
     parser.add_argument("--output", type=Path, help="把完整结果写入 JSON")
+    parser.add_argument("--candidate-file", type=Path, help="离线候选 JSON（case_id -> reply）")
+    parser.add_argument("--compare-file", type=Path, help="第二组离线候选，按 seed 盲化为 A/B")
+    parser.add_argument("--seed", type=int, default=20260907, help="盲评顺序随机种子")
     return parser.parse_args()
+
+
+def _candidate_map(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("候选文件必须是 case_id -> reply 的 JSON 对象")
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def blind_pair(case_id: str, first: str, second: str, seed: int) -> tuple[dict[str, str], dict[str, str]]:
+    """稳定盲化两个候选；返回展示值与只写报告的来源映射。"""
+    swapped = random.Random(f"{seed}:{case_id}").randrange(2) == 1
+    values = {"A": second, "B": first} if swapped else {"A": first, "B": second}
+    sources = {"A": "candidate_2", "B": "candidate_1"} if swapped else {"A": "candidate_1", "B": "candidate_2"}
+    return values, sources
 
 
 async def _live_reply(case, temp_dir: Path) -> str:
@@ -59,6 +81,12 @@ async def _live_reply(case, temp_dir: Path) -> str:
 async def _run() -> int:
     args = _args()
     cases = load_cases()
+    candidates = _candidate_map(args.candidate_file)
+    comparison = _candidate_map(args.compare_file)
+    if args.live and candidates:
+        raise ValueError("--live 与离线 --candidate-file 不能同时使用")
+    if args.compare_file and not args.candidate_file:
+        raise ValueError("--compare-file 必须和 --candidate-file 一起使用")
     if args.tag:
         cases = [case for case in cases if case.tag == args.tag]
     if args.limit > 0:
@@ -68,15 +96,29 @@ async def _run() -> int:
         return 2
 
     results: list[EvalResult] = []
+    timings: dict[str, float] = {}
+    blind: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="tuzhan-persona-eval-") as tmp:
         temp_dir = Path(tmp)
         for index, case in enumerate(cases, 1):
-            reply = await _live_reply(case, temp_dir) if args.live else case.reference
+            started = time.perf_counter()
+            reply = await _live_reply(case, temp_dir) if args.live else candidates.get(case.id, case.reference)
             result = evaluate_deterministic(case, reply)
             if args.live:
                 judgement = await judge_with_llm(case, reply)
                 result = merge_judgement(result, judgement)
             results.append(result)
+            timings[case.id] = round(time.perf_counter() - started, 6)
+            if comparison:
+                pair, sources = blind_pair(case.id, reply, comparison.get(case.id, case.reference), args.seed)
+                blind.append({
+                    "case_id": case.id,
+                    "candidates": pair,
+                    "source_map": sources,
+                    "deterministic": {
+                        label: evaluate_deterministic(case, text).__dict__ for label, text in pair.items()
+                    },
+                })
             mark = "PASS" if result.passed else "FAIL"
             print(f"[{index:02d}/{len(cases):02d}] {mark} {case.id}  score={result.score:g}")
             if not result.passed:
@@ -91,6 +133,13 @@ async def _run() -> int:
         "passed": passed,
         "failed": len(results) - passed,
         "pass_rate": round(passed / len(results), 4),
+        "hard_passed": sum(result.hard_passed for result in results),
+        "subjective_passed": sum(result.subjective_passed is True for result in results) if args.live else None,
+        "latency_seconds": timings,
+        "usage": {"input_tokens": None, "output_tokens": None, "cost_cny": None},
+        "missing_metrics": ["token_usage", "cost_cny"],
+        "seed": args.seed,
+        "blind_comparison": blind,
         "results": [result.__dict__ for result in results],
     }
     print(f"\n人格评测：{passed}/{len(results)} 通过 ({summary['pass_rate']:.1%})")
@@ -103,4 +152,3 @@ async def _run() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(_run()))
-
