@@ -195,6 +195,7 @@ async def judge_with_llm(case: PersonaCase, reply: str) -> dict[str, Any]:
         [{"role": "system", "content": _JUDGE_SYSTEM}, {"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=220,
+        task="judge",
     )
     cleaned = raw.strip()
     if cleaned.startswith("```"):
