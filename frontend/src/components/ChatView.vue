@@ -342,8 +342,14 @@ async function handleImageFile(f: File | null) {
     if (imageUrl) {
       userMsg.image = imageUrl
     }
-    // 当场展示的 user 文案 = 后端落库的文案，二者完全一致，刷新后不会从短句变成长描述
-    const text = '（我发了一张图片，图的内容是：' + desc + '）'
+    // 当场展示的 user 文案 = 后端落库的文案，二者完全一致，刷新后不会从短句变成长描述。
+    // 按人格卡第 12 条把描述标为背景，引用转义保留内容边界。
+    // 用户气泡只展示背景来源，不把模型的操作指令当作用户说的话。
+    const text = (
+      '（我发了一张图片。视觉模型提供的图片背景参考，可能不准确：'
+      + JSON.stringify(desc)
+      + '）'
+    )
     userMsg.content = text
     // 用整体替换强制触发重渲染：否则改的是 push 进去的原始对象引用，
     // 要等 bot 第一条流式片段到达才会"刷"成完整描述，识图+LLM 首字的几秒里

@@ -1,7 +1,7 @@
 # 菟菚桌面助手 —— Codex 接手交接报告（2026-09-07 更新）
 
 > 本报告为 Codex 接手的**最新**状态。上一版（D5 交接）已过时——此后经历了 D2 RAG 知识库、C4 好感度玩法闭环、历史文档归档。
-> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线 M0–M5 的核心退出标准已达成，M6 首批低成本原型完成，M8 已完成未来信件、关系快照、双视角叙事（A+B）、阶段封存与告别、梦境/平行可能性、不同版本的我们（M8.7，2026-09-07，ZCode 实现、Codex 独立审查验收）；M3 的世界观/观察日志与网页/EPUB 属按真实使用再评估的扩展项。当前稳定验证基线为后端聚合 **69/69**、前端 Vitest **67/67**、人格 golden set **48 场景**、生产构建与浏览器关键路径 **7/7**。M1 临时对话、事实自然衰减与「长期保留」入口已完成；每日批处理 off-by-one 与主动统一仲裁器均已收口。
+> 截至本文：原功能路线图 **23/24 完成**，仅剩依赖公网资源的 D8。长期进化路线 M0–M5 的核心退出标准已达成，M6 首批低成本原型完成，M8 已完成未来信件、关系快照、双视角叙事（A+B）、阶段封存与告别、梦境/平行可能性、不同版本的我们（M8.7，2026-09-07，ZCode 实现、Codex 独立审查验收）；M3 的世界观/观察日志与网页/EPUB 属按真实使用再评估的扩展项。当前稳定验证基线为后端聚合 **70/70**、前端 Vitest **69/69**、人格 golden set **48 场景**、生产构建与浏览器关键路径 **7/7**。M1 临时对话、事实自然衰减与「长期保留」入口已完成；每日批处理 off-by-one 与主动统一仲裁器均已收口。
 
 ---
 
@@ -83,7 +83,7 @@ env -u CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR -u CODEBUDDY_TOOL_CALL_ID .venv/Scri
 
 ### 3. 测试套件入口 + 计数
 - 全量：`pytest tests/test_suite_runner.py -q`（聚合 `tests/` 各模块）
-- 当前聚合基线为 **69/69**；`test_edge_regressions.py` 另有快速边界回归
+- 当前聚合基线为 **70/70**；`test_edge_regressions.py` 另有快速边界回归
 - 改动后先 `py_compile` 相关 .py 再跑套件
 
 ### 4. 前端改完要过 vue-tsc + vite build
@@ -127,6 +127,8 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 - `tests/test_knowledge_base.py`（新增）
 
 ## 八、给你的下一步（Codex 建议行动序列）
+
+执行：Codex（2026-09-07）。M9 波次 0 已开始，识图事实层首切片由 ZCode（GLM）给出初稿，Codex 接手审查修补；改动、验证和限制见 `../deliverables/M9-VISION-2026-09-07.md`。下一独立切片为输出卫生过滤器，之后推进每日自动备份及行为签名 eval/模型与搜索实测。沿用任务书技术路线与 `VERIFY:` 纪律。
 
 1. **先确认工作树与验收记录**：M8.7 已于 2026-09-07 由 Codex 实跑 `.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q`、`npm test`、`npm run build`、`npm run test:e2e`，结果为后端 **69/69**、前端 **67/67**、生产构建与浏览器 **7/7** 全绿；后续改动以此为回归基线。
 2. 读 `docs/EVOLUTION-ROADMAP.md`（逐项验收标准）+ `persona-菟菚.md`（人格约束，改动别破坏人设）
