@@ -31,10 +31,14 @@ BACKUP_KEEP = 7                      # 保留最近 7 份备份
 IMGS_MAX_MB = 300                    # 生图目录软上限（MB）
 SCREENSHOTS_MAX_MB = 200             # 截图目录软上限（MB）
 SCREENSHOTS_KEEP = 50                # 截图目录保留的最新份数（防只增不减）
-LONG_MEMORY_KEEP = 2000              # long_memory 表保留的最新条数（防无限增长）
-# pinned 行（memory_add 显式写入）永不随普通轮转清理，但若任其无限累积同样膨胀。
-# 设一个宽松上限：每用户 pinned 超过该值时，最旧的超量 pinned 降级为普通行
-# （内容保留，转为受 LONG_MEMORY_KEEP 约束），既保住显式记住的内容，又防病态增长。
+# 全局（非 per-user）保留的最新未固定条数；pinned 行不占此配额。per-user 热路径
+# 清理见 pipeline → userdb.prune_long_memory（800/人），与本常量的分工是
+# 「活跃即时清理＋兜底巡检」；PINNED_MEMORY_KEEP 与 per-user 800 同值纯属巧合，无联动。
+LONG_MEMORY_KEEP = 2000
+# pinned 行（memory_add 显式写入）受契约保护：永不因容量清理降级或删除。
+# PINNED_MEMORY_KEEP 仅是容量观察阈值——超过时记录不含原文的计数提示供人工
+# 关注，不改变 pinned 状态。（B01：旧实现把超量最旧 pinned 降级为普通行再随
+# 轮转删除，会静默销毁用户显式要求记住的内容，违反契约，已移除。）
 PINNED_MEMORY_KEEP = 800
 AUDIT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 审计日志单文件上限（5MB）
 AUDIT_LOG_KEEP = 3                   # 轮转保留份数
@@ -222,61 +226,62 @@ def clean_old_screenshots(max_mb: int = SCREENSHOTS_MAX_MB, keep: int = SCREENSH
     return removed
 
 
-def _demote_overflowing_pinned(conn) -> int:
-    """把每用户超出 PINNED_MEMORY_KEEP 的最旧 pinned 记忆降级为普通行。
+_PINNED_OVERFLOW_LAST: dict[str, int] = {}
 
-    返回降级条数。pinned 行受显式保护不随普通轮转清理，但若 LLM/用户高频调用
-    memory_add，会让 pinned 无限累积。这里在维护周期内给 pinned 设宽松上限，
-    超量的最旧行置 pinned=0（内容仍在表内，转入普通配额，超旧后被正常轮转）。
-    逐用户 Python 处理：维护任务低频（小时级），数据量小，成本可忽略。
+
+def _report_pinned_overflow(conn) -> list[tuple[str, int]]:
+    """统计每用户超出 PINNED_MEMORY_KEEP 的 pinned 记忆数量，仅记录计数。
+
+    B01 契约：pinned 行永不因容量降级或删除；总量过大只产生不含原文的容量
+    提示（user_id + 条数），供人工关注，不自动处置。
+    去抖（审查 I1）：首超记 WARNING，此后仅当某用户的超量计数变化才记
+    INFO，无变化降为 DEBUG——避免永久超阈值用户每周期重复刷同一条 INFO。
     """
     over = conn.execute(
         "SELECT user_id, COUNT(*) AS n FROM long_memory WHERE pinned=1 "
         "GROUP BY user_id HAVING n > ?",
         (PINNED_MEMORY_KEEP,),
     ).fetchall()
-    demoted = 0
-    for row in over:
-        # 该用户应降级的最旧条数 = 超出上限的部分
-        excess = row["n"] - PINNED_MEMORY_KEEP
-        cur = conn.execute(
-            "UPDATE long_memory SET pinned=0 WHERE id IN ("
-            "  SELECT id FROM long_memory WHERE user_id=? AND pinned=1 "
-            "  ORDER BY id ASC LIMIT ?)",
-            (row["user_id"], excess),
+    info = [(row["user_id"], row["n"]) for row in over]
+    for user_id, n in info:
+        prev = _PINNED_OVERFLOW_LAST.get(user_id)
+        level = "WARNING" if prev is None else ("INFO" if prev != n else "DEBUG")
+        logger.log(
+            level,
+            f"[维护] 用户 {user_id} 的 pinned 记忆 {n} 条已超过观察阈值 {PINNED_MEMORY_KEEP}；"
+            "按契约不降级、不清理，仅记录容量提示",
         )
-        demoted += cur.rowcount or 0
-    return demoted
+    _PINNED_OVERFLOW_LAST.clear()
+    _PINNED_OVERFLOW_LAST.update({uid: n for uid, n in info})
+    return info
 
 
 def clean_old_long_memory(keep: int = LONG_MEMORY_KEEP) -> int:
-    """清理 long_memory 表中过旧的记录，返回删除条数（防表无限增长）。
+    """清理 long_memory 表中过旧的未固定记录，返回删除条数（防表无限增长）。
 
-    与向量库同步：SQLite 删除前先删对应的 Chroma 向量（按 user 分组批量删），
+    与向量库同步：SQLite 删除前先删对应的 Chroma 向量（按用户分组批量删），
     避免向量库残留孤儿条目——检索端若回表校验只是白费召回，若直接返回
     则被删的旧内容会「复活」。
-    保护：pinned=1（用户显式要求记住的记忆）永不清理。
+    保护：pinned=1（用户显式要求记住的记忆）永不清理、永不降级，容量清理
+    只从 unpinned 候选中选；pinned 超过 PINNED_MEMORY_KEEP 仅记计数提示。
     """
     try:
         conn = sqlite3.connect(str(_BOT_DB), timeout=5)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
-            # pinned 上限防线：每用户 pinned 数超过 PINNED_MEMORY_KEEP 时，把最旧的
-            # 超量 pinned 降级为普通行（pinned=0，内容保留）。否则 memory_add 高频调用
-            # 会让 pinned 行永久绕过所有配额、表与向量无限增长（审查「需关注」项）。
-            # 降级后这些行落入下方「pinned=0 保留最近 keep 条」的普通配额，超旧的会
-            # 随本轮清理被删，与对话流水记忆一致，不会单独堆积。
-            demoted = _demote_overflowing_pinned(conn)
-            # 选出待删行（保留最近 keep 条非 pinned 行；pinned 行降级后同按普通配额）
+            # 字典式行访问依赖 Row 工厂（旧实现漏设：rows 非空时 row["user_id"]
+            # 直接 TypeError，整个维护周期在清理步骤崩溃，同批的审计日志轮转
+            # 也一并被跳过）
+            conn.row_factory = sqlite3.Row
+            # pinned 容量观察：超阈值只记不含原文的计数，不改 pinned 状态（B01 契约）
+            _report_pinned_overflow(conn)
+            # 选出待删行（全局保留最近 keep 条非 pinned 行；pinned 不参与配额）
             rows = conn.execute(
                 "SELECT id, user_id FROM long_memory WHERE pinned=0 AND id NOT IN ("
                 "  SELECT id FROM long_memory WHERE pinned=0 ORDER BY id DESC LIMIT ?)",
                 (keep,),
             ).fetchall()
             if not rows:
-                if demoted:
-                    conn.commit()
-                    logger.info("[维护] pinned 记忆超上限，已降级 {} 条为普通行（内容保留）", demoted)
                 return 0
             # 先删向量（按用户分组批量），再删 SQLite 行
             try:
