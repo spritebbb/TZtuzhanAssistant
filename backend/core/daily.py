@@ -141,7 +141,8 @@ async def run_daily_batch(user_id: str, day: date) -> None:
             [
                 {"role": "system", "content": JUDGE_PROMPT.replace("菟菚", persona_name)},
                 {"role": "user", "content": f"昨天的对话：\n{transcript}"},
-            ]
+            ],
+            task="batch_other",
         )
         data = _parse_json(resp)
         llm_ok = True
@@ -212,6 +213,7 @@ async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
             ],
             temperature=0.65,
             max_tokens=520,
+            task="batch_diary",
         )
         data = _parse_json(resp)
         content = str(data.get("content") or "").strip()
@@ -266,6 +268,7 @@ async def maybe_write_research_report(user_id: str) -> dict | None:
             ],
             temperature=0.55,
             max_tokens=800,
+            task="batch_diary",
         )
         data = _parse_json(resp)
         title = str(data.get("title") or "").strip()
@@ -310,6 +313,7 @@ async def extract_promises(user_id: str, day: date, transcript: str) -> int:
             ],
             temperature=0.2,
             max_tokens=300,
+            task="extract",
         )
         data = _parse_json(resp)
     except Exception:
@@ -350,6 +354,7 @@ async def extract_terms(user_id: str, day: date, transcript: str) -> int:
             ],
             temperature=0.2,
             max_tokens=240,
+            task="extract",
         )
         data = _parse_json(resp)
     except Exception:
@@ -424,6 +429,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
             ],
             temperature=0.3,
             max_tokens=400,
+            task="extract",
         )
         data = _parse_json(resp)
     except Exception:
