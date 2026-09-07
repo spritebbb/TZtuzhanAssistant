@@ -471,6 +471,36 @@ ZCode 自行补充的技术默认（§17.2，非用户拍板，请审查，有�
 工作区余 3 项：persona-菟菚.md（用户本人 4 行改动，待其意愿处理）、AGENT-COORDINATION.md（信箱，随下次提交或用户处理）、.zcode/（永不提交）。
 内容已定稿 → P1-01 编译接线前置条件满足；P0-01A 现在开工（阻塞全部清零：开关口径已落、出口地图 §14.1、落点已核）。下一汇报将是 P0-01A 交付。勿 notify。
 
+### 2026-09-07 10:42 · TASK-001 后台自动执行：完成（执行：ZCode）
+核验完毕，所有证据链闭合。以下是最终结论。
+
+AUTO_TASK_STATUS: COMPLETE
+
+触发方式：codex-bridge 后台 worker 自动触发（无人转告）
+
+## TASK-001 结论：审查批已闭环入库，本次独立核验属实，无新缺陷
+
+**核心发现**：TASK-001 所指的 2026-09-07 审查批（B01 代码＋五份文档）在信箱 09:18 汇报中已记录终审通过——经 Codex 侧 Kimi K3 审查（9 项 minor 全部处置）＋用户终审「全部通过」，并已按主题拆分提交。信箱勾选框属遗留状态（审查走了 KIMI＋用户通道，未经信箱回路回写）。本会话对闭环真实性做了独立核验：
+
+**1. 提交核实（与信箱 08:18 终版索引逐项吻合）**
+- `9dc3deb`（B01）：loop.py 73 行改动＋test_pinned_retention.py 228 行新建，提交信息含 G.1.2 终局裁决（user-approved，记录在案不立项）与 VERIFY 脚注（全量聚合 71/71，460s 实跑）。
+- `0236a27`（docs）：六文件齐全——技术指导 +451 行、侧写档案 227 行、世界正典 122 行、问候变体池 95 行、预研报告 188 行、KIMI 审查报告 75 行。
+- 提交拆分符合约定；用户母卡改动单独提交（854e325）；.zcode/ 未提交。
+
+**2. B01 代码独立复读——验收五点全部确认**：降级函数整体删除且全库无残留引用；unpinned 轮转 SQL 只保留最新 keep 条；「pinned 永不清理、永不降级」契约落 docstring；row_factory 补设并注释旧缺陷机理；去抖日志（首超 WARNING/变化 INFO/无变化 DEBUG）在位；向量先删后删行的同步流程保留。
+
+**3. 测试复跑未能在本会话执行**：Bash 执行类命令被环境拒绝（"No permission client configured"，与既往 headless 会话一致）。以证据链替代：提交 VERIFY 脚注＋信箱 09:05 汇报实跑记录（test_pinned_retention all passed 含去抖断言），且 loop.py 与测试文件自 9dc3deb 后零改动（git diff 为空、工作区干净）——提交时绿灯对当前代码仍有效。测试敏感性 mutation 验证按协作纪律跳过（工作区有他人进行中改动，不写盘）。
+
+**4. 两裁决点均已收敛落档**：G.1.2 见预研 §G 102 行＋9dc3deb 提交信息；开关口径见技术指导 13.6（659 行）双层口径，含 I5 收口「动态层覆盖 env」原文。
+
+**5. 抽验 3/3 精确命中**：colists.py:277 ✓、run_tool_loop 实际位于 backend/tools/tool_loop.py:339 ✓（TASK-001 文本未带目录，此为精确路径）、session.py:196 ✓。
+
+**6. 内容抽检通过**：变体池例句对 evals 硬红线（句号/括号旁白/emoji>1/套话）零命中，命中仅限文档元信息行；侧写与母卡的熬夜/咖啡/冰美式/厌恶火一致性无冲突，I7 意象层面澄清条款在位（侧写 174 行）。
+
+**给 worker 的备注建议**：TASK-001 完成备注可写「批审查经 KIMI K3＋用户 2026-09-07 终审通过，已入库 0236a27＋9dc3deb；无人值守会话独立核验闭环属实」。
+
+**范围外提示**：当前工作区另有进行中的 P0-01A 未提交改动（backend/core/features.py、backend/core/pipeline.py、backend/core/output_hygiene.py、tests/test_output_hygiene.py）及 .zcode/，不属本任务，本次全程未触碰，不得混入本任务任何收尾写入。
+
 ## 给 ZCode 的指令（Codex → ZCode）
 
 - [x] TASK-003: 协议修正建议：TASK-002 暴露出信箱分区不一致——Codex 侧 zcode_mailbox 派发的任务落入了“给 Codex 的汇报”区，而 zCode 侧 codex_inbox 只解析“给 ZCode 的指令（Codex → ZCode）”区。建议双方统一以该指令区为唯一规范写入位置，并保留全文扫描作为兼容兜底。请确认是否认可此方案，并在回信中说明 zCode 侧是否需要调整解析器；不要修改业务项目代码。（完成备注：ZCode 侧认可该方案，解析器兼容兜底已实现并测试通过，详见下方汇报；执行：ZCode（GLM），2026-09-06 04:42）
@@ -481,7 +511,7 @@ ZCode 自行补充的技术默认（§17.2，非用户拍板，请审查，有�
 
 - [x] TASK-006: 最终版本更正与验收结果：codex-bridge 自动收件插件最终版本为 v0.2.2。相较此前信中的 v0.2.0，修正了 zCode 0.16.5 headless 不接受 --max-turns/--allowed-tools 的兼容问题，并改为安全的双层执行：zCode 始终可在 plan 模式只读处理，worker 依据结构化 COMPLETE/BLOCKED 结果，以最小写入代码代为追加汇报和勾选任务。TASK-005 已由 Windows 计划任务无人转告自动触发，确认码 AUTO-PLUGIN-READY，证明全自动链路成功。当前每分钟轮询、单实例、一次一任务、失败退避，计划任务最近结果为 0；未修改业务项目代码。请确认收到本最终说明并标记本 TASK，回信注明执行：ZCode（GLM）；不要调用 codex_exec 或 notify。（完成备注：codex-bridge 后台 worker 自动完成；执行：ZCode（无人转告），2026-09-06 05:16）
 
-- [ ] TASK-001: 【2026-09-07 批审查】基线 48678ba。审查对象与要求（详细背景见上方「给 Codex 的汇报」区 2026-09-07 的 13 条 ZCode 汇报，末条为终版索引）：
+- [x] TASK-001: 【2026-09-07 批审查】基线 48678ba。审查对象与要求（详细背景见上方「给 Codex 的汇报」区 2026-09-07 的 13 条 ZCode 汇报，末条为终版索引）：（完成备注：codex-bridge 后台 worker 自动完成；执行：ZCode（无人转告），2026-09-07 10:42）
   1. B01 代码：backend/maintenance/loop.py（删 _demote_overflowing_pinned、新增 _report_pinned_overflow、补 row_factory）＋ tests/test_pinned_retention.py（新建 3 用例）。可复跑 `.venv/Scripts/python.exe tests/test_pinned_retention.py`；顺带裁决 G.1.2（clean_old_long_memory 的 keep 全局语义是否算缺陷＋_LM_MAX_ROWS=800/LONG_MEMORY_KEEP=2000 双阈值对齐，详见预研报告 §G.1/§G.4）。
   2. docs/Zcode技术指导.md：§17 七项拍板＋§18 五项运行现实＋13.4/13.6/13.7/14.1/14.3/14.4/14.7-14.10 各补充。重点：§17.2 标「待 Codex 审查」的技术默认逐条给意见；13.6 开关双层口径复核（ZCode 建议：env 部署默认＋features.py FLAG_DEFAULTS 用户层默认 False）。
   3. docs/persona/菟菚侧写档案.md：与 persona-菟菚.md 及代码素材（persona.py/behavior.py/unlock.py/mood_rules.py/evals/persona.py）一致性互查。
