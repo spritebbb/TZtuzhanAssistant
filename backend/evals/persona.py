@@ -47,6 +47,12 @@ class PersonaCase:
     max_chars: int = 180
     first_chat: bool = False
     address: str | None = None
+    signature_ids: tuple[str, ...] = ()
+    emotional_state: str = ""
+    relationship_state: dict[str, Any] = field(default_factory=dict)
+    multi_turn: tuple[dict[str, str], ...] = ()
+    must_not: tuple[str, ...] = ()
+    human_anchors: tuple[str, ...] = ()
 
 
 @dataclass
@@ -57,6 +63,9 @@ class EvalResult:
     score: float
     violations: list[str] = field(default_factory=list)
     judge_reason: str = ""
+    hard_passed: bool = True
+    subjective_passed: bool | None = None
+    signature_violations: list[str] = field(default_factory=list)
 
 
 def load_cases(path: Path = CASES_PATH) -> list[PersonaCase]:
@@ -82,6 +91,12 @@ def load_cases(path: Path = CASES_PATH) -> list[PersonaCase]:
             max_chars=int(item.get("max_chars", 180)),
             first_chat=bool(item.get("first_chat", False)),
             address=item.get("address"),
+            signature_ids=tuple(map(str, item.get("signature_ids", []))),
+            emotional_state=str(item.get("emotional_state", "")),
+            relationship_state=dict(item.get("relationship_state") or {}),
+            multi_turn=tuple(dict(turn) for turn in item.get("multi_turn", [])),
+            must_not=tuple(map(str, item.get("must_not", []))),
+            human_anchors=tuple(map(str, item.get("human_anchors", []))),
         )
         if case.id in seen:
             raise ValueError(f"重复的 persona eval id: {case.id}")
@@ -134,15 +149,24 @@ def evaluate_deterministic(case: PersonaCase, reply: str) -> EvalResult:
     for term in case.forbidden:
         if term.lower() in reply.lower():
             violations.append(f"命中场景禁用语：{term}")
+    for term in case.must_not:
+        if term.lower() in reply.lower():
+            violations.append(f"命中 must_not：{term}")
     for group in case.rubric_any:
         if not any(term.lower() in reply.lower() for term in group):
             violations.append("缺少场景信号：" + "/".join(group))
+    from .signatures import evaluate_signatures
+
+    signature_violations = evaluate_signatures(case.signature_ids, reply)
+    violations.extend(signature_violations)
     return EvalResult(
         case_id=case.id,
         reply=reply,
         passed=not violations,
         score=4.0 if not violations else max(0.0, 4.0 - len(violations)),
         violations=violations,
+        hard_passed=not violations,
+        signature_violations=signature_violations,
     )
 
 
@@ -206,5 +230,7 @@ def merge_judgement(base: EvalResult, judgement: dict[str, Any]) -> EvalResult:
         score=score,
         violations=violations,
         judge_reason=str(judgement.get("reason", "")),
+        hard_passed=base.hard_passed,
+        subjective_passed=judge_passed,
+        signature_violations=list(base.signature_violations),
     )
-
