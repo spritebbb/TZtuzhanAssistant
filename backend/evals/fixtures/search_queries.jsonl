@@ -1,0 +1,40 @@
+{"id":"zh-01","category":"zh","query":"量子纠缠是什么"}
+{"id":"zh-02","category":"zh","query":"如何给番茄炖牛腩调味"}
+{"id":"zh-03","category":"zh","query":"Python 的 context manager 怎么用"}
+{"id":"zh-04","category":"zh","query":"苏轼《定风波》的写作背景"}
+{"id":"zh-05","category":"zh","query":"什么是向量数据库"}
+{"id":"zh-06","category":"zh","query":"家用路由器如何设置访客网络"}
+{"id":"zh-07","category":"zh","query":"解释一下机会成本"}
+{"id":"zh-08","category":"zh","query":"为什么天空看起来是蓝色"}
+{"id":"zh-09","category":"zh","query":"SQLite WAL 模式有什么作用"}
+{"id":"zh-10","category":"zh","query":"如何判断一篇文章的主要观点"}
+{"id":"en-01","category":"en","query":"What is retrieval augmented generation?"}
+{"id":"en-02","category":"en","query":"How does a heat pump work?"}
+{"id":"en-03","category":"en","query":"Explain database normalization"}
+{"id":"en-04","category":"en","query":"What causes ocean tides?"}
+{"id":"en-05","category":"en","query":"How do passkeys improve login security?"}
+{"id":"en-06","category":"en","query":"What is the CAP theorem?"}
+{"id":"en-07","category":"en","query":"How does photosynthesis store energy?"}
+{"id":"en-08","category":"en","query":"Explain the difference between TCP and UDP"}
+{"id":"en-09","category":"en","query":"What is a confidence interval?"}
+{"id":"en-10","category":"en","query":"How do solar eclipses happen?"}
+{"id":"fresh-01","category":"fresh","query":"今天北京天气如何"}
+{"id":"fresh-02","category":"fresh","query":"当前人民币兑美元汇率是多少"}
+{"id":"fresh-03","category":"fresh","query":"本周英超赛程"}
+{"id":"fresh-04","category":"fresh","query":"最新稳定版 Python 是什么"}
+{"id":"fresh-05","category":"fresh","query":"今天黄金价格是多少"}
+{"id":"fresh-06","category":"fresh","query":"当前欧盟委员会主席是谁"}
+{"id":"fresh-07","category":"fresh","query":"最近一次 SpaceX 发射结果"}
+{"id":"fresh-08","category":"fresh","query":"本月中国居民消费价格指数"}
+{"id":"fresh-09","category":"fresh","query":"今天上海地铁是否有临时停运"}
+{"id":"fresh-10","category":"fresh","query":"当前 Node.js LTS 版本"}
+{"id":"conflict-01","category":"conflict","query":"咖啡是否一定会导致脱水"}
+{"id":"conflict-02","category":"conflict","query":"鸡蛋会不会提高所有人的胆固醇风险"}
+{"id":"conflict-03","category":"conflict","query":"每天走一万步是否是医学硬标准"}
+{"id":"conflict-04","category":"conflict","query":"维生素C能否预防普通感冒"}
+{"id":"conflict-05","category":"conflict","query":"电动车全生命周期一定比燃油车低碳吗"}
+{"id":"conflict-06","category":"conflict","query":"晚上使用屏幕一定会造成失眠吗"}
+{"id":"conflict-07","category":"conflict","query":"间歇性禁食是否适合所有成年人"}
+{"id":"conflict-08","category":"conflict","query":"红酒少量饮用是否有益心血管"}
+{"id":"conflict-09","category":"conflict","query":"开源软件是否天然比闭源软件安全"}
+{"id":"conflict-10","category":"conflict","query":"AI生成内容能否被可靠地完全检测"}

@@ -85,6 +85,15 @@ async def _run() -> int:
     comparison = _candidate_map(args.compare_file)
     if args.live and candidates:
         raise ValueError("--live 与离线 --candidate-file 不能同时使用")
+    if args.live:
+        from backend.core.model_routes import resolve_route
+
+        candidate_route = resolve_route("chat_routine")
+        judge_route = resolve_route("judge")
+        if (candidate_route.base_url.rstrip("/"), candidate_route.model) == (
+            judge_route.base_url.rstrip("/"), judge_route.model
+        ):
+            raise ValueError("live 人格评测要求 judge 与生成使用不同的实际 endpoint/model")
     if args.compare_file and not args.candidate_file:
         raise ValueError("--compare-file 必须和 --candidate-file 一起使用")
     if args.tag:
@@ -139,6 +148,10 @@ async def _run() -> int:
         "usage": {"input_tokens": None, "output_tokens": None, "cost_cny": None},
         "missing_metrics": ["token_usage", "cost_cny"],
         "seed": args.seed,
+        "routes": ({
+            "candidate": {"base_url": resolve_route("chat_routine").base_url, "model": resolve_route("chat_routine").model},
+            "judge": {"base_url": resolve_route("judge").base_url, "model": resolve_route("judge").model},
+        } if args.live else None),
         "blind_comparison": blind,
         "results": [result.__dict__ for result in results],
     }
