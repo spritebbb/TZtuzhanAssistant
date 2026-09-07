@@ -31,7 +31,7 @@ _TABLES = (
     "activity_viewpoints", "activity_goals", "goal_progress",
     "activity_writings", "writing_turns", "activity_lists", "list_items",
     "relationship_events", "artifacts", "context_lifecycle",
-    "character_life_events", "job_runs",
+    "character_life_events",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions",
     "kb_documents", "kb_chunks", "unlocks",
@@ -118,9 +118,10 @@ async def reset_everything() -> dict:
     """执行彻底失忆重置，返回逐步骤状态；任何失败都明确返回 ``ok=False``。"""
     global _resetting, _reset_epoch
 
-    from .persona_profiles import active_user_id
+    from .persona_profiles import active_id, active_user_id
 
     uid = active_user_id()
+    active_persona = active_id()
     async with _reset_lock:
         _resetting = True
         _reset_epoch += 1
@@ -151,6 +152,11 @@ async def reset_everything() -> dict:
                     try:
                         for table in _TABLES:
                             db.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (uid,))
+                        # P1-04 任务认领记录按人格作用域清理（job_runs 无 user_id 列）
+                        db.conn.execute(
+                            "DELETE FROM job_runs WHERE scope_key=?",
+                            (f"persona::{active_persona}",),
+                        )
                         db.conn.commit()
                     except Exception:
                         db.conn.rollback()
