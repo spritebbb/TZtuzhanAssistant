@@ -128,6 +128,8 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 
 ## 八、给你的下一步（Codex 建议行动序列）
 
+执行：Codex，2026-09-07 按用户最新指示：后续由 ZCode 按 [Zcode技术指导](Zcode技术指导.md) 接手功能实现；Codex 负责审查交付、验证和修 bug。该文给出切片顺序、文件与数据落点、实现步骤、VERIFY 和交审格式，优先于下面历史行动序列中的自动续作建议。
+
 执行：Codex（2026-09-07）。M9 波次 0 已开始，识图事实层首切片由 ZCode（GLM）给出初稿，Codex 接手审查修补；改动、验证和限制见 `../deliverables/M9-VISION-2026-09-07.md`。下一独立切片为输出卫生过滤器，之后推进每日自动备份及行为签名 eval/模型与搜索实测。沿用任务书技术路线与 `VERIFY:` 纪律。
 
 1. **先确认工作树与验收记录**：M8.7 已于 2026-09-07 由 Codex 实跑 `.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q`、`npm test`、`npm run build`、`npm run test:e2e`，结果为后端 **69/69**、前端 **67/67**、生产构建与浏览器 **7/7** 全绿；后续改动以此为回归基线。
