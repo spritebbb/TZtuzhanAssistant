@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import tempfile
+from pathlib import Path
 
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_visible_outputs_"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.core.output_hygiene import HygieneContext, protect_visible_text  # noqa: E402
 

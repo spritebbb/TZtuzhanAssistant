@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.evals.persona import PersonaCase, evaluate_deterministic, load_cases
 from backend.evals.signatures import SIGNATURES
