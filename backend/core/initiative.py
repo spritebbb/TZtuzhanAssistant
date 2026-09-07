@@ -908,6 +908,13 @@ async def maybe_follow_up_promise(user_id: str) -> str | None:
             record_promise_completed(user_id, promise)
         except Exception:
             logger.exception("[主动性] 约定完成事件记录失败（不影响跟进）")
+        try:
+            # P2-04 链式反应：约定跟进完成 → 建「正向回望」链实例（一次，幂等）
+            from .event_chains import on_promise_completed
+
+            on_promise_completed(user_id, promise["id"])
+        except Exception:
+            logger.exception("[主动性] 链式回望建链失败（不影响跟进）")
         _mark_promise_followed(user_id)
 
     text = await _arbited_proactive(
