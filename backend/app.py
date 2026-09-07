@@ -314,6 +314,21 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("[MCP] 外部服务器恢复任务启动失败")
         _spawn_bg(maintenance_loop())
+        # P1-04 启动补跑：睡眠/离线期间错过的行程周期走 time_tick 同一入口
+        # （同一 job_runs 认领，与计划任务互不双跑）；后台执行不阻塞启动。
+        async def _time_tick_catchup() -> None:
+            try:
+                from .config import config as _cfg
+                from .maintenance.time_tick import run as _tick_run
+
+                def _run() -> int:
+                    return _tick_run(["--data-root", str(_cfg.data_dir), "--json"])
+
+                await asyncio.to_thread(_run)
+            except Exception:
+                logger.exception("[tick] 启动补跑失败（计划任务会继续推进）")
+
+        _spawn_bg(_time_tick_catchup())
         checkpoint_all()  # 启动时先合并一次 WAL
         # 主动性引擎：后台 loop 定时检查「久未聊 + 关系够近」的用户，生成主动消息
         # 并写入待投递队列（kv_store），前端轮询 /api/initiative 时取走（离线不丢）。
