@@ -23,14 +23,15 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-# ---- 封闭状态键（state_keys_version=1，新增键必须同步 eval 用例）----
+# ---- 封闭状态键（state_keys_version=2，新增键必须同步 eval 用例）----
 STAGE_ORDER = ("初识", "熟悉", "亲密", "恋人")
 EMOTION_NAMES = ("joy", "sadness", "anger", "hurt", "anxiety", "calm", "tenderness")
 ENERGY_BANDS = ("high", "normal", "low")
 TIME_OF_DAY = ("morning", "afternoon", "evening", "late")
 SUBSTAGES = ("早", "中", "晚")
+ATTITUDE_AXES = ("patience", "humor", "guard", "directness", "followup")
 
-STATE_KEYS_VERSION = 1
+STATE_KEYS_VERSION = 2
 _ALLOWED_BASE_KEYS = frozenset(
     {"derived_stage", "substage", "trust", "intimacy", "energy_band", "time_of_day", "quiet"}
 )
@@ -112,6 +113,14 @@ def _validate_predicate(cond: dict) -> None:
             raise PersonaSliceError("emotion 键只支持 gte/lte")
         if not isinstance(value, (int, float)) or not 0 <= value <= 1:
             raise PersonaSliceError("emotion 阈值必须在 0-1")
+        return
+    if field.startswith("attitude."):
+        if field.split(".", 1)[1] not in ATTITUDE_AXES:
+            raise PersonaSliceError(f"态度键非法: {field}")
+        if op not in ("gte", "lte"):
+            raise PersonaSliceError("attitude 键只支持 gte/lte")
+        if not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise PersonaSliceError("attitude 阈值必须在 0-1")
         return
     if field not in _ALLOWED_BASE_KEYS:
         raise PersonaSliceError(f"状态键未登记: {field}")
@@ -210,6 +219,18 @@ def build_state_view(
         for name, intensity in emotions.items():
             if name in EMOTION_NAMES:
                 view[f"emotion.{name}"] = round(float(intensity), 2)
+        from .emotion_state import attitude_summary
+
+        attitude = attitude_summary(
+            emotions,
+            trust=view["trust"],
+            intimacy=view["intimacy"],
+            low_energy_or_late=(
+                view.get("energy_band") == "low" or view["time_of_day"] == "late"
+            ),
+        )
+        for axis, value in attitude.items():
+            view[f"attitude.{axis}"] = value
     return view
 
 
@@ -221,7 +242,7 @@ def _predicate_ok(cond: dict, view: dict) -> bool:
     if current is None:
         # emotion.<name>：情绪不存在 → 不满足；基础键缺失 → 不满足（不猜测默认）
         return False
-    if field.startswith("emotion."):
+    if field.startswith(("emotion.", "attitude.")):
         return current >= value if op == "gte" else current <= value
     if op == "eq":
         return current == value

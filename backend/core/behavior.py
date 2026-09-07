@@ -10,6 +10,7 @@ build_system_prompt 或 pipeline 直接拼接。这样菟菚的「活」是有�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from .state import AgentState
 
@@ -256,12 +257,13 @@ def _event_line(s: AgentState) -> str:
 
 
 # ---- 离散情绪（P1-03）→ 行为锚点 ----
-def _emotion_line(s: AgentState, emotions: list | None = None) -> str:
-    """少量高价值锚点：先两三个，全情绪 × 态度矩阵归 P3-01。
+def _emotion_line(s: AgentState, emotions: list | None = None,
+                  low_energy_or_late: bool | None = None) -> str:
+    """P3-01 全情绪 × 关系态度矩阵，编译为可执行的自然语言行为片段。
 
     无离散情绪时返回空串，行为帧完全按旧逻辑（兼容承诺）。
     """
-    from .emotion_state import emotion_hint
+    from .emotion_state import attitude_instruction, emotion_hint
 
     items = emotions if emotions is not None else getattr(s, "discrete_emotions", None)
     if not items:
@@ -293,6 +295,20 @@ def _emotion_line(s: AgentState, emotions: list | None = None) -> str:
         parts.append(
             "这一轮你可以软一点：主动关心一句、语气放轻，但别突然黏得不像你"
         )
+    if low_energy_or_late is None:
+        low_energy_or_late = s.is_tired or datetime.now().hour >= 23 or datetime.now().hour < 6
+    trust = getattr(s, "trust", 0)
+    intimacy = getattr(s, "intimacy", 0)
+    if s.affection and trust == 0 and intimacy == 0:  # 手工构造的旧 AgentState 兼容
+        trust = intimacy = s.affection
+    matrix_line = attitude_instruction(
+        maps,
+        trust=trust,
+        intimacy=intimacy,
+        low_energy_or_late=low_energy_or_late,
+    )
+    if matrix_line:
+        parts.append(matrix_line)
     return "；".join(parts)
 
 

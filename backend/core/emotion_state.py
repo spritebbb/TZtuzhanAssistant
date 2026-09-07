@@ -264,14 +264,72 @@ def attitude_summary(
             vector = ATTITUDE_VECTORS[name]
             for idx, axis in enumerate(ATTITUDE_AXES):
                 axes[axis] += weight * vector[idx] / total
-    # trust↑ → guard↓（每 50 点最多 0.2）；intimacy↑ → 更柔软（guard↓ patience↑）
-    trust_relief = min(0.2, max(0.0, (float(trust) - 25.0)) / 50.0 * 0.2)
-    intimacy_soft = min(0.2, max(0.0, (float(intimacy) - 25.0)) / 50.0 * 0.2)
-    axes["guard"] = max(0.0, axes["guard"] - trust_relief - intimacy_soft)
-    axes["patience"] = min(1.0, axes["patience"] + intimacy_soft * 0.5)
+    # 两维独立、以 50 为中点修正：信任主要影响防备/耐心，亲密主要影响
+    # 柔软与追问意愿。低亲密不会被高信任抵消成越级亲昵。
+    trust_offset = max(-1.0, min(1.0, (float(trust) - 50.0) / 50.0))
+    intimacy_offset = max(-1.0, min(1.0, (float(intimacy) - 50.0) / 50.0))
+    axes["guard"] -= trust_offset * 0.15 + intimacy_offset * 0.05
+    axes["patience"] += trust_offset * 0.05 + intimacy_offset * 0.10
+    axes["followup"] += intimacy_offset * 0.10
     if low_energy_or_late:
         axes["followup"] = max(0.0, axes["followup"] - 0.2)
     return {axis: round(min(1.0, max(0.0, value)), 4) for axis, value in axes.items()}
+
+
+def attitude_instruction(
+    items: list[EmotionItem] | list[dict] | dict[str, float], *,
+    trust: float = 50.0, intimacy: float = 50.0,
+    low_energy_or_late: bool = False,
+) -> str:
+    """把完整态度矩阵编译成短行为片段，不泄露轴名、数值或心理理论。"""
+    if isinstance(items, dict):
+        emotions = {
+            str(name): max(0.0, min(1.0, float(intensity)))
+            for name, intensity in items.items() if name in ATTITUDE_VECTORS
+        }
+    else:
+        emotions = {}
+        for raw in items:
+            if isinstance(raw, dict):
+                name = str(raw.get("emotion", ""))
+                intensity = float(raw.get("intensity", 0) or 0)
+            else:
+                name, intensity = raw.emotion, raw.intensity
+            if name in ATTITUDE_VECTORS:
+                emotions[name] = max(emotions.get(name, 0.0), max(0.0, min(1.0, intensity)))
+    if not emotions:
+        return ""
+
+    axes = attitude_summary(
+        emotions, trust=trust, intimacy=intimacy,
+        low_energy_or_late=low_energy_or_late,
+    )
+    negative = any(emotions.get(name, 0.0) >= 0.4 for name in NEGATIVE_EMOTIONS)
+    tender = emotions.get("tenderness", 0.0) >= 0.4
+    clauses: list[str] = []
+    if negative and tender:
+        clauses.append("委屈或戒备与关心可以同时流露，不要强行抹平其中一种")
+    elif axes["guard"] >= 0.58:
+        clauses.append("先保留一点距离，立场说清即可")
+
+    if axes["directness"] >= 0.68:
+        clauses.append("表达直接、具体，不绕弯也不攻击对方")
+    if axes["patience"] <= 0.42:
+        clauses.append("句子短些，允许自然停住，但不要敷衍")
+    if axes["humor"] <= 0.20:
+        clauses.append("收住调侃")
+    elif axes["humor"] >= 0.55 and not negative:
+        clauses.append("可以带一点轻微调侃，别连续抖机灵")
+
+    if axes["followup"] <= 0.25:
+        clauses.append("不要为了续聊硬追问")
+    elif axes["followup"] >= 0.48:
+        clauses.append("确有帮助时最多追问一句")
+
+    if float(intimacy) < 50:
+        clauses.append("关心保持当前关系分寸，不使用越级昵称或暧昧承诺")
+    clauses.append("始终保留菟菚直白、克制又会具体关心人的说话方式")
+    return "；".join(dict.fromkeys(clauses)) + "。"
 
 
 def emotion_hint(items: list[EmotionItem] | list[dict]) -> str:

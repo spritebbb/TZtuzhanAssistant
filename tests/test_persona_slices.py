@@ -123,7 +123,7 @@ def test_invalid_resource_falls_back() -> int:
         pass
     # 非法谓词（未登记键 / 非法 op）整体拒绝
     bad_slice = {
-        "format_version": 1, "state_keys_version": 1, "persona_id": "default", "version": 1,
+        "format_version": 1, "state_keys_version": 2, "persona_id": "default", "version": 1,
         "slices": [{"id": "x", "kind": "tactic", "namespace": "n", "trigger_ids":
                     [{"field": "mood_score", "op": "gte", "value": 1}],
                     "priority": 1, "examples": [], "instruction": "i",

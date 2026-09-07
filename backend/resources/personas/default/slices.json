@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "state_keys_version": 1,
+  "state_keys_version": 2,
   "persona_id": "default",
   "version": 1,
   "slices": [

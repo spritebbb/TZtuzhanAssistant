@@ -88,6 +88,23 @@ class AgentState:
         return self.energy < 35
 
     @property
+    def attitude_axes(self) -> dict[str, float]:
+        """P3-01 只读派生态度；不新增持久状态或第二套情绪权威。"""
+        from .emotion_state import attitude_summary
+
+        emotions = {
+            str(item.get("emotion", "")): float(item.get("intensity", 0) or 0)
+            for item in self.discrete_emotions
+            if isinstance(item, dict)
+        }
+        return attitude_summary(
+            emotions,
+            trust=self.trust,
+            intimacy=self.intimacy,
+            low_energy_or_late=self.is_tired,
+        )
+
+    @property
     def is_bubbly(self) -> bool:
         return self.emotion >= 65
 
