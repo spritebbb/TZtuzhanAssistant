@@ -135,8 +135,8 @@ cd frontend && npx vue-tsc --noEmit && npx vite build
 1. **先确认工作树与验收记录**：M8.7 已于 2026-09-07 由 Codex 实跑 `.venv\\Scripts\\python.exe -m pytest tests\\test_suite_runner.py -q`、`npm test`、`npm run build`、`npm run test:e2e`，结果为后端 **69/69**、前端 **67/67**、生产构建与浏览器 **7/7** 全绿；后续改动以此为回归基线。
 2. 读 `docs/EVOLUTION-ROADMAP.md`（逐项验收标准）+ `persona-菟菚.md`（人格约束，改动别破坏人设）
 3. **下一推荐切片转入 M9 地基与人格打磨**：M8.7「不同版本的我们」已完成并验收（relationship_versions.py：显式检查点不可变、白名单快照、确定性比较无价值判断，schema v13）。M8 仅余重逢交互，三段式方案已经用户拍板：她视角离线叙事 → 用户回应 → 补写日记/研究；实施须遵守长期离线不扣好感、不追问去向、不制造负罪感及 E03 恢复预览/校验/回滚。M3 世界观/观察日志、网页/EPUB 按真实使用再评估；桌面宠物与 STT 按 M9 的既定延期条件推进。
-4. **D8 不要直接开做**：它仍卡公网部署、HTTPS、推送凭据与通知策略，需先与用户对齐资源和方案。
+4. **D8 不要直接开做**：方案已经定为 Cloudflare Tunnel + Access 公网 HTTPS 网关，通知 payload 默认不带正文；完整实现见 `docs/Zcode技术指导.md` L12。实际部署仍需域名、Cloudflare tenant 和推送凭据，先完成可离线验收的 gateway/auth/mock 再进入部署。
 
 ---
 
-_需要人工/用户决策的事项：D8 是否需要公网部署资源。_
+_需要外部提供的事项：实施 D8 时的域名、Cloudflare tenant 与推送凭据；技术路线已完成拍板。_
