@@ -28,6 +28,7 @@ class BehaviorFrame:
     rest_line: str = ""     # 用户让她休息后，真实休息计时在语气里的体现
     tension_line: str = ""  # 未修复冲突与本轮修复进度
     season_line: str = ""   # 关系季节（M4）：由真实事件推导的氛围基调
+    emotion_line: str = ""  # 离散情绪（P1-03）：少量锚点 + 自然语言摘要
 
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
@@ -36,6 +37,8 @@ class BehaviorFrame:
             parts.append(self.texture_line)
         if self.season_line:
             parts.append(self.season_line)
+        if self.emotion_line:
+            parts.append(self.emotion_line)
         if self.initiative:
             parts.append(self.initiative)
         if self.reaction_line:
@@ -249,6 +252,47 @@ def _event_line(s: AgentState) -> str:
     )
 
 
+# ---- 离散情绪（P1-03）→ 行为锚点 ----
+def _emotion_line(s: AgentState, emotions: list | None = None) -> str:
+    """少量高价值锚点：先两三个，全情绪 × 态度矩阵归 P3-01。
+
+    无离散情绪时返回空串，行为帧完全按旧逻辑（兼容承诺）。
+    """
+    from .emotion_state import emotion_hint
+
+    items = emotions if emotions is not None else getattr(s, "discrete_emotions", None)
+    if not items:
+        return ""
+    maps = [
+        it if isinstance(it, dict) else {"emotion": it.emotion, "intensity": it.intensity}
+        for it in items
+    ]
+    hint = emotion_hint(maps)
+    hard = [m for m in maps if m["emotion"] in ("anger", "hurt") and m["intensity"] >= 0.5]
+    soft = [m for m in maps if m["emotion"] == "tenderness" and m["intensity"] >= 0.5]
+    angry = [m for m in maps if m["emotion"] == "anger" and m["intensity"] >= 0.5]
+    parts = []
+    if hint:
+        parts.append(hint + "。")
+    if hard and soft:
+        # 锚点三：关心与受伤并存——不抹掉矛盾感
+        parts.append(
+            "你现在心里有点矛盾——既有火气或委屈，又有软的地方，别强行只演一种："
+            "话可以带点刺，但那份关心藏不住，也不必藏死"
+        )
+    elif hard:
+        # 锚点一：被冒犯后的硬度——短、硬、收幽默，但不越界
+        parts.append(
+            "这一轮你的话可以硬一点、短一点，幽默先收住；保持分寸，不骂人、不翻旧账，立场站稳就行"
+        )
+    elif soft and not angry:
+        # 锚点二：柔软时的自然流露
+        parts.append(
+            "这一轮你可以软一点：主动关心一句、语气放轻，但别突然黏得不像你"
+        )
+    return "；".join(parts)
+
+
 def build_behavior_frame(state: AgentState, season_line: str = "") -> BehaviorFrame:
     """根据状态生成一轮行为帧。season_line 由 seasons.current_season 预先算好。"""
     return BehaviorFrame(
@@ -262,4 +306,5 @@ def build_behavior_frame(state: AgentState, season_line: str = "") -> BehaviorFr
         rest_line=_rest_line(state),
         tension_line=_tension_line(state),
         season_line=season_line,
+        emotion_line=_emotion_line(state),
     )

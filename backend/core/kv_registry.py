@@ -50,6 +50,8 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("c4:last_bond_rank", "unlock", "解锁检测的上次羁绊锚点", "runtime"),
     KvKeySpec("sticker:last_message_id", "stickers", "贴纸频率控制的消息间隔锚点", "runtime"),
     KvKeySpec("state:rest", "state", "精力/休息状态机（是否在休息）", "runtime", export=True),
+    KvKeySpec("state:emotions", "emotion_state", "离散情绪有界快照（P1-03，≤3 条活跃情绪）", "runtime", export=True),
+    KvKeySpec("state:emotion_repairs", "emotion_state", "每来源一次性修复记录（道歉/安抚）", "runtime"),
     KvKeySpec("state:relationship_tension", "state", "关系张力 0-100（修复期语气依据）", "runtime", export=True),
     KvKeySpec("state:emotion_memory", "state", "情绪记忆（跨天连续的心情素材）", "runtime", export=True),
     KvKeySpec("state:emotion_archive", "state", "情绪记忆归档（可回看的历史情绪）", "runtime", export=True),
