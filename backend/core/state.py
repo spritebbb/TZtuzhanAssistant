@@ -67,6 +67,9 @@ class AgentState:
     tension: int = 0          # 关系张力 0-100；冲突后不会随普通心情漂移瞬间消失
     repair_hint: str = ""     # 最近一次修复方式，供行为层自然反馈
     last_update: str | None = None  # 上次更新时间 ISO
+    # 离散情绪（P1-03）派生快照：list[dict]（emotion/intensity/…），不落库，
+    # 由 load_state 顺带投影；无活跃情绪时为空，消费方完全走旧逻辑。
+    discrete_emotions: list[dict] = field(default_factory=list)
 
     # ---- 派生（不落库，消费方用）----
     @property
@@ -356,6 +359,17 @@ def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
     elif tension > 0:
         emotion = min(emotion, 44)
 
+    # P1-03 离散情绪投影（只读，失败静默回退空——不影响旧路径）
+    discrete: list[dict] = []
+    try:
+        from dataclasses import asdict as _asdict
+
+        from .emotion_state import load_emotions as _load_emotions
+
+        discrete = [_asdict(i) for i in _load_emotions(user_id)]
+    except Exception:
+        discrete = []
+
     return AgentState(
         emotion=emotion,
         energy=energy,
@@ -369,6 +383,7 @@ def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
         tension=tension,
         repair_hint=str(tension_state.get("last_repair", "")),
         last_update=updated,
+        discrete_emotions=discrete,
     )
 
 
