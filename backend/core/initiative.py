@@ -674,6 +674,7 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         return maybe_orchestrate_surprise(uid)
 
     for proposer in (
+        _maybe_rhythm_followup,
         maybe_follow_up_promise,
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
@@ -683,6 +684,62 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         if text:
             return True
     return False
+
+
+async def _maybe_rhythm_followup(user_id: str) -> str | None:
+    """P2-05A 有期限追发：上一轮被打断的「待补一句」，20 分钟后可发、2 小时过期。
+
+    复用 _arbited_proactive 的空闲/额度/勿扰仲裁；无追发时零开销返回。
+    """
+    from .conversation_rhythm import mark_sent, ready_followups
+
+    ready = ready_followups(user_id)
+    if not ready:
+        return None
+    item = ready[0]
+    hint = item.get("hint", "")
+
+    async def produce() -> str | None:
+        user = db.get_user(user_id)
+        if not user:
+            return None
+        affection_val = user["affection"] or 0
+        sys_prompt = build_system_prompt(
+            stage=stage_of(affection_val),
+            address=user["nickname_pref"] or "",
+            lover_confirm=bool(user["lover_confirm"]),
+            first_chat=False,
+            affection=affection_val,
+            user_id=user_id,
+        )
+        return await chat(
+            [
+                {"role": "system", "content": sys_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"刚才聊到一半有句话没说完：{hint}。"
+                        "现在自然地把这半句补上——像想起什么随口接着说，"
+                        "一句就够，别解释「我刚才想说什么」，别加括号动作。"
+                    ),
+                },
+            ],
+            max_tokens=60,
+            temperature=0.85,
+        )
+
+    text = await _arbited_proactive(
+        user_id,
+        source="initiative:rhythm_followup",
+        idle_minutes=5,
+        done_today=lambda: False,
+        produce=produce,
+        on_delivered=lambda: mark_sent(user_id, item["origin_turn_id"]),
+    )
+    if text is None:
+        # 没发出去（额度/勿扰）：保留实例等下个窗口，过期自然作废
+        return None
+    return text
 
 
 # ---- 主动归档建议（会话过长时，菟菚主动提醒归档，而非擅自清空）----

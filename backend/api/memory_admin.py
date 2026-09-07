@@ -172,6 +172,19 @@ async def api_list_preferences(include_revoked: bool = Query(False)):
     return {"ok": True, "items": items}
 
 
+@router.get("/address-candidates")
+async def api_address_candidates():
+    """可查看的称呼候选与形成来源；不展示等级或数值进度。"""
+    from ..core.affection import stage_of
+    from ..core.conversation_rhythm import address_candidates
+
+    uid = active_user_id()
+    user = await asyncio.to_thread(db.get_user, uid)
+    stage = stage_of((user["affection"] if user else 0) or 0)
+    data = await asyncio.to_thread(address_candidates, uid, stage=stage)
+    return {"ok": True, **data}
+
+
 @router.post("/preferences")
 async def api_create_preference(
     category: str = Body(...),
