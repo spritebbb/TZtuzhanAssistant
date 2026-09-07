@@ -18,6 +18,7 @@ from .base import ToolRegistry
 
 # 工具循环轮次上限
 MAX_LOOPS = 3
+MAX_TOOL_CALLS = 8
 
 # 文本协议正则（回退模式用）
 _TOOL_BLOCK_RE = re.compile(r"```tool[ \t]*(?:\n| )([\s\S]*?)```", re.MULTILINE)
@@ -306,25 +307,45 @@ def _clean_args(call: dict, user_text: str) -> dict:
     return args
 
 
-async def _execute_calls(calls: list[dict], fallback: str = "") -> str:
-    """并行执行工具调用，返回结果文本块。"""
-    import asyncio
+def _call_fingerprint(name: str, args: dict) -> str:
+    """同一工具循环内的确定性调用键，防模型重试重复副作用。"""
+    payload = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"{name}:{payload}"
 
+
+async def _execute_calls(
+    calls: list[dict], fallback: str = "", *,
+    seen: dict[str, str] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    remaining: int = MAX_TOOL_CALLS,
+) -> tuple[str, int]:
+    """顺序执行文本协议调用；支持取消、总上限和同调用结果复用。"""
     specs = {t.name: t for t in ToolRegistry.list()}
+    seen = seen if seen is not None else {}
 
     def _prepare(c: dict) -> dict:
         filled = _fill_missing_args(c, fallback, getattr(specs.get(c["name"]), "input_schema", None))
         return _clean_args({"name": c["name"], "arguments": filled}, fallback)
 
-    results = await asyncio.gather(*[
-        ToolRegistry.execute(c["name"], _prepare(c))
-        for c in calls
-    ])
     parts = []
-    for i, (c, r) in enumerate(zip(calls, results)):
-        body = r.output if r.ok else (r.error or "调用失败")
-        parts.append(f"[工具结果 {i + 1}/{len(results)} - {c['name']}]\n{body}")
-    return "\n\n".join(parts)
+    executed = 0
+    for i, c in enumerate(calls):
+        if is_cancelled and is_cancelled():
+            parts.append("[工具执行已取消]")
+            break
+        args = _prepare(c)
+        fingerprint = _call_fingerprint(c["name"], args)
+        if fingerprint in seen:
+            body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
+        elif executed >= remaining:
+            body = "调用上限已用尽，本次未执行"
+        else:
+            result = await ToolRegistry.execute(c["name"], args)
+            body = result.output if result.ok else (result.error or "调用失败")
+            seen[fingerprint] = body
+            executed += 1
+        parts.append(f"[工具结果 {i + 1}/{len(calls)} - {c['name']}]\n{body}")
+    return "\n\n".join(parts), executed
 
 
 def _tool_hint_text() -> str:
@@ -345,6 +366,7 @@ async def run_tool_loop(
     final_instruction: list[dict] | None = None,
     call_native: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> str:
     """执行完整工具循环，返回最终 LLM 文本。
 
@@ -375,14 +397,14 @@ async def run_tool_loop(
         return await _run_native(
             work, call_native, tools,
             max_loops=max_loops, final_instruction=final_instruction,
-            on_progress=on_progress,
+            on_progress=on_progress, is_cancelled=is_cancelled,
         )
 
     # 回退：文本协议模式
     return await _run_text(
         work, call_llm,
         max_loops=max_loops, final_instruction=final_instruction,
-        on_progress=on_progress,
+        on_progress=on_progress, is_cancelled=is_cancelled,
     )
 
 
@@ -394,6 +416,7 @@ async def _run_native(
     max_loops: int,
     final_instruction: list[dict] | None,
     on_progress: Callable[[dict], Any] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> str:
     """原生 Function Calling 循环。"""
     fallback = _extract_last_user(work)
@@ -420,7 +443,11 @@ async def _run_native(
     else:
         work.append({"role": "system", "content": _REINFORCE})
     loop_count = 0
+    call_count = 0
+    seen: dict[str, str] = {}
     while loop_count < max_loops:
+        if is_cancelled and is_cancelled():
+            return "（操作已取消）"
         loop_count += 1
         await _progress({"type": "thinking"})
         try:
@@ -453,13 +480,23 @@ async def _run_native(
         # 每个工具结果一条独立 tool 消息（id 与 tool_calls 一一对应）
         specs = {t.name: t for t in ToolRegistry.list()}
         for c in calls:
+            if is_cancelled and is_cancelled():
+                return "（操作已取消）"
             filled = _fill_missing_args(c, fallback, getattr(specs.get(c["name"]), "input_schema", None))
             filled = _clean_args({"name": c["name"], "arguments": filled}, fallback)
             logger.info("[工具循环] 调用 {} 参数={}", c["name"], json.dumps(filled, ensure_ascii=False)[:300])
             # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
             await _progress({"type": "tool", "name": c["name"]})
-            r = await ToolRegistry.execute(c["name"], filled)
-            body = r.output if r.ok else (r.error or "调用失败")
+            fingerprint = _call_fingerprint(c["name"], filled)
+            if fingerprint in seen:
+                body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
+            elif call_count >= MAX_TOOL_CALLS:
+                body = "调用上限已用尽，本次未执行"
+            else:
+                result = await ToolRegistry.execute(c["name"], filled)
+                body = result.output if result.ok else (result.error or "调用失败")
+                seen[fingerprint] = body
+                call_count += 1
             await _progress({"type": "tool_done", "name": c["name"]})
             work.append({
                 "role": "tool",
@@ -470,6 +507,8 @@ async def _run_native(
             break
 
     # 循环用尽：无 tools 再生成一次最终回复
+    if is_cancelled and is_cancelled():
+        return "（操作已取消）"
     await _progress({"type": "thinking"})
     if final_instruction:
         work.extend(list(final_instruction))
@@ -484,6 +523,7 @@ async def _run_text(
     max_loops: int,
     final_instruction: list[dict] | None,
     on_progress: Callable[[dict], Any] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> str:
     """文本协议回退循环。"""
     work = list(work)
@@ -499,7 +539,11 @@ async def _run_text(
             pass
 
     loop_count = 0
+    call_count = 0
+    seen: dict[str, str] = {}
     while loop_count < max_loops:
+        if is_cancelled and is_cancelled():
+            return "（操作已取消）"
         loop_count += 1
         await _progress({"type": "thinking"})
         raw = await call_llm(work)
@@ -515,7 +559,11 @@ async def _run_text(
         # 推「开始调用工具」进度（文本回退模式批量并行执行，逐条推名字）
         for c in calls:
             await _progress({"type": "tool", "name": c.get("name", "")})
-        result_block = await _execute_calls(calls, fallback)
+        result_block, executed = await _execute_calls(
+            calls, fallback, seen=seen, is_cancelled=is_cancelled,
+            remaining=max(0, MAX_TOOL_CALLS - call_count),
+        )
+        call_count += executed
         for c in calls:
             await _progress({"type": "tool_done", "name": c.get("name", "")})
         work.append({"role": "assistant", "content": clean or "（我查一下）"})
@@ -527,6 +575,8 @@ async def _run_text(
             "如果还需要更多信息，可以再调用工具；否则直接给出最终回复。",
         })
 
+    if is_cancelled and is_cancelled():
+        return "（操作已取消）"
     await _progress({"type": "thinking"})
     if final_instruction:
         work.extend(list(final_instruction))
