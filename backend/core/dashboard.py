@@ -70,12 +70,12 @@ def dashboard_summary(user_id: str, days: int = 30) -> dict:
         ).fetchall()
         promises = [dict(row) for row in db.conn.execute(
             "SELECT id, content, follow_up, created_at FROM promises "
-            "WHERE user_id = ? AND status = 'pending' "
+            "WHERE user_id = ? AND status IN ('pending','open') "
             "ORDER BY CASE WHEN follow_up = '' THEN 1 ELSE 0 END, follow_up, id LIMIT 5",
             (user_id,),
         ).fetchall()]
         pending_promise_count = int(db.conn.execute(
-            "SELECT COUNT(*) FROM promises WHERE user_id = ? AND status = 'pending'",
+            "SELECT COUNT(*) FROM promises WHERE user_id = ? AND status IN ('pending','open')",
             (user_id,),
         ).fetchone()[0])
         diary_count = int(db.conn.execute(
