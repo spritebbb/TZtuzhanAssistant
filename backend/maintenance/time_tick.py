@@ -156,40 +156,46 @@ def run(argv: list[str] | None = None) -> int:
     scope_key = f"persona::{persona_id}"
     user_id = scoped_user_id(DEFAULT_USER_ID, persona_id)
 
-    # 窗口：--once 只处理当前小时；默认补跑缺失周期（限窗限次）
-    current_hour = _utc_hour_floor(now)
-    if args.once:
-        periods = [_iso(current_hour)]
-    else:
-        window_start = current_hour - timedelta(hours=max(1, args.max_hours))
-        periods = _pending_periods(db.conn, scope_key, window_start,
-                                   min(current_hour, until), limit=args.max_hours)
-        if until > current_hour:
-            periods.append(_iso(current_hour))
-        periods = sorted(set(periods))
+    # 应用内启动补跑运行在线程池中，但仍与 API 共用全局连接。该连接不允许
+    # 两个线程交叉开启事务，因此从读取待办周期到完成认领都持有同一把可重入锁。
+    # 独立计划任务进程之间仍由 job_runs 的租约和 SQLite 写锁协调。
+    with db._lock:
+        # 窗口：--once 只处理当前小时；默认补跑缺失周期（限窗限次）
+        current_hour = _utc_hour_floor(now)
+        if args.once:
+            periods = [_iso(current_hour)]
+        else:
+            window_start = current_hour - timedelta(hours=max(1, args.max_hours))
+            periods = _pending_periods(db.conn, scope_key, window_start,
+                                       min(current_hour, until), limit=args.max_hours)
+            if until > current_hour:
+                periods.append(_iso(current_hour))
+            periods = sorted(set(periods))
 
-    if args.dry_run:
-        print(json.dumps({"dry_run": True, "scope": scope_key, "periods": periods},
-                         ensure_ascii=False))
-        return 0
+        if args.dry_run:
+            print(json.dumps({"dry_run": True, "scope": scope_key, "periods": periods},
+                             ensure_ascii=False))
+            return 0
 
-    summary = {"scope": scope_key, "user": user_id, "attempted": 0,
-               "succeeded": 0, "skipped": 0, "failed": 0, "events": 0}
-    owner = f"tick-{os.getpid()}-{int(now.timestamp())}"
-    for period in periods:
-        period_dt = datetime.fromisoformat(period)
-        if not _claim(db.conn, scope_key, period, owner, now):
-            summary["skipped"] += 1
-            continue
-        summary["attempted"] += 1
-        try:
-            result = advance_schedule(user_id, min(period_dt + timedelta(hours=1), until))
-            summary["events"] += int(result.get("events", 0))
-            _finish(db.conn, scope_key, period, True, now, 1)
-            summary["succeeded"] += 1
-        except Exception:
-            _finish(db.conn, scope_key, period, False, now, 1)
-            summary["failed"] += 1
+        summary = {"scope": scope_key, "user": user_id, "attempted": 0,
+                   "succeeded": 0, "skipped": 0, "failed": 0, "events": 0}
+        owner = f"tick-{os.getpid()}-{int(now.timestamp())}"
+        for period in periods:
+            period_dt = datetime.fromisoformat(period)
+            if not _claim(db.conn, scope_key, period, owner, now):
+                summary["skipped"] += 1
+                continue
+            summary["attempted"] += 1
+            try:
+                result = advance_schedule(user_id, min(period_dt + timedelta(hours=1), until))
+                summary["events"] += int(result.get("events", 0))
+                _finish(db.conn, scope_key, period, True, now, 1)
+                summary["succeeded"] += 1
+            except Exception:
+                # advance_schedule 失败时不得让未提交事务泄漏给失败状态更新。
+                db.conn.rollback()
+                _finish(db.conn, scope_key, period, False, now, 1)
+                summary["failed"] += 1
 
     if args.json:
         print(json.dumps(summary, ensure_ascii=False))
