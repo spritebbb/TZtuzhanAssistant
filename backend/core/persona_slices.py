@@ -187,16 +187,20 @@ def build_state_view(
     energy: int | None = None,
     now: datetime | None = None,
     emotions: dict[str, float] | None = None,
+    trust: int | None = None,
+    intimacy: int | None = None,
 ) -> dict:
-    """从既有状态组装封闭键值视图。trust/intimacy 首版由 affection 过渡初始化。
+    """从既有状态组装封闭键值视图。
 
+    trust/intimacy 首选真源（P2-01 起由调用方传入 state 派生值）；
+    缺省时由 affection 过渡初始化（P2-01 前的兼容行为）。
     时间按部署机本地时间计算（与 persona._now_line 同一口径，部署时区 Asia/Shanghai）。
     """
     now = now or datetime.now()
     view: dict = {
         "derived_stage": stage,
-        "trust": int(affection),
-        "intimacy": int(affection),
+        "trust": int(trust if trust is not None else affection),
+        "intimacy": int(intimacy if intimacy is not None else affection),
         "time_of_day": time_of_day_of(now.hour),
         "quiet": False,
     }
@@ -331,11 +335,13 @@ def compile_slices(view: dict, *, profile_id: str, max_dynamic: int = MAX_DYNAMI
 
 def compile_prompt_lines(*, profile_id: str, stage: str, affection: int,
                          energy: int | None = None, now: datetime | None = None,
-                         emotions: dict[str, float] | None = None) -> list[str]:
+                         emotions: dict[str, float] | None = None,
+                         trust: int | None = None, intimacy: int | None = None) -> list[str]:
     """给 persona.py 的便捷入口：任何失败都返回空列表（保持旧 prompt 契约）。"""
     try:
         view = build_state_view(stage=stage, affection=affection, energy=energy,
-                                now=now, emotions=emotions)
+                                now=now, emotions=emotions,
+                                trust=trust, intimacy=intimacy)
         result = compile_slices(view, profile_id=profile_id)
         return result.lines if result else []
     except Exception:

@@ -240,45 +240,176 @@ def substage_of(trust: int, intimacy: int) -> tuple[str, str]:
     return stage, "晚"
 
 
+# ---- P2-01 信任 × 亲密二维关系（权威路径，ADR: docs/adr/M9-relationship-dimensions.md）----
+
+# 事件 → 两维增量（14.10 首版映射；rule_id 封闭集合）
+DIMENSION_RULES: dict[str, tuple[int, int]] = {
+    "promise_confirmed": (2, 0),          # 明确约定 → trust+2
+    "boundary_respected": (1, 0),         # 明确尊重边界 → trust+1
+    "user_self_disclosure": (0, 1),       # 用户自愿真实披露 → intimacy+1
+    "persona_disclosure_accepted": (0, 2),  # 被明确接纳的角色披露 → intimacy+2
+    "confirmed_offense": (-2, 0),         # 已确认冒犯 → trust-2（tension 走旧上限）
+    "manual": (0, 0),                     # 调试入口走 set_affection_absolute，不入账
+}
+# 每日聚合上限：正向每维 ≤ +4，负向每维 ≥ -6（超限截断）
+_DAILY_POSITIVE_CAP = 4
+_DAILY_NEGATIVE_CAP = -6
+
+
+def dimensions_of(user_id: str) -> tuple[int, int]:
+    """读取两维；NULL（未迁移）按旧 affection 回退（只读，不落库）。"""
+    u = db.get_user(user_id)
+    if not u:
+        return 0, 0
+    aff = int(u["affection"] or 0)
+    trust = u["trust"]
+    intimacy = u["intimacy"]
+    return (int(trust) if trust is not None else aff,
+            int(intimacy) if intimacy is not None else aff)
+
+
+def dimensions_stage(trust: int, intimacy: int) -> str:
+    """双门槛阶段：min(trust, intimacy) 按原 25/50/75 阈值。"""
+    return stage_of(min(int(trust), int(intimacy)))
+
+
+def bond_level_dimensions(trust: int, intimacy: int) -> tuple[str, str] | None:
+    """双门槛羁绊：min(trust, intimacy) 按原 75/85/95 阈值。"""
+    return bond_level(min(int(trust), int(intimacy)))
+
+
+def _daily_dimension_totals(user_id: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """当天有效（未撤销）ledger 的两维（正合计, 负合计），正负独立核算。"""
+    today = date.today().isoformat()
+    rows = db.conn.execute(
+        "SELECT trust_delta, intimacy_delta FROM relationship_dimension_ledger "
+        "WHERE user_id = ? AND occurred_at LIKE ? AND reverted_at IS NULL",
+        (user_id, f"{today}%"),
+    ).fetchall()
+    t = [int(r["trust_delta"]) for r in rows]
+    i = [int(r["intimacy_delta"]) for r in rows]
+    return ((sum(v for v in t if v > 0), sum(v for v in t if v < 0)),
+            (sum(v for v in i if v > 0), sum(v for v in i if v < 0)))
+
+
+def _clamp_daily(user_id: str, trust_delta: int, intimacy_delta: int) -> tuple[int, int]:
+    """把本笔增量截断到当日聚合上限内（正向 ≤ +4、负向 ≥ -6，正负独立）。"""
+    (t_pos, t_neg), (i_pos, i_neg) = _daily_dimension_totals(user_id)
+    out_t, out_i = trust_delta, intimacy_delta
+    if trust_delta > 0:
+        out_t = min(trust_delta, max(0, _DAILY_POSITIVE_CAP - t_pos))
+    elif trust_delta < 0:
+        out_t = max(trust_delta, _DAILY_NEGATIVE_CAP - t_neg)
+    if intimacy_delta > 0:
+        out_i = min(intimacy_delta, max(0, _DAILY_POSITIVE_CAP - i_pos))
+    elif intimacy_delta < 0:
+        out_i = max(intimacy_delta, _DAILY_NEGATIVE_CAP - i_neg)
+    return out_t, out_i
+
+
+def apply_relationship_event(user_id: str, event_id: int, rule_id: str) -> tuple[int, int]:
+    """事件入账：唯一 (user, event, rule) 幂等，clamp 后更新两维并同步 affection=min。
+
+    返回更新后的 (trust, intimacy)；重复入账直接返回当前值，不二次加分。
+    """
+    if rule_id not in DIMENSION_RULES:
+        raise ValueError(f"未登记的关系事件规则: {rule_id}")
+    raw_t, raw_i = DIMENSION_RULES[rule_id]
+    with db._lock:
+        cur = db.conn.execute(
+            "INSERT OR IGNORE INTO relationship_dimension_ledger "
+            "(user_id, event_id, rule_id, trust_delta, intimacy_delta, occurred_at) "
+            "VALUES (?, ?, ?, 0, 0, ?)",
+            (user_id, int(event_id), rule_id,
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        if cur.rowcount == 0:
+            return dimensions_of(user_id)  # 幂等：已入账过
+        delta_t, delta_i = _clamp_daily(user_id, raw_t, raw_i)
+        # 把实际增量（可能被日限截断）写回本行；rule_id 保留原始规则可追溯
+        db.conn.execute(
+            "UPDATE relationship_dimension_ledger SET trust_delta=?, intimacy_delta=? "
+            "WHERE user_id=? AND event_id=? AND rule_id=? AND reverted_at IS NULL",
+            (delta_t, delta_i, user_id, int(event_id), rule_id),
+        )
+        trust, intimacy = dimensions_of(user_id)
+        trust = max(0, min(100, trust + delta_t))
+        intimacy = max(0, min(100, intimacy + delta_i))
+        db.conn.execute(
+            "UPDATE users SET trust=?, intimacy=?, affection=? WHERE user_id=?",
+            (trust, intimacy, min(trust, intimacy), user_id),
+        )
+        db.conn.commit()
+        # 恋人达成检测（与旧 set_affection_absolute 同口径）
+        u = db.get_user(user_id)
+        if u and int(u["affection"] or 0) >= 75 and not u["lover_confirm"]:
+            db.set_lover_confirm(user_id)
+    return dimensions_of(user_id)
+
+
+def revert_relationship_event(user_id: str, event_id: int, rule_id: str) -> tuple[int, int]:
+    """撤销一笔入账：标记 reverted_at 并按该笔 delta 反向扣除（clamp）。"""
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT trust_delta, intimacy_delta FROM relationship_dimension_ledger "
+            "WHERE user_id=? AND event_id=? AND rule_id=? AND reverted_at IS NULL",
+            (user_id, int(event_id), rule_id),
+        ).fetchone()
+        if row is None:
+            return dimensions_of(user_id)
+        db.conn.execute(
+            "UPDATE relationship_dimension_ledger SET reverted_at=? "
+            "WHERE user_id=? AND event_id=? AND rule_id=?",
+            (datetime.now().isoformat(timespec="seconds"), user_id, int(event_id), rule_id),
+        )
+        trust, intimacy = dimensions_of(user_id)
+        trust = max(0, min(100, trust - int(row["trust_delta"])))
+        intimacy = max(0, min(100, intimacy - int(row["intimacy_delta"])))
+        db.conn.execute(
+            "UPDATE users SET trust=?, intimacy=?, affection=? WHERE user_id=?",
+            (trust, intimacy, min(trust, intimacy), user_id),
+        )
+        db.conn.commit()
+    return dimensions_of(user_id)
+
+
 def set_affection(user_id: str, value: int) -> None:
     """手动设置好感度（0-100），用于调试/调节。"""
     db.set_affection_absolute(user_id, value)
 
 
 def display(user_id: str) -> dict:
-    """好感度前端展示负载：数值 + 阶段/羁绊标签 + 下一阶段信息。
+    """关系前端展示负载（P2-01 二维版）。
 
-    value: 0-100 当前好感度
-    stage: 阶段名（初识/熟悉/亲密/恋人）
-    bond: 恋人羁绊等级（眷恋/热恋/白头）；非恋人阶段为空串
-    next/next_at: 下一阶段名与所需数值；已满级则两者为空
-    fill: 0-100 供进度条按绝对好感度渲染
+    trust/intimacy: 0-100 两维；value/fill: 兼容字段，取 min（双门槛派生）
+    stage/bond/substage: 双门槛阶段、羁绊与阶段内小档（14.10/14.10.1）
+    next/next_at: 主维视角的下一阶段
     """
-    u = db.get_user(user_id)
-    if not u:
-        return {"value": 0, "stage": STAGE_THRESHOLDS[0][1], "bond": "",
-                "next": STAGE_THRESHOLDS[1][1], "next_at": STAGE_THRESHOLDS[1][0], "fill": 0}
-    aff = u["affection"]
-    stage = stage_of(aff)
-    bl = bond_level(aff)
+    trust, intimacy = dimensions_of(user_id)
+    main = min(trust, intimacy)
+    stage = stage_of(main)
+    bl = bond_level(main)
     bond = bl[0] if bl else ""
-    # 找下一阶段（高于当前值的最近阈值）；恋人阶段后仍有羁绊梯度，统一指向"圆满"
+    _, substage = substage_of(trust, intimacy)
     nt_name, nt_at = "", None
     for t, s in STAGE_THRESHOLDS:
-        if t > aff:
+        if t > main:
             nt_name, nt_at = s, t
             break
     if nt_at is None:
         nt_name, nt_at = "圆满", 100
-    if aff >= 100:
+    if main >= 100:
         nt_name, nt_at = "", None
     return {
-        "value": aff,
+        "value": main,
+        "trust": trust,
+        "intimacy": intimacy,
         "stage": stage,
+        "substage": substage,
         "bond": bond,
         "next": nt_name,
         "next_at": nt_at,
-        "fill": aff,
+        "fill": main,
     }
 
 

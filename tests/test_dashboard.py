@@ -22,7 +22,8 @@ UID = "assistant-main"
 def _seed() -> None:
     db.ensure_user(UID)
     db.set_affection_absolute(UID, 24)
-    db.update_affection(UID, 3, "认真陪伴")
+    db.update_affection(UID, 3, "认真陪伴")   # P2-01 起仅 legacy 留痕，不刷两维
+    db.set_affection_absolute(UID, 27)        # 数值变化走两维调试入口
     db.set_mood(UID, 72)
     db.add_message(UID, "user", "今天一起做点什么")
     db.add_message(UID, "assistant", "先把你的计划摊开看看")
@@ -76,7 +77,9 @@ def _test_history_and_summary() -> None:
     assert summary["stats"]["unlock_total"] == 9
     assert summary["promises"][0]["content"] == "明天继续整理书架"
     assert len(summary["promises"]) == 5
-    assert summary["recent_affection"][0]["reason"] == "认真陪伴"
+    # P2-01：尾条为两维调试入口的手动设置；legacy 互动留痕带前缀仍在
+    assert summary["recent_affection"][0]["reason"].startswith("手动设置")
+    assert any("[legacy] 认真陪伴" in r["reason"] for r in summary["recent_affection"])
     print("[OK] C5 历史落账与 30 天聚合")
 
 

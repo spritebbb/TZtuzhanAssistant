@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """M8.7「不同版本的我们」：关系版本检查点的隐私白名单、不可变、确定性比较、
-人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema v16。"""
+人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema v17。"""
 from __future__ import annotations
 
 import asyncio
@@ -64,7 +64,7 @@ def _seed_real_content(uid: str) -> None:
     """播种消息/事实/事件/日记/产物/情绪记忆——只该以计数出现，不该以内容出现。"""
     db.ensure_user(uid)
     now = _now_iso()
-    db.update_affection(uid, 10, "种子好感")
+    db.set_affection_absolute(uid, 10)
     with db._lock:
         db.conn.execute(
             "INSERT INTO messages (user_id, role, content, ts) VALUES (?, 'user', ?, ?)",
@@ -167,7 +167,7 @@ def _test_capture_whitelist_and_privacy() -> None:
 def _test_immutability_and_exact_compare() -> None:
     before_view = rver.capture_version(UID, "第二次检查点")
     # 检查点之后真实生活继续：状态变化 + 新记录
-    db.update_affection(UID, 45, "继续积累")  # 10 → 55，初识 → 亲密
+    db.set_affection_absolute(UID, 55)  # 10 → 55，初识 → 亲密（P2-01 两维调试入口）
     db.set_mood(UID, 80)                      # 心情档变化
     with db._lock:
         for i in range(3):
@@ -400,7 +400,7 @@ async def _test_api_list_maps_business_error() -> None:
 
 
 def _test_schema_v16() -> None:
-    assert _SCHEMA_VERSION == 16, "schema 应升到 v16"
+    assert _SCHEMA_VERSION == 17, "schema 应升到 v17"
     with db._lock:
         columns = {row[1] for row in db.conn.execute("PRAGMA table_info(relationship_versions)")}
     assert columns == {"id", "user_id", "label", "captured_at", "schema_version", "snapshot_json", "created_at"}
@@ -409,7 +409,7 @@ def _test_schema_v16() -> None:
 
     assert "relationship_versions" in CATEGORIES["life"]
     assert "relationship_versions" in reset_module._TABLES
-    print("[OK] schema v16：表结构、导出类别与双 reset 清单全部就位")
+    print("[OK] schema v17：表结构、导出类别与双 reset 清单全部就位")
 
 
 async def main() -> None:

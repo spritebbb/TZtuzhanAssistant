@@ -151,8 +151,10 @@ def build_system_prompt(
             try:
                 _st = _load_state(user_id, create_if_missing=False)
                 _energy = _st.energy
+                _trust, _intimacy = _st.trust, _st.intimacy
             except Exception:
                 _energy = None
+                _trust = _intimacy = affection
             _emotions: dict[str, float] = {}
             try:
                 from .emotion_state import active_emotions_map
@@ -163,6 +165,7 @@ def build_system_prompt(
             _lines = _compile_lines(
                 profile_id=_pid(user_id), stage=stage, affection=affection,
                 energy=_energy, emotions=_emotions,
+                trust=_trust, intimacy=_intimacy,
             )
             if _lines:
                 slices_part = (

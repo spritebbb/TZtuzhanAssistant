@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 16
+_SCHEMA_VERSION = 17
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_batch_date TEXT,
     style_profile   TEXT,
     mood_value      INTEGER NOT NULL DEFAULT 60,
-    mood_updated_at TEXT
+    mood_updated_at TEXT,
+    trust           INTEGER,            -- P2-01 二维关系：信任 0-100（NULL=未迁移）
+    intimacy        INTEGER             -- P2-01 二维关系：亲密 0-100
 );
 CREATE TABLE IF NOT EXISTS messages (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -511,6 +513,20 @@ CREATE TABLE IF NOT EXISTS job_runs (
     updated_at TEXT NOT NULL,
     UNIQUE (scope_key, job_key, period_start)
 );
+-- P2-01 关系二维事件账本：唯一 (user_id, event_id, rule_id)，幂等入账，
+-- reverted_at 标记撤销；进入 E03 关系状态类别与 reset 清单。
+CREATE TABLE IF NOT EXISTS relationship_dimension_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    event_id INTEGER NOT NULL,
+    rule_id TEXT NOT NULL,
+    trust_delta INTEGER NOT NULL DEFAULT 0,
+    intimacy_delta INTEGER NOT NULL DEFAULT 0,
+    occurred_at TEXT NOT NULL,
+    reverted_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dim_ledger_unique
+    ON relationship_dimension_ledger(user_id, event_id, rule_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -566,6 +582,16 @@ class UserDB:
             )
         except sqlite3.OperationalError:
             pass
+        # P2-01：users 补 trust/intimacy 两列（NULL=未迁移，首次回填=旧 affection）
+        for col in ("trust", "intimacy"):
+            try:
+                self.conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER")
+            except sqlite3.OperationalError:
+                pass
+        # P2-01 首次迁移：仅回填 NULL（判据=trust IS NULL），二次运行零副作用
+        self.conn.execute(
+            "UPDATE users SET trust = affection, intimacy = affection WHERE trust IS NULL"
+        )
         # 兼容旧库：long_memory 补 pinned 列（用户显式要求记住的记忆不被轮转清理）
         try:
             self.conn.execute(
@@ -787,20 +813,22 @@ class UserDB:
 
     @_locked
     def update_affection(self, user_id: str, delta: int, reason: str) -> None:
+        """P2-01 起降级为 legacy 互动统计：只记 affection_log，不改写关系数值。
+
+        两维（trust/intimacy）只经 apply_relationship_event（事件入账）与
+        set_affection_absolute（调试入口）变化；旧频次奖励路径调用本方法
+        仅留痕，不再刷分（14.10：普通聊天频次不直接刷两维）。
+        """
         now = datetime.now().isoformat(timespec="seconds")
         self.conn.execute(
             "INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,)
         )
-        self.conn.execute(
-            "UPDATE users SET affection = MAX(0, MIN(100, affection + ?)) WHERE user_id = ?",
-            (delta, user_id),
-        )
-        value = int(self.conn.execute(
+        row = self.conn.execute(
             "SELECT affection FROM users WHERE user_id = ?", (user_id,)
-        ).fetchone()[0])
+        ).fetchone()
         self.conn.execute(
             "INSERT INTO affection_log (user_id, delta, reason, ts, value) VALUES (?, ?, ?, ?, ?)",
-            (user_id, delta, reason, now, value),
+            (user_id, delta, f"[legacy] {reason}", now, int(row["affection"] or 0)),
         )
         self.conn.commit()
 
@@ -928,16 +956,18 @@ class UserDB:
 
     @_locked
     def set_affection_absolute(self, user_id: str, value: int) -> None:
-        """直接把好感度设为指定值（0-100），用于手动调节/调试。"""
+        """手动设置好感度（0-100），用于调试/调节：两维同值，affection 同步 min。"""
         value = max(0, min(100, int(value)))
         self.ensure_user(user_id)
         cur = self.get_user(user_id)["affection"]
         self.conn.execute(
-            "UPDATE users SET affection = ? WHERE user_id = ?", (value, user_id)
+            "UPDATE users SET trust = ?, intimacy = ?, affection = ? WHERE user_id = ?",
+            (value, value, value, user_id),
         )
         self.conn.execute(
             "INSERT INTO affection_log (user_id, delta, reason, ts, value) VALUES (?, ?, ?, ?, ?)",
-            (user_id, value - cur, "手动设置", datetime.now().isoformat(timespec="seconds"), value),
+            (user_id, value - cur, "手动设置（两维同值）",
+             datetime.now().isoformat(timespec="seconds"), value),
         )
         self.conn.commit()
         u = self.get_user(user_id)
@@ -1494,6 +1524,7 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
+                "relationship_dimension_ledger",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
