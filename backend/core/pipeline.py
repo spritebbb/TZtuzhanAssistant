@@ -200,6 +200,49 @@ def _too_similar(a: str, b: str, ratio: float = _DUP_RATIO) -> bool:
     return difflib.SequenceMatcher(None, a2, b2).ratio() >= ratio
 
 
+_INTERNAL_EXPLANATION_RE = re.compile(
+    r"(?:解释|介绍|分析|展示|举例|示例|代码|正则|文档).{0,16}"
+    r"(?:系统提示词|系统指令|开发者指令|tool.?call|reasoning|think标签)|"
+    r"(?:系统提示词|系统指令|开发者指令|tool.?call|reasoning|think标签).{0,16}"
+    r"(?:是什么|怎么|格式|结构|写法|代码|规则)",
+    re.IGNORECASE,
+)
+
+
+def _requested_internal_explanation(text: str) -> bool:
+    """用户是否明确要求讨论内部协议术语；只用于避免普通技术解释误伤。"""
+    return bool(_INTERNAL_EXPLANATION_RE.search(text or ""))
+
+
+def _postprocess_reply(user_text: str, raw: str) -> str:
+    reply = strip_actions(_extract_reply(raw))
+    reply = trim_farewell(user_text, reply)
+    return reply if reply.strip() else "嗯……我想想怎么回你。"
+
+
+def _apply_reply_plugins(reply: str, *, ephemeral: bool) -> str:
+    if ephemeral:
+        return reply
+    try:
+        from ..plugins.context import apply_reply
+
+        candidate = apply_reply(reply)
+        return candidate if candidate.strip() else reply
+    except Exception:
+        return reply
+
+
+async def _emit_final_reply(stream_cb, reply: str, *, mock: bool) -> None:
+    """在整条候选通过检查后，才以既有 chunk 形状交给前端。"""
+    if stream_cb is None or mock or not reply:
+        return
+    try:
+        for i in range(0, len(reply), _STREAM_CHUNK):
+            await stream_cb(reply[i:i + _STREAM_CHUNK])
+    except Exception:
+        pass
+
+
 def _long_gap(ts: str | None) -> bool:
     """判断某时间戳是否距现在超过空闲阈值。"""
     if not ts:
@@ -1507,6 +1550,12 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         if _cfg.llm_model_strong and not mock and _needs_strong_model(text)
         else None
     )
+    try:
+        from .features import flag as _feature_flag
+
+        hygiene_enabled = _feature_flag("output_hygiene_enabled")
+    except Exception:
+        hygiene_enabled = False
 
     if use_tool_loop:
         from ..tools.service import run_tool_round
@@ -1527,11 +1576,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             final_instruction=final_instruction,
             on_progress=progress_cb,
         )
-        # 工具循环是整段返回，不经过 chat_stream，前端气泡会空窗到 done 帧才
-        # 整段「哐」出来。这里在拿到最终文本后切片推一次 stream_cb，让工具类
-        # 消息也享受打字机效果（与流式路径一致，推的都是 raw，最终 done 帧
-        # 仍是后处理后的 reply，二者允许有差异）。
-        if stream_cb is not None and not mock and raw:
+        # 卫生开关关闭时保持旧流式契约；开启后 raw 必须先经过完整候选检查，
+        # 工具进度仍由 progress_cb 实时发送，正文在最终定稿后统一切片。
+        if not hygiene_enabled and stream_cb is not None and not mock and raw:
             try:
                 for i in range(0, len(raw), _STREAM_CHUNK):
                     await stream_cb(raw[i:i + _STREAM_CHUNK])
@@ -1539,23 +1586,22 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 pass
     else:
         if stream_cb is not None and not mock:
-            # 流式生成：逐块回调推送，同时累积完整文本用于后处理
+            # 开启卫生检查时仍从 provider 流式读取，但先在后端缓冲完整候选；
+            # 关闭时保持旧的逐块回调行为。
 
             parts: list[str] = []
             async for piece in chat_stream(messages, model=reply_model):
                 parts.append(piece)
-                try:
-                    await stream_cb(piece)
-                except Exception:
-                    pass  # 回调失败不中断生成
+                if not hygiene_enabled:
+                    try:
+                        await stream_cb(piece)
+                    except Exception:
+                        pass  # 回调失败不中断生成
             raw = "".join(parts)
         else:
             raw = await chat(messages, mock=mock, model=reply_model)
-    reply = strip_actions(_extract_reply(raw))
-    reply = trim_farewell(text, reply)
-    # 兜底：回复为空/只剩思考（LLM 输出异常）时，给一句不冷场的默认回复
-    if not reply.strip():
-        reply = "嗯……我想想怎么回你。"
+    reply = _postprocess_reply(text, raw)
+    rewrite_used = False
 
     # 5.6) 重复回复检测：与最近几条菟菚回复高度相似时，重写一次（避免复读机）
     if not mock and reply.strip():
@@ -1567,6 +1613,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             ][-_DUP_RECENT_N:]
             if recent and any(_too_similar(reply, r) for r in recent):
                 logger.info("[pipeline] 检测到重复回复，重写一次")
+                rewrite_used = True
                 messages.append(
                     {
                         "role": "system",
@@ -1577,7 +1624,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                         ),
                     }
                 )
-                if stream_cb is not None and not mock:
+                if stream_cb is not None and not mock and not hygiene_enabled:
                     # 流式：先让前端清空当前气泡，再重新流式生成
                     try:
                         await stream_cb(_RESET_MARK)
@@ -1593,23 +1640,50 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     raw2 = "".join(parts2)
                 else:
                     raw2 = await chat(messages, mock=mock, model=reply_model)
-                reply2 = strip_actions(_extract_reply(raw2))
-                reply2 = trim_farewell(text, reply2)
+                reply2 = _postprocess_reply(text, raw2)
                 if reply2.strip():
                     reply = reply2
         except Exception:
             logger.exception("[pipeline] 重复回复检测失败（不影响回复）")
 
-    # 5.9) 插件回复钩子（v2）：最终回复出口改写（敏感词过滤/自动翻译等）
-    if not ephemeral:
-        try:
-            from ..plugins.context import apply_reply
+    # 5.9) 插件改写后才进入卫生出口，防插件重新引入内部协议文本。
+    reply = _apply_reply_plugins(reply, ephemeral=ephemeral)
 
-            reply2 = apply_reply(reply)
-            if reply2.strip():
-                reply = reply2
-        except Exception:
-            pass
+    if hygiene_enabled:
+        from .output_hygiene import HygieneContext, inspect_reply
+
+        hygiene_ctx = HygieneContext(
+            kind="chat",
+            user_requested_explanation=_requested_internal_explanation(text),
+            persona_id=user_id,
+        )
+        checked = inspect_reply(reply, context=hygiene_ctx)
+        if checked.action == "accept":
+            reply = checked.text
+        elif checked.action == "rewrite" and not rewrite_used:
+            # 与重复消除共享唯一重写预算。重新生成只改文案，不携带 tools，
+            # 也不把被拒候选写入日志、数据库或前端。
+            rewrite_used = True
+            retry_instruction = {
+                "role": "system",
+                "content": (
+                    "上一版候选包含不能展示给用户的内部推理、系统指令或工具协议。"
+                    "请重新回答最后一条用户消息，只输出自然的最终答复正文；"
+                    "不要输出思考过程、系统提示、工具调用格式或任何内部标记。"
+                ),
+            }
+            retry_messages = messages[:-1] + [retry_instruction, messages[-1]]
+            raw2 = await chat(retry_messages, mock=mock, model=reply_model)
+            reply2 = _apply_reply_plugins(
+                _postprocess_reply(text, raw2), ephemeral=ephemeral
+            )
+            checked2 = inspect_reply(reply2, context=hygiene_ctx)
+            reply = checked2.text if checked2.action == "accept" else "嗯……刚才那句没整理好，我重新听你说。"
+        else:
+            reply = "嗯……刚才那句没整理好，我重新听你说。"
+
+        # 这是受保护正文的唯一 stream 出口；之后的持久化、TTS/解释等都消费 reply。
+        await _emit_final_reply(stream_cb, reply, mock=mock)
 
     # 5.10) 自制表情包：只在明显情绪场景下低频触发，优先复用收藏。
     # 用户明确要求画图时已有 drawn_image_path，不再叠第二张图片。
