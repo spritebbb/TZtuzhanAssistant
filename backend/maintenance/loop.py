@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import shutil
 import sqlite3
 import time
@@ -26,6 +25,7 @@ _BACKUPS = _DATA / "backups"
 
 # 周期：checkpoint+备份间隔 / 图片清理间隔（秒）
 CHECKPOINT_INTERVAL = 6 * 3600      # 6 小时
+BACKUP_INTERVAL = 24 * 3600          # 每日至少一份成功快照
 CLEAN_IMGS_INTERVAL = 1 * 3600      # 1 小时
 BACKUP_KEEP = 7                      # 保留最近 7 份备份
 IMGS_MAX_MB = 300                    # 生图目录软上限（MB）
@@ -65,31 +65,15 @@ def checkpoint_all() -> None:
 
 
 def backup() -> Path | None:
-    """快照全部运行库 + imgs 到 backups/<时间戳>/，并清理超龄备份。"""
+    """创建带校验清单的每日快照；任一必需项失败则不留下成功目录。"""
     try:
-        _BACKUPS.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        dest = _BACKUPS / stamp
-        dest.mkdir(parents=True, exist_ok=True)
-        for name in ("bot.db", "sessions.db", "agent_tasks.db"):
-            src = _DATA / name
-            if src.exists():
-                # 用 SQLite 在线备份 API 替代直接拷贝：WAL 模式下能拿到
-                # 一致快照，不会拷到一半的脏数据
-                _backup_sqlite(src, dest / name)
-        if _IMGS.exists():
-            shutil.copytree(_IMGS, dest / "imgs", dirs_exist_ok=True)
-        if _SCREENSHOTS.exists():
-            shutil.copytree(_SCREENSHOTS, dest / "screenshots", dirs_exist_ok=True)
-        # Schema-upgrade snapshots live beside periodic snapshots but must not be
-        # consumed by the seven-periodic-backup rotation window.
-        snaps = sorted(
-            p for p in _BACKUPS.iterdir()
-            if p.is_dir() and re.fullmatch(r"\d{8}-\d{6}", p.name)
+        from .backup_manifest import create_periodic_backup, valid_backups
+
+        dest = create_periodic_backup(
+            _DATA, _BACKUPS, persona_file=config.persona_file, keep=BACKUP_KEEP
         )
-        for old in snaps[:-BACKUP_KEEP]:
-            shutil.rmtree(old, ignore_errors=True)
-        logger.info(f"[维护] 备份完成: {dest.name}（共 {len(snaps)} 份，保留最近 {BACKUP_KEEP} 份）")
+        count = len(valid_backups(_BACKUPS))
+        logger.info(f"[维护] 可验证备份完成: {dest.name}（共 {count} 份，保留最近 {BACKUP_KEEP} 份）")
         return dest
     except Exception as e:
         logger.warning(f"[维护] 备份失败: {e}")
@@ -339,14 +323,19 @@ def rotate_audit_log(max_bytes: int = AUDIT_LOG_MAX_BYTES, keep: int = AUDIT_LOG
 
 async def maintenance_loop() -> None:
     """后台周期任务：先跑一轮，再按各自间隔循环。"""
-    next_ckpt = time.time() + CHECKPOINT_INTERVAL
-    next_clean = time.time() + CLEAN_IMGS_INTERVAL
+    from .backup_manifest import backup_due
+
+    next_ckpt = 0.0
+    next_clean = 0.0
     while True:
         now = time.time()
         try:
             if now >= next_ckpt:
                 await asyncio.to_thread(checkpoint_all)
-                await asyncio.to_thread(backup)
+                if await asyncio.to_thread(
+                    backup_due, _BACKUPS, now=now, interval_sec=BACKUP_INTERVAL
+                ):
+                    await asyncio.to_thread(backup)
                 try:
                     from ..core.tts import clean_cache_async
                     await clean_cache_async()
