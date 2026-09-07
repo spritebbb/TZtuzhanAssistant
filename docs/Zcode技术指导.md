@@ -7,6 +7,8 @@
 > 2026-09-07 拍板补充：ZCode（GLM）经用户逐项确认 7 项决策并填入配套技术默认，见第 17 节汇总与各节内「2026-09-07 拍板/补充」标注。
 >
 > 2026-09-07 实施更新：波次 0 已由 Codex 完成。P0-01A=`ad110c2`、P0-01B=`9bbc224`、P0-02=`63c80b4`、P0-03=`a17471e`、P0-04A=`9720fca`、P0-04B=`0f2b64b`；P0-04C1 已真实运行，C2 因未配置 Tavily/Bocha 凭据按合同标记 unavailable。实现与验证档案见 `deliverables/P0-COMPLETION-2026-09-07.md`。后续接手不得重做这些切片，先审实际接口和回归。
+>
+> 2026-09-08 实施更新：P1、P2 已由 Codex 完成。P1-01=`9b8d39b`、P1-02=`87090f1`、P1-03=`7e9c12e`、P1-04=`b1b2c87`、P1-05=`1d25d0f`；P2-01=`88e6c28`、P2-02=`b8bb8c1`、P2-03=`36bc59b`、P2-04=`6d99a18`、P2-05=`b6b3f2b`、P2-06=`469bafc`。全量测试发现并修复开放约定看板计数（`8add635`）及应用内时间 tick 共享连接事务竞争（`58a6c28`）。后续接手应以实际 schema v21 和本文“实施结果”为准，不得重复实现 P1/P2。
 
 ## 1. 接手边界与当前基线
 
@@ -26,11 +28,11 @@
 |---|---|
 | M8.3–M8.7 收尾 | `f4d39ea` 已提交，不再是待提交工作树 |
 | M9-00 识图事实层 | `6081d67` 已提交，勿重做 |
-| 后端 | 70/70，Codex 实跑聚合测试，484.90 秒 |
+| 后端 | 89/89，Codex 实跑聚合测试，430.14 秒（2026-09-08） |
 | 前端 | Vitest 69/69；vue-tsc 与生产构建通过 |
 | 浏览器 | Playwright 7/7，临时数据目录 |
 | 人格 | 现有 golden set 48 场景；签名/魅力专项尚未建设 |
-| bot.db schema | `backend/core/userdb.py` 当前版本 13；其他数据库有各自版本 |
+| bot.db schema | `backend/core/userdb.py` 当前版本 21；其他数据库有各自版本 |
 | 工作区遗留 | `.zcode/` 本机配置未跟踪，不加入业务提交 |
 | 真实端点验证 | 本轮识图用 mock 验证，无真实视觉模型效果结论 |
 
@@ -114,12 +116,12 @@ git diff --check
 | P0-02 | 周期备份加固 | 已完成：`63c80b4` |
 | P0-03 | 行为签名 eval | 已完成：`a17471e`，53 条离线样本 |
 | P0-04 | 槽位路由 + 模型/搜索实测 | A/B 已完成：`9720fca`/`0f2b64b`；C1 已实测，C2 缺凭据 unavailable |
-| P1-01 | 人格侧写、正典与编译切片 | P0-03；内容与运行时分开 |
-| P1-02 | 语境注册表渐进接入 | P1-01，先只迁移一个来源 |
-| P1-03 | 情绪状态基础 | 先 ADR，再与行为帧集成 |
-| P1-04 | 行程状态机与时间 tick | P1-01；先状态，再跨进程调度 |
-| P1-05 | 纪念日/季节换挡 | P1-03/P1-04 |
-| P2-01～06 | 二维关系、校准、对称约定、链式事件、节奏仪式、重逢 | 按第 6 节逐项推进 |
+| P1-01 | 人格侧写、正典与编译切片 | 已完成 `9b8d39b` |
+| P1-02 | 语境注册表渐进接入 | 已完成 `87090f1` |
+| P1-03 | 情绪状态基础 | 已完成 `7e9c12e` |
+| P1-04 | 行程状态机与时间 tick | 已完成 `b1b2c87`；并发修复 `58a6c28` |
+| P1-05 | 纪念日/季节换挡 | 已完成 `1d25d0f` |
+| P2-01～06 | 二维关系、校准、对称约定、链式事件、节奏仪式、重逢 | 已全部完成 `88e6c28`～`469bafc` |
 | P3-01～05 | 全情绪矩阵、知识内化/求证、TTS、数据安全、演化/遥测 | 主线基础完成后独立交付 |
 | G01～04 | 记忆质感、副语言、悬念、求助 | 明确补设计边界，不伪装成已拍板细节 |
 
@@ -306,6 +308,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_calendar_modulation.py ;; .venv/Scri
 VERIFY: .venv/Scripts/python.exe tests/test_relationship_dimensions.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py ;; .venv/Scripts/python.exe tests/test_relationship_versions.py ;; .venv/Scripts/python.exe tests/test_unlocks.py
 ```
 
+**实施结果（`88e6c28`，schema v17）**：`users.trust/intimacy` 首次仅从旧 affection 回填 NULL，后续由 `relationship_dimension_ledger` 按来源事件和规则版本幂等记账，单维分别执行每日正负上限；兼容 affection 始终同步为 `min(trust,intimacy)`，旧消费者自然遵守双门槛。`affection.py` 提供事件应用、反向 delta 撤销、阶段/子阶段派生，`state.py`、`behavior.py`、人格切片、解锁、成长展示、关系快照和导出恢复统一消费真实两维。8 个子阶段时刻经既有解锁队列自然表达，不在收藏页暴露数值。迁移、reset 和兼容规则见 `docs/adr/M9-relationship-dimensions.md`；`tests/test_relationship_dimensions.py` 及关系包、版本、快照、解锁回归覆盖旧用户迁移、幂等、日限额、撤销和双阈值边界。
+
 ### P2-02：用户教学、侧写与双向校准
 
 **接入** `daily.py` 的提炼、`pipeline.py` 用户画像段、`behavior.py`；新建 `core/user_preferences.py`、`tests/test_user_preferences.py`。复用既有记忆管理/纠偏入口，不加面板。
@@ -318,6 +322,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_relationship_dimensions.py ;; .venv/
 VERIFY: .venv/Scripts/python.exe tests/test_user_preferences.py ;; .venv/Scripts/python.exe tests/test_memory_correction.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
 ```
 
+**实施结果（`b8bb8c1`，schema v18）**：`backend/core/user_preferences.py` 实现 comfort/address/reminder/humor 四类封闭偏好的 `candidate → active → revoked` 生命周期，显式用户教学可确认，推测性表达不落画像；同值教学幂等并可复活。resolver 按“明确禁止、最近确认教学、旧配置、默认值”合并为短行为约束，`pipeline.py` 在正常对话注入，撤销后自动回退下一优先级。`memory_admin.py` 提供列表、新建、确认/更新和撤销 API，所有写入带来源消息、置信度与 CAS 状态保护；旧称呼配置按需迁移。`daily.py` 同时接入 P2-01 的确定性语义事件提炼，一天最多记一次明确披露，冒犯不自动扣分。测试覆盖临时对话零写入、记忆纠偏联动、偏好冲突与撤销、跨人格和关系包。
+
 ### P2-03：对称约定，先把她说过的话记清楚
 
 **修改** userdb promises、`daily.extract_promises`、`initiative.maybe_follow_up_promise`、relationship_events；新建 `tests/test_symmetric_promises.py`。
@@ -327,6 +333,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_user_preferences.py ;; .venv/Scripts
 ```text
 VERIFY: .venv/Scripts/python.exe tests/test_symmetric_promises.py ;; .venv/Scripts/python.exe tests/test_promise_followup.py ;; .venv/Scripts/python.exe tests/test_relationship_events.py
 ```
+
+**实施结果（`36bc59b`，schema v19）**：`promises` 增加 `owner`、可空 `due_at`、`action_kind`、`namespace`、`source_message_id` 与规范化内容哈希，旧 pending 行迁移为 user-owner/open。`daily.py` 提炼时要求所有者和期限；assistant-owner 若没有可执行 action 只作为叙事约定，不谎称后台任务。读取时惰性推进过期，取消和过期均不扣关系；user-owner 完成按 promise id 仅增加一次 trust，assistant-owner 完成不把她的履约算到用户身上。`initiative.py` 对她自己的逾期约定生成坦白进度或补救分支，并继续走共享主动额度。全量回归发现看板只统计旧 pending，已在 `8add635` 改为同时统计 pending/open。
 
 ### P2-04：链式反应最小引擎
 
@@ -344,9 +352,11 @@ VERIFY: .venv/Scripts/python.exe tests/test_symmetric_promises.py ;; .venv/Scrip
 VERIFY: .venv/Scripts/python.exe tests/test_event_chains.py ;; .venv/Scripts/python.exe tests/test_m5_thoughts.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
 ```
 
+**实施结果（`6d99a18`，schema v20）**：`backend/core/event_chains.py` 首版只注册“明确约定完成 → 一次正向回望 → 关闭”规则，`event_chains` 按 user/source/rule 唯一，实例保存 due、attempt、expiry 和单向状态。到期节点转成既有 `pending_thoughts` 的 `chain_aftermath` 候选，由统一仲裁、共享额度和投递回执处理；成功表达关闭实例，失败在同一实例累加，最多 2 次尝试或 7 天过期。永久取消、源删除和 reset 都阻止重建；代码中没有负向链，用户缺席或取消不会产生惩罚。`tests/test_event_chains.py` 覆盖幂等创建、到期、投递、失败熔断、取消、删除和 reset，并回归心事与主动仲裁。
+
 ### P2-05：追发、主动收尾、称呼和晚安仪式
 
-分三个小提交，不一次改完：A 有期限的追发；B 晚安/行程收尾；C 称呼变化。文件落在 pending_thoughts/initiative、pipeline 快捷告别路径、affection/behavior/用户偏好 resolver，新增 `tests/test_conversation_rhythm.py`。
+原设计分为 A 有期限的追发、B 晚安/行程收尾、C 称呼变化三个子项；最终在同一有界提交中落地，因为三者共享一套用户轮次判定和来源生命周期。文件落在 conversation_rhythm/initiative、pipeline 快捷告别路径和用户偏好 resolver，新增 `tests/test_conversation_rhythm.py`。
 
 - A：追发有 origin_turn_id、expires_at、最大一次表达；用户开始新话题、手动停止、勿扰或来源删除时取消。复用候选及原子额度，不用内存 sleep 挂一个不可恢复定时器。
 - B：显式晚安先遵守用户结束意图，只给一段简短回应，不趁机追问。行程“去忙”是角色表达，用户需要帮助时基本可及；不能以睡觉为由锁死输入框。
@@ -359,6 +369,14 @@ VERIFY: .venv/Scripts/python.exe tests/test_event_chains.py ;; .venv/Scripts/pyt
 VERIFY: .venv/Scripts/python.exe tests/test_conversation_rhythm.py ;; .venv/Scripts/python.exe tests/test_proactive_policy.py ;; .venv/Scripts/python.exe tests/test_persona_eval.py
 ```
 
+**实施结果（`b6b3f2b`）**：
+
+1. `backend/core/conversation_rhythm.py` 成为节奏状态的权威模块。`rhythm:followups` 以版本化 kv 持久保存有界追发，记录 `origin_turn_id`、`source_message_id`、`ready_at`、`expires_at`、状态和一次性表达标记；该键已登记到 `kv_registry.py`，最多保留一条有效候选，默认 20 分钟后可表达、2 小时过期。
+2. `pipeline.py` 在用户消息已落库后调用 `handle_user_turn`：显式晚安和手动停止立即取消追发；打断语从紧邻的上一条 assistant 消息创建候选；明显的新长话题取消旧候选。显式晚安只注入简短收尾约束，保持输入和后续新会话可用。
+3. `initiative.py` 通过 `_maybe_rhythm_followup` 把到期追发送入既有统一二级仲裁。勿扰时取消时效性候选，源消息不存在、已删除、已表达或已过期均不投递；成功表达后状态关闭，失败不制造第二条候选。
+4. 称呼解释复用 `user_preferences`。`address_candidates()` 返回真实偏好 id、来源类型、来源消息 id、简短原因和 `revocable`，`GET /api/memory/address-candidates` 只暴露候选与依据，不显示等级或进度条；撤销继续走既有偏好生命周期。
+5. `tests/test_conversation_rhythm.py` 覆盖创建、等待、过期、单次表达、新话题/晚安/手动停止/勿扰取消、源删除、称呼来源和在场文案；同时回归主动额度、关系包和人格评测，确认没有旁路投递。
+
 ### P2-06：M8 重逢三段式
 
 **复用** `offline_narrative.collect_offline_context`、`greeting.greeting_for`、`daily.write_daily_diary/maybe_write_research_report` 与关系事件；新增 `tests/test_reunion_flow.py`。
@@ -366,12 +384,21 @@ VERIFY: .venv/Scripts/python.exe tests/test_conversation_rhythm.py ;; .venv/Scri
 1. 久别窗口产生 reunion_id（按人格、最近离开锚点），第一条只由可追溯的真实记录/明确角色生活记录构成。没有离线数据就诚实留白，不编造“我刚去真实城市旅行”。
 2. 第一条投递后状态从 pending 到 offered；用户可回应，也可直接换题，不能卡在必须回应才能聊天。禁止问去了哪、为什么不来，不扣好感。
 3. 只有用户真正回应，才将双方这一轮补入日记素材；若未回应，只能记已真实发生的问候，不能生成“我们聊了这些”。研究补写仅在有研究素材时调用。
-4. 一次窗口只发一条，网页刷新、多个窗口与失败重试不重复。持久状态建议 `state:reunion`（version/id/status/source_ids/timestamps，不复制原文），登记并明确导出/reset；源删除后不能恢复旧叙事。
+4. 一次窗口只发一条，网页刷新、多个窗口与失败重试不重复。实施采用关系表 `reunion_arcs` 保存 version/id/status/source_ids/timestamps，不复制原文，并明确纳入导出/reset；源删除后不能恢复旧叙事。
 5. 与恢复预览、封存和版本快照分离：打开旧关系包不会自动触发一段已发生的重逢，不修改 M8 的只读/显式确认契约。
 
 ```text
 VERIFY: .venv/Scripts/python.exe tests/test_reunion_flow.py ;; .venv/Scripts/python.exe tests/test_offline_narrative.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
 ```
+
+**实施结果（`469bafc`，schema v21）**：
+
+1. `backend/core/reunion.py` 与 `reunion_arcs` 表承载重逢状态机。记录按人格作用域保存指向生活事件的 `source_snapshot_id`、`offered_message_id`、`response_message_id`、状态和时间戳，不复制离线叙事正文；状态只按 `pending → offered → responded → closed` 或 `expired` 前进，7 天限频并在 7 天后过期。
+2. 唯一合法来源是 P1-04 已落库的 `character_life_events`。`greeting.py` 先建立或复用 arc，再用来源描述生成不超过 180 字的她视角问候；没有有效来源时明确要求模型诚实留白，生成失败采用“回来啦。好久不见。”，不编造现实经历、不追问用户去向。
+3. 问候实际可见后，以 bot 消息写入 `messages`，再把 arc 标为 `offered` 并绑定真实消息 id。`pipeline.py` 只观察该问候后的第一条用户消息：真实回应标为 `responded`，明确换题直接 `closed`；两条路径都不改信任、亲密或旧好感兼容值。
+4. `daily.py` 只在日记真实消费到回应后关闭 `responded` arc；没有研究素材时不额外调用研究生成。来源生活事件被删除时 arc 关闭，防止旧叙事再次出现。
+5. `relationship_export.py` 将生活事件和 arc 纳入导出，恢复时先重映射来源 id，再强制将 arc 置为 `closed` 并清空消息引用，因此导入旧关系包不会自动重演重逢。`userdb.py` 初始化迁移、通用 reset 与 `reset.py` 都覆盖新表；设计与回滚约束记录在 `docs/adr/M9-reunion-arcs.md`。
+6. `tests/test_reunion_flow.py` 覆盖真实来源、无来源留白、投递状态、回应/换题、限频、过期、源删除、日记收束、导出恢复不重放及无关系扣分；并回归离线叙事、关系包、schema 备份和快照版本。
 
 ## 7. 波次 3：扩展任务的落地路线
 
@@ -1275,9 +1302,9 @@ Adapter 先执行 `GET /capabilities` 或版本自检，固定实际安装 commi
 
 ### 21.4 P2-06 重逢与 E03 恢复补充
 
-`reunion_arcs(id,user_id,absence_bucket,source_snapshot_id,state,narrative_version,offered_message_id,created_at,expires_at)` 以 user_id+source_snapshot_id 唯一；state=pending/offered/responded/closed/expired。只有已完成的离线快照可建 arc，7天内最多一次；第一段≤180字，第二段由用户是否回应决定，第三段日记/研究只能写角色侧真实生成过程和明确来源，不能编造用户离线经历。用户换题立即 closed，不追问、不扣关系值。
+`reunion_arcs(id,user_id,absence_bucket,source_snapshot_id,state,narrative_version,offered_message_id,response_message_id,created_at,updated_at,expires_at)` 以 user_id+source_snapshot_id 唯一；`source_snapshot_id` 实际引用 `character_life_events.id`，state=pending/offered/responded/closed/expired。只有已落库且仍存在的角色生活事件可建 arc，7天内最多一次；第一段≤180字，第二段由用户是否回应决定，第三段日记只能写真实发生的回应与明确来源，不能编造用户离线经历。用户换题立即 closed，不追问、不扣关系值。
 
-E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，所有引用经旧→新 id 映射，缺源变 tombstone 而不是指向 id=0。导入事务与向量重建分离；数据库成功后索引失败标 rebuild_pending。恢复生成的新 reunion 候选带 import generation，用户撤销导入时一并失效。测试重复导入、部分旧版本、缺失引用、跨 persona、导入后删除和 arc 幂等。
+E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，所有引用经旧→新 id 映射，缺源不建立悬空引用。当前实现恢复 `character_life_events` 后重映射 reunion 来源 id，并将所有恢复 arc 强制置为 closed、清空 offered/response 消息引用，保证导入不会重演已经发生的问候。测试覆盖重复导入、缺失引用、跨 persona、导入后删除和 arc 幂等；未来若允许显式重演，必须另加用户确认与新的 generation，不能复活旧 arc。
 
 ## 22. 全路线覆盖账本与“完成”的判定
 
@@ -1287,13 +1314,13 @@ E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，
 |---|---|---|
 | M0 稳定基线、识图、固定记忆、输出卫生、备份、eval、路由 | M9-00、B01、P0-01～04、§13～14、§20 | 识图、B01、P0-01A 已实现；其余方案完成/待分片 |
 | M1 记忆溯源、纠偏、冷热/初历/遗忘 | G01、§13.3、§14.8、F07、§21.4 | 方案完成/待分片 |
-| M2 关系事件、心事、解释、主动仲裁扩展 | P2-03～05、F02/F03、§14.7/14.9 | 基线已实现；扩展方案完成 |
+| M2 关系事件、心事、解释、主动仲裁扩展 | P2-03～05、F02/F03、§14.7/14.9 | P2-03～05 已实现；其余扩展方案完成 |
 | M3 共读、专注、目标、创作、清单及网页/EPUB/观察 | F04～06、L01/L02、§21.4 | 基线已实现；扩展方案完成 |
-| M4 双向关系、二维门槛、校准、修复与分支 | P2-01/02、L03/L05、§14.6/14.10 | 用户决定已写入；方案完成 |
-| M5 连续生活、行程、心事、链式反应、欲望 | P1-04/05、P2-04、G03/G04、L06 | 方案完成/待分片 |
+| M4 双向关系、二维门槛、校准、修复与分支 | P2-01/02、L03/L05、§14.6/14.10 | P2-01/02 已实现；其余扩展方案完成 |
+| M5 连续生活、行程、心事、链式反应、欲望 | P1-04/05、P2-04、G03/G04、L06 | P1-04/05、P2-04 已实现；其余扩展方案完成 |
 | M6 在场、空间、审美、桌宠、界面克制 | L07/L08/L10、§20.5 | 方案完成；桌宠按条件延期 |
 | M7 世界来源、D8、QQ、微信、跨端时间线 | L11～L14 | 方案完成；部署/账号属外部条件 |
-| M8 回望、重逢、封存、导出恢复 | P2-06、§21.4、LC-1 | 基线大部已实现；补充方案完成 |
+| M8 回望、重逢、封存、导出恢复 | P2-06、§21.4、LC-1 | P2-06 重逢已实现；M8 全部 Epic 完成 |
 | 18 个长期 Epic | 对应 M0–M8 行 + P3-01～05、L15/L16 | 全部有实现或完整方案 |
 | M9 §4.1～4.10 | P3-01、P2-04、P1-01/02/04、P0-04、§17 | 全部有模块/数据/测试落点 |
 | M9 26 项缺陷 | 原 §10 映射 + §14、§17、§20～21 | 1～26 全覆盖 |
