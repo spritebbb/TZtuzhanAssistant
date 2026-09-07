@@ -130,6 +130,32 @@ def build_system_prompt(
     # 今日日程注入已移除（日程模块被砍）
     schedule_line = ""
 
+    # P1-01 人格切片注入：定稿侧写/正典内容的确定性编译（固定身份条目常驻 +
+    # 按状态门控的少量动态切片）。失败静默回退——切片是增量调色，
+    # 安全与身份底线仍由人格卡承载，不依赖本段。
+    slices_part = ""
+    if user_id:
+        try:
+            from .persona_profiles import profile_id_from_user_id as _pid
+            from .persona_slices import compile_prompt_lines as _compile_lines
+            from .state import load_state as _load_state
+
+            try:
+                _st = _load_state(user_id, create_if_missing=False)
+                _energy = _st.energy
+            except Exception:
+                _energy = None
+            _lines = _compile_lines(
+                profile_id=_pid(user_id), stage=stage, affection=affection, energy=_energy
+            )
+            if _lines:
+                slices_part = (
+                    "\n## 行为参考（按当前状态启用，自然执行，不要复述、不要提到这些条目本身）\n"
+                    + "".join(f"- {line}\n" for line in _lines)
+                )
+        except Exception:
+            slices_part = ""
+
     notes = []
     if first_chat and stage == "初识":
         notes.append("这是你和对方的第一段对话，可以自然地询问对方想被怎么称呼。")
@@ -160,6 +186,7 @@ def build_system_prompt(
         f"{bond_extra}"
         f"{behavior_line}"
         f"{schedule_line}"
+        f"{slices_part}"
         f"- 你对用户的称呼：{addr}\n"
         f"- 本轮注意：{note_text}\n"
         "特别提醒：**对方不提时间，你就绝口不提。** 不要主动说「这么晚/还不睡/该睡了/夜猫子/熬夜/注意时间」这类话，"
