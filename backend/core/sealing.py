@@ -118,8 +118,15 @@ async def seal(
             )
             reply = reply.strip().strip('"「」')
             if reply:
-                letter_text = reply[:_MAX_LETTER]
-                used_llm = True
+                from .output_hygiene import HygieneContext, protect_visible_text
+
+                result = protect_visible_text(
+                    reply[:_MAX_LETTER],
+                    context=HygieneContext(kind="farewell", source_namespace="sealing"),
+                    fallback=letter_text,
+                )
+                letter_text = result.text
+                used_llm = result.action == "accept"
         except Exception as exc:
             logger.warning("[封存] {} 的告别信生成失败，使用确定性告别文：{}", user_id, exc)
 

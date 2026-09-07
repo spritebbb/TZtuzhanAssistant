@@ -214,6 +214,18 @@ async def greeting_for(
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
         return None
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    text = protect_visible_text(
+        text,
+        context=HygieneContext(kind="greeting", source_namespace="greeting"),
+        fallback=_fallback_greeting(user_id),
+    ).text
+    if not text:
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        return None
     if await message_count(session_id) != baseline_message_count:
         from .proactive_policy import finish_active_claim
 

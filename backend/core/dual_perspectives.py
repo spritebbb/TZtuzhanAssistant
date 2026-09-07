@@ -354,4 +354,11 @@ async def generate_tuzhan_draft(user_id: str, perspective_id: int) -> dict:
     draft = draft.strip().strip('"「」')
     if not draft:
         raise DualPerspectiveError("草稿生成结果为空，请直接代她写下这一段")
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    draft = protect_visible_text(
+        draft,
+        context=HygieneContext(kind="dual_perspective", source_namespace="dual_perspectives"),
+        fallback="这段经历对我有分量，但我想先诚实地停在这里，不替当时的自己编造感受。",
+    ).text
     return {"ok": True, "draft": draft[:_MAX_VIEW], "origin": "llm"}

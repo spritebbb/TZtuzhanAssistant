@@ -220,6 +220,21 @@ async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
         logger.warning("[日记] {} 的 {} 生成失败，使用事实型兜底", user_id, day.isoformat())
     if not content:
         content, mood = _fallback_diary(day, transcript)
+    from .output_hygiene import HygieneContext, protect_visible_text
+
+    fallback_content, fallback_mood = _fallback_diary(day, transcript)
+    content = protect_visible_text(
+        content,
+        context=HygieneContext(kind="diary", source_namespace="daily"),
+        fallback=fallback_content,
+    ).text
+    if not mood:
+        mood = fallback_mood
+    mood = protect_visible_text(
+        mood,
+        context=HygieneContext(kind="diary_mood", source_namespace="daily"),
+        fallback=fallback_mood,
+    ).text
     diary_id = save_diary(user_id, day.isoformat(), content, mood)
     return {
         "id": diary_id,
@@ -255,6 +270,20 @@ async def maybe_write_research_report(user_id: str) -> dict | None:
         data = _parse_json(resp)
         title = str(data.get("title") or "").strip()
         content = str(data.get("content") or "").strip()
+        if not content:
+            return None
+        from .output_hygiene import HygieneContext, protect_visible_text
+
+        content = protect_visible_text(
+            content,
+            context=HygieneContext(kind="research_report", source_namespace="daily"),
+            fallback="这阶段的材料还不够稳妥，我先把结论留到下一次记录。",
+        ).text
+        title = protect_visible_text(
+            title,
+            context=HygieneContext(kind="research_title", source_namespace="daily"),
+            fallback="阶段观察",
+        ).text
         if not content:
             return None
         report_id = save_research_report(user_id, period, title, content)
