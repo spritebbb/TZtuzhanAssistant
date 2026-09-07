@@ -318,7 +318,7 @@ def create_app() -> FastAPI:
         # （同一 job_runs 认领，与计划任务互不双跑）；后台执行不阻塞启动。
         async def _time_tick_catchup() -> None:
             try:
-                from .config import config as _cfg
+                from .core.config import config as _cfg
                 from .maintenance.time_tick import run as _tick_run
 
                 def _run() -> int:

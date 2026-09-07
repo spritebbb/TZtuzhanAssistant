@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """M8.7「不同版本的我们」：关系版本检查点的隐私白名单、不可变、确定性比较、
-人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema v17。"""
+人格隔离、真删除、导出恢复、reset 清理、损坏数据边界与 schema 下限。"""
 from __future__ import annotations
 
 import asyncio
@@ -400,7 +400,7 @@ async def _test_api_list_maps_business_error() -> None:
 
 
 def _test_schema_v16() -> None:
-    assert _SCHEMA_VERSION == 17, "schema 应升到 v17"
+    assert _SCHEMA_VERSION >= 17, "relationship_versions 需要 schema v17+"
     with db._lock:
         columns = {row[1] for row in db.conn.execute("PRAGMA table_info(relationship_versions)")}
     assert columns == {"id", "user_id", "label", "captured_at", "schema_version", "snapshot_json", "created_at"}
@@ -409,7 +409,7 @@ def _test_schema_v16() -> None:
 
     assert "relationship_versions" in CATEGORIES["life"]
     assert "relationship_versions" in reset_module._TABLES
-    print("[OK] schema v17：表结构、导出类别与双 reset 清单全部就位")
+    print("[OK] schema v17+：表结构、导出类别与双 reset 清单全部就位")
 
 
 async def main() -> None:

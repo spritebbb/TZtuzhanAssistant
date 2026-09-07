@@ -89,7 +89,7 @@ def _counts_locked(user_id: str) -> dict[str, int]:
             "SELECT COUNT(*) FROM activities WHERE user_id = ? AND status = 'completed'"
         ),
         "promises_pending": count(
-            "SELECT COUNT(*) FROM promises WHERE user_id = ? AND status = 'pending'"
+            "SELECT COUNT(*) FROM promises WHERE user_id = ? AND status IN ('pending','open')"
         ),
         "promises_completed": count(
             "SELECT COUNT(*) FROM promises WHERE user_id = ? AND status = 'done'"

@@ -176,8 +176,16 @@ def test_dry_run_and_persona_isolation() -> int:
 def test_reset_tables_registered() -> int:
     from backend.core.reset import _TABLES
 
-    assert "character_life_events" in _TABLES and "job_runs" in _TABLES
-    print("[OK] 新表已入 reset 清单")
+    assert "character_life_events" in _TABLES
+    # job_runs 没有 user_id，reset_everything 按 persona scope_key 单独清理；
+    # 放进通用 _TABLES 会重新引入 "no such column: user_id"。
+    import inspect
+    from backend.core import reset
+
+    source = inspect.getsource(reset.reset_everything)
+    assert "DELETE FROM job_runs WHERE scope_key=?" in source
+    assert "job_runs" not in _TABLES
+    print("[OK] 生活事件走通用 reset，job_runs 按人格 scope 单独清理")
     return 0
 
 

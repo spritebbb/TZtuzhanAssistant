@@ -46,6 +46,8 @@ _GENERIC_FALLBACK_GREETINGS = [
     "又见面了。",
 ]
 
+_REUNION_FALLBACK = "回来啦。好久不见。"
+
 # 每个 user 上一次抽到的兜底索引，避免连续两次抽到同一句
 _last_fallback_idx: dict[str, int] = {}
 
@@ -82,7 +84,12 @@ def _set_last_seen(user_id: str, ts: float | None = None) -> None:
     kv_set(user_id, _GREET_KEY, str(ts or time.time()))
 
 
-async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str:
+async def _greeting_text(
+    user_id: str,
+    *,
+    gap_hours: float | None = None,
+    reunion_hint: str = "",
+) -> str:
     """用 LLM 生成一句菟菚风格的问候。"""
     from . import affection
 
@@ -114,7 +121,9 @@ async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str
     )
     time_desc = f"{now.month}月{now.day}日 {period}"
     narrative_hint = ""
-    if gap_hours is not None and gap_hours >= config.proactive_greeting_idle_hours:
+    if reunion_hint:
+        narrative_hint = "\n\n" + reunion_hint
+    elif gap_hours is not None and gap_hours >= config.proactive_greeting_idle_hours:
         try:
             from .offline_narrative import collect_offline_context
 
@@ -139,7 +148,7 @@ async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str
         {
             "role": "user",
             "content": (
-                f"现在是{time_desc}，你刚忙完一阵、正打算歇口气，这时对方上线来找你了。"
+                f"现在是{time_desc}，你注意到对方上线来找你了。"
                 "你们隔了一阵没聊，主动打个招呼吧。自然一点，就像朋友隔阵再见那样。"
                 "一句话就够，别太长，别解释，别加括号动作。"
                 f"{'如果记得对方的名字（' + address + '）就用上。' if address else ''}"
@@ -152,7 +161,7 @@ async def _greeting_text(user_id: str, *, gap_hours: float | None = None) -> str
         return text.strip()[:200]
     except Exception as e:
         logger.warning(f"[问候] LLM 生成失败: {e}")
-        return _fallback_greeting(user_id)  # 兜底：轮换池随机抽取
+        return _REUNION_FALLBACK if gap_hours is not None else _fallback_greeting(user_id)
 
 
 async def greeting_for(
@@ -175,12 +184,14 @@ async def greeting_for(
     baseline_message_count = await message_count(session_id)
     now = time.time()
     gap_hours: float | None = None
+    absent_since: datetime.datetime | None = None
     claim_token: str | None = None
     with _greet_lock:
         last_ts = _last_seen_ts(user_id)
         if not force and last_ts is not None:
             gap = now - last_ts
             gap_hours = max(0.0, gap / 3600)
+            absent_since = datetime.datetime.fromtimestamp(last_ts)
             if gap < config.proactive_greeting_idle_hours * 3600:
                 _set_last_seen(user_id, now)
                 return None  # 间隔短，不问候
@@ -197,14 +208,39 @@ async def greeting_for(
             kv_del(user_id, _GREET_PENDING_KEY)
             return None
 
+    reunion_arc = None
+    reunion_hint = ""
+    if gap_hours is not None and absent_since is not None:
+        try:
+            from .reunion import prepare_reunion, prompt_hint
+
+            reunion_arc = prepare_reunion(
+                user_id, gap_hours, absent_since=absent_since,
+                now=datetime.datetime.fromtimestamp(now),
+            )
+            if reunion_arc is not None:
+                reunion_hint = prompt_hint(user_id, int(reunion_arc["id"]))
+            else:
+                reunion_hint = (
+                    "这次久别期间没有可追溯的离线生活记录。只自然打招呼，"
+                    "不要声称自己离线时做过什么，也不要追问对方去哪了或为什么没来。"
+                )
+        except Exception as e:
+            logger.warning(f"[问候] 重逢候选整理失败: {e}")
     try:
         # 生成问候并持久化到会话
-        text = await _greeting_text(user_id, gap_hours=gap_hours)
+        text = await _greeting_text(
+            user_id, gap_hours=gap_hours, reunion_hint=reunion_hint
+        )
     except Exception as e:
         logger.warning(f"[问候] 生成异常: {e}")
         from .proactive_policy import finish_active_claim
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
         return None
     finally:
         # 无论成功失败都释放占位，避免一次失败后永久卡住问候
@@ -213,14 +249,20 @@ async def greeting_for(
         from .proactive_policy import finish_active_claim
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
         return None
     from .output_hygiene import HygieneContext, protect_visible_text
 
     text = protect_visible_text(
         text,
         context=HygieneContext(kind="greeting", source_namespace="greeting"),
-        fallback=_fallback_greeting(user_id),
+        fallback=_REUNION_FALLBACK if gap_hours is not None else _fallback_greeting(user_id),
     ).text
+    if reunion_arc is not None:
+        text = text[:180]
     if not text:
         from .proactive_policy import finish_active_claim
 
@@ -230,6 +272,10 @@ async def greeting_for(
         from .proactive_policy import finish_active_claim
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
         logger.info("[问候] 生成期间会话已活跃，丢弃过时问候")
         return None
     from .reset import ResetSuperseded, epoch_is_current, user_write_guard
@@ -237,6 +283,10 @@ async def greeting_for(
         from .proactive_policy import finish_active_claim
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
         return None
 
     # 持久化到会话存储
@@ -244,17 +294,37 @@ async def greeting_for(
         from ..session.store import append_messages
 
         async with user_write_guard(epoch):
-            await append_messages(
+            stored = await append_messages(
                 session_id,
                 [{"role": "bot", "content": text, "ts": now}],
             )
+            if not stored:
+                raise RuntimeError("问候未写入会话")
     except ResetSuperseded:
         from .proactive_policy import finish_active_claim
 
         finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
         return None
     except Exception as e:
         logger.warning(f"[问候] 持久化失败: {e}")
+        from .proactive_policy import finish_active_claim
+
+        finish_active_claim(user_id, claim_token, success=False, source="greeting")
+        if reunion_arc is not None:
+            from .reunion import close_arc
+
+            close_arc(user_id, int(reunion_arc["id"]))
+        return None
+
+    if reunion_arc is not None:
+        from .reunion import mark_offered
+
+        if mark_offered(user_id, int(reunion_arc["id"]), text) is None:
+            logger.warning("[问候] 重逢弧落账失败，已保留普通问候")
 
     from .proactive_policy import finish_active_claim
 

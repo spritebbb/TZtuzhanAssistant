@@ -31,7 +31,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions"),
+    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs"),
     "tasks": ("tasks", "promises"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -107,6 +107,7 @@ _REFERENCE_RULES = (
     _rule_static("facts", "conflicts_with_fact_id", "facts", frozenset()),
     _rule_static("future_letters", "goal_id", "activities"),
     _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
+    _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
     _rule_dynamic("artifacts", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
     _rule_dynamic("pending_thoughts", "source_id", "source_type"),
@@ -383,6 +384,11 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         key: (target_user_id if key == "user_id" else row[key])
                         for key in row.keys()
                     }
+                    # 导入的是历史，不得让旧重逢弧在新命名空间继续等待回应。
+                    if table == "reunion_arcs":
+                        values["state"] = "closed"
+                        values["offered_message_id"] = None
+                        values["response_message_id"] = None
                     old_id = int(values.pop("id")) if "id" in values else None
                     for ref_fn, column in rules:
                         if column not in values:

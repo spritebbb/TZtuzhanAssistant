@@ -124,7 +124,7 @@ def test_schema_and_reset_registered() -> int:
     from backend.core.userdb import _SCHEMA_VERSION
 
     assert "user_preferences" in _TABLES
-    assert _SCHEMA_VERSION == 18
+    assert _SCHEMA_VERSION >= 18
     print("[OK] 表入 reset 清单 / schema 18")
     return 0
 
