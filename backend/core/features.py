@@ -24,6 +24,9 @@ _write_lock = threading.Lock()
 # 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
     "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
+    # P0-01A：用户可见回复在发送/持久化前统一检查。新功能按用户约定默认关闭，
+    # 可由设置层显式开启；关闭时 pipeline 保持旧流式契约。
+    "output_hygiene_enabled": False,
 }
 
 
