@@ -7,6 +7,9 @@
 - 不因用户离线降好感、不制造负罪感：忙碌期是松弛描述，不是惩罚。
 - 修复期的语气已由行为帧 tension_line 负责，这里只做标注，不重复注入。
 - 跨人格隔离：所有查询按 user_id 命名空间。
+- 本模块是「关系季节」。P1-05 的自然季节（春夏秋冬，见
+  calendar_modulation.natural_season_of）是另一种 kind：两者独立共存、
+  绝不同名覆盖，解释快照分别标注来源。
 """
 from __future__ import annotations
 

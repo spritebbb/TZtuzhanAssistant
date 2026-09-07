@@ -947,12 +947,20 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     reply_season = None
     try:
         from .behavior import build_behavior_frame
+        from .calendar_modulation import compose_line, effective_modulation
         from .seasons import current_season
         from .state import load_state
 
         reply_state = load_state(user_id, create_if_missing=not ephemeral)
         reply_season = current_season(user_id, reply_state)
-        reply_frame = build_behavior_frame(reply_state, season_line=reply_season["line"])
+        cal_mod = effective_modulation(
+            user_id, datetime.now().date(),
+            energy=reply_state.energy, tension=reply_state.tension,
+        )
+        reply_frame = build_behavior_frame(
+            reply_state, season_line=reply_season["line"],
+            calendar_line=compose_line(cal_mod),
+        )
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
     stage = reply_state.stage if reply_state is not None else affection.stage_of(user["affection"])

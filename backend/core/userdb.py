@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS important_dates (
     label   TEXT NOT NULL,     -- 事件名，如 '你的生日' / '我们认识的日子'
     kind    TEXT NOT NULL DEFAULT 'other',  -- birthday / anniversary / other
     year    INTEGER,           -- 有年份则存具体年份；无年份 NULL = 每年
-    ts      TEXT NOT NULL
+    ts      TEXT NOT NULL,
+    namespace TEXT NOT NULL DEFAULT 'user_real'  -- P1-05：user_real / character_fiction
 );
 CREATE TABLE IF NOT EXISTS stickers (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -556,6 +557,13 @@ class UserDB:
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")
+        except sqlite3.OperationalError:
+            pass
+        # P1-05：important_dates 补 namespace 列（角色纪念日/用户真实日子分流）
+        try:
+            self.conn.execute(
+                "ALTER TABLE important_dates ADD COLUMN namespace TEXT NOT NULL DEFAULT 'user_real'"
+            )
         except sqlite3.OperationalError:
             pass
         # 兼容旧库：long_memory 补 pinned 列（用户显式要求记住的记忆不被轮转清理）
@@ -1504,7 +1512,7 @@ def _bigrams(text: str) -> set[str]:
 # ---- important_dates（情感记忆：生日/纪念日/特殊日子）----
 
 
-def save_important_date(user_id: str, date_str: str, label: str, kind: str = "other", year: int | None = None) -> bool:
+def save_important_date(user_id: str, date_str: str, label: str, kind: str = "other", year: int | None = None, namespace: str = "user_real") -> bool:
     """保存一个特殊日子。date_str 格式为 'MM-DD'（如 '12-25'）。
 
     去重：同用户、同日、同标签 已存在时不重复插入（返回 False），
@@ -1530,8 +1538,11 @@ def save_important_date(user_id: str, date_str: str, label: str, kind: str = "ot
             db.conn.commit()
             return False
         db.conn.execute(
-            "INSERT INTO important_dates (user_id, date, label, kind, year, ts) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, date_str, label, kind, year, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO important_dates (user_id, date, label, kind, year, ts, namespace) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, date_str, label, kind, year,
+             datetime.now().isoformat(timespec="seconds"),
+             namespace if namespace in ("user_real", "character_fiction") else "user_real"),
         )
         db.conn.commit()
         return True
