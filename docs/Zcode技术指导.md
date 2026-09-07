@@ -51,6 +51,9 @@
 - 行程先做本地时间 tick，每小时由 Windows 计划任务推进。
 - 纪念日/季节中度换挡；重逢是离线叙事 → 用户可回应 → 补写日记/研究。
 - TTS 路线为本地 GPT-SoVITS；STT 本地 Whisper 但延期；桌面宠物等工具臃肿治理完成；多角色群聊日后单独立项。
+- 关系阶段要求信任和亲密同时跨过 25/50/75；关系分支可看简短描述与形成原因，不显示等级或进度条。
+- 数据加密采用 Windows 本机便捷解锁，并提供独立恢复口令换机；D8 采用 Cloudflare Tunnel + Access。
+- IM 顺序先 QQ 后微信；QQ 走官方机器人低风险路线，微信按用户决定采用个人微信本地桥接。
 
 ## 2. 所有切片共用的工程契约
 
@@ -433,7 +436,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_tts_provider.py ;; npm --prefix fron
 2. 选成熟系统/库方案管理密钥，不自制密码算法；明确本机凭据存储、迁移到新机器、密钥遗失边界，备份密文与密钥不能放同一包。
 3. 迁移先生成可校验的新加密副本，再原子切换；失败保留原副本和可恢复状态，不能边覆盖边试。
 4. 用一次性数据测正常/错误密钥、进程中断、磁盘失败、恢复到空目录、旧格式升级。测试不打印敏感原文或密钥。
-5. 本项的具体加密方案/跨机恢复凭据是原路线尚未定的选择，不由 ZCode 自行做不可逆生产迁移；先交清晰可审的方案与临时目录 PoC，用户选定后才迁移真实资料。
+5. 2026-09-07 用户已选“本机便捷解锁 + 独立恢复口令”；具体密钥层级、迁移与验证以第 21 节为准。真实资料迁移仍必须先完成临时目录 PoC、备份验证和 Codex 审查，不能边覆盖边试。
 
 ```text
 VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/python.exe tests/test_schema_backup.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
@@ -454,9 +457,9 @@ VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/
 VERIFY: .venv/Scripts/python.exe tests/test_persona_evolution.py ;; .venv/Scripts/python.exe tests/test_experience_metrics.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
 ```
 
-## 8. 原审计五个空白：补设计后再实现
+## 8. 原审计五个空白：完整设计后分片实现
 
-这里给出可实施的最小路线，不把尚未定稿的权重和触发阈值伪称用户已确认。先提交短 ADR 和测试样例给 Codex 审查；只有真正的产品选择才请用户决定，普通接口/阈值候选由 ZCode写明依据。
+这里给出可实施路线。确定性阈值和接口已经在第 13–22 节固定；它们属于工程默认而非用户偏好，实施时如有证据需要改变，ZCode 必须在回信列明并由 Codex 审查。
 
 ### G01：记忆分级、视角、初历和可见遗忘
 
@@ -542,7 +545,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_companion_requests.py ;; .venv/Scrip
 | 25 数据安全 | P0-02/P3-04 |
 | 26 发现缺陷管道 | P3-05B |
 
-仍延期：D8 公网/推送、STT、桌面宠物、多角色群聊。网页/EPUB、观察日志/世界观共创是原 M3 可选扩展；没有明确认领不在本轮大批新增。训练音色、真实模型实测、加密真实迁移等有外部条件的阶段，缺条件只标该阶段未完成，不阻塞同主题可以离线交付的工具与测试。
+实施仍延期：D8 公网/推送、STT、桌面宠物、多角色群聊；完整技术方案分别见 L12、L09、L10、L15。网页/EPUB、观察日志/世界观共创的方案见 L01/L02。训练音色、真实模型实测、加密真实迁移等有外部条件的阶段，缺条件只标该阶段未完成，不阻塞同主题可以离线交付的 adapter、工具、迁移演练与测试。
 
 ## 11. 可直接转给 ZCode 的首个功能任务
 
@@ -1015,11 +1018,128 @@ VERIFY: npm --prefix frontend test ;; npm --prefix frontend run build
 
 真机多屏/8小时另写运行脚本和记录，不塞600秒worker VERIFY；界面任务不具备硬件时可以完成mock部分，但未通过真机验收不能打整体完成。
 
-## 17. 2026-09-07 用户拍板与补充约定
+### L11：世界感知来源层（天气、节日、RSS/主题订阅）
 
-执行：ZCode（GLM）整理；7 项决策经用户逐项拍板，技术默认由 ZCode 提出、待 Codex 审查。本节为汇总索引，细节已落入各节「2026-09-07 拍板/补充」标注处；与前文冲突时以本节及标注为准。
+**文件与接口**：新建 `backend/core/world_sources.py`、`backend/core/topic_subscriptions.py`、`backend/api/world.py`、`tests/test_world_sources.py`；接入 `daily.py`、`greeting.py`、`initiative.py` 和 P1-02 registry。提供 `refresh_source(source_id, now) -> SourceSnapshot`、`list_candidates(user_id, now)`、`POST /api/world/subscriptions` 与删除接口。天气按用户主动设置的粗粒度城市查询；节日采用版本化日历数据；RSS 只读用户明确订阅的 URL。不得从 IP、设备名或聊天片段偷偷推断位置。
 
-### 17.1 用户拍板（7 项）
+**数据与调用链**：`world_subscriptions(id,user_id,kind,locator,label,enabled,created_at,version)`；`world_snapshots(id,subscription_id,fetched_at,expires_at,content_json,source_url,content_hash,status)`。天气 TTL 30 分钟、RSS 15 分钟、节日数据按版本更新；相同 content_hash 不生成新候选。刷新由 JOB-1 执行，解析后只产生 `context_registry` 的短期候选，未经用户确认不写 facts、relationship_events 或她的经历。问候/主动消息取候选时仍经过 OUT-1 与统一主动额度。
+
+**安全与失败**：RSS 抓取继承 L01 的 SSRF、重定向、大小、超时和内容不可信边界；HTML 只提正文/标题/日期，脚本和远程资源不执行。来源异常保留最后一份未过期快照并标 stale；过期后明确“暂时取不到”，不能把旧天气当今天。删除订阅级联删除快照、registry 激活和候选。导出只含订阅设置，缓存默认不入关系包；临时轮不能创建订阅。
+
+**验收**：冻结时钟覆盖 TTL、去重、过期、来源失败、位置未授权、恶意 RSS、删除后无幽灵候选；主动候选在用户刚发言、额度已满或 source_version 变化时失效。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_world_sources.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py ;; .venv/Scripts/python.exe tests/test_context_registry.py
+```
+
+### L12：D8 公网 HTTPS、Access、PWA 与 Web Push（实施需域名条件，方案完整）
+
+**拓扑**：新增独立 `gateway` 进程/监听端口，只把该端口交给 Cloudflare Tunnel；现有开发端口 `8801` 继续绑定 loopback，不允许直接暴露。Tunnel 入口先过 Cloudflare Access，源站再次校验 Access JWT 的签名、`aud`、`iss`、`exp`，再校验应用自己的短期 session。Cloudflare 文档明确要求源站验证令牌；不能因为 Tunnel 到源站的 peer address 是 loopback，就沿用 `backend/app.py` 当前“loopback 免认证”分支。[Cloudflare Access 自托管应用](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) 与 [保护源站](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)是实施基线。
+
+**文件与接口**：新建 `backend/gateway/app.py`、`backend/gateway/access_auth.py`、`backend/core/devices.py`、`backend/api/devices.py`、`frontend/src/stores/devices.ts`、`tests/test_gateway_auth.py`；修改 app 路由分组、CORS/CSRF、SSE、WebSocket（若实际启用）、`frontend/public/sw.js` 和 PWA 设置页。所有 `/api/**`、静态私有附件、SSE 及推送订阅接口共用强制认证依赖；健康检查仅返回无敏感状态。Access 服务令牌/公钥缓存不写日志，JWKS 轮换失败时只允许未过期缓存短暂续用，超窗 fail closed。
+
+**数据模型**：`devices(id,user_id,display_name,platform,created_at,last_seen_at,revoked_at,version)`；`push_subscriptions(id,device_id,endpoint_hash,endpoint_cipher,p256dh_cipher,auth_cipher,created_at,expires_at,last_success_at,failure_count,revoked_at)`；`auth_sessions(id,device_id,token_hash,expires_at,revoked_at)`。endpoint 和密钥材料按 P3-04 加密；VAPID 私钥只在本机密钥仓，不入数据库/备份包。`POST /api/devices/register`、`GET /api/devices`、`POST /api/devices/{id}/revoke`、`POST/DELETE /api/push/subscriptions` 都要求 Access 身份与应用 session 同时匹配 user_id。
+
+**推送链路**：用户在已认证页面明确允许通知后注册 service worker 与 PushSubscription；后端发送的 payload 只含 opaque event id 和通用提示，service worker 点击后再经认证拉正文。Push API 依赖安全上下文和 service worker，且订阅可变化，前端每次启动要对账而不是假定永久有效。[MDN Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API)作为浏览器行为参考。401/403 时 service worker 不缓存登录页为 API 数据；现有 `/api`、SSE、人格私有资源继续禁止 Cache Storage。推送 404/410 立即撤销订阅，连续失败退避，不重复发送主动事件。
+
+**上线与回滚**：先本机 mock JWT，再 staging 域名；上线检查 DNS/Tunnel/Access policy、origin 不可公网直连、TLS、CSRF、登出/撤销、多设备和恢复。flag `remote_gateway_enabled` 默认 false；关闭后停止公网监听与新推送，保留设备列表供删除/导出。真正上线需要用户提供域名与 Cloudflare 账户配置，这只是外部条件，不是留给 ZCode 的架构决策。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_gateway_auth.py ;; .venv/Scripts/python.exe tests/test_devices.py ;; npm --prefix frontend test ;; npm --prefix frontend run build
+VERIFY_TIMEOUT: 600
+```
+
+### L13：跨端消息总线与 QQ 官方机器人首接
+
+**渠道选择**：QQ 首期采用腾讯官方机器人 SDK/API，原因是授权接口和凭据边界清楚，通常比注入普通 QQ 客户端的本地桥接风控风险小；这不等于零风险，也不保证具备普通好友账号的全部私聊/主动消息能力。能力以申请到的场景和官方端点实测为准。[腾讯官方 botpy SDK](https://github.com/tencent-connect/botpy)是实现入口。普通 QQ 账号桥接只保留 adapter 接口与风险说明，不进入首期生产配置。
+
+**文件/接口**：新建 `backend/channels/base.py`、`identity.py`、`inbox.py`、`outbox.py`、`qq_official.py`、`tests/test_channel_bus.py`。`ChannelAdapter` 固定 `capabilities() / verify_webhook() / normalize_inbound() / send(outbound) / health()`；统一 `InboundMessage(channel,external_account_id,external_message_id,text,attachments,received_at)` 与 `OutboundMessage(logical_message_id,channel,binding_id,text,reply_to)`。QQ webhook 验签和回执后写 inbox，再由渠道身份绑定解析 user/persona，调用正常 chat pipeline；禁止复用 `/api/remote/task` 让请求体自报 user_id。
+
+**身份与消息数据**：`channel_bindings(id,user_id,persona_id,channel,external_account_hash,status,verified_at,revoked_at,version)`；绑定通过桌面端生成一次性 6 位码（10 分钟、最多5次），用户从对应 QQ 会话发送后完成，不能仅凭昵称/openid 猜身份。`channel_inbox(channel,external_message_id,binding_id,payload_cipher,received_at,status,error)` 以 channel+external_message_id 唯一；`channel_outbox(logical_message_id,channel,binding_id,payload_cipher,status,attempts,next_retry_at,provider_message_id,last_error)` 唯一。正文按 P3-04 加密；保留策略跟正常消息一致。
+
+**一致性**：当前 `sessions.db`、`bot.db` 和 `agent_tasks.db` 不能组成原子事务，因此采用 inbox/outbox 状态机：inbox 认领→调用 pipeline 产生一个 logical_message_id→会话持久化成功→outbox 投递。投递超时为 `unknown`，先按 provider idempotency/查询能力确认，不能盲发第二条；无查询能力则进入人工可见失败状态。跨端历史仍以 `backend/session/store.py` 为权威时间线，渠道表只保存传输状态，不另造聊天真相。
+
+**边界**：附件先做文本与受限图片，复用 vision 事实层；群聊、语音、文件和主动私聊要等 `capabilities()` 明示支持再启用。所有入站内容是不可信用户输入，不能携带 system/tool 权限。撤销绑定后拒绝新入站并停止 outbox；处理中撤销通过 source_version 阻止迟到投递。凭据来自 secrets provider，不进配置模板明文。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_channel_bus.py ;; .venv/Scripts/python.exe tests/test_channel_identity.py ;; .venv/Scripts/python.exe tests/test_pipeline_scenario.py
+```
+
+### L14：个人微信本地桥接（第二渠道，用户已确认）
+
+**选型与隔离**：首个参考实现采用独立本机 sidecar 适配 WeChatFerry，只把最小消息协议暴露给主后端。该项目文档提供登录检查、收消息与发文本接口，但兼容特定微信客户端版本；每次启动必须做版本与能力握手，失败就暂停渠道并提示用户手工处理，不能自动降级成未知 hook。[WeChatFerry 项目](https://github.com/lich0821/WeChatFerry)与[客户端 API](https://wechatferry.readthedocs.io/zh/latest/autoapi/wcferry/client/index.html)仅作为适配依据，不代表平台官方支持或永久兼容。
+
+**文件/协议**：新建 `bridge/wechat_sidecar/`、`backend/channels/wechat_local.py`、`tests/test_wechat_bridge.py`。sidecar 仅监听命名管道或 loopback 随机端口，启动握手返回 `bridge_version,client_version,logged_in,capabilities`；主进程传一次性 token，双向帧限制 1MB。复用 L13 的 normalize/inbox/outbox/binding，不让桥接进程直连数据库、模型或工具。首期仅一对一文本和图片；群聊、撤回、语音、朋友圈都关闭。
+
+**登录、去重与恢复**：登录必须由用户在本机客户端完成；`is_login=false` 时暂停消费并保留有界 outbox，不模拟扫码、不绕过验证。入站用微信消息 id；缺稳定 id 时以 sender+timestamp bucket+content hash 做短期去重并记录低置信，不能据此永久合并。断线指数退避，恢复后从 bridge 可提供的游标补收；无法补收时明确显示间隙。发送超时进入 unknown，与 L13 同样不盲重试。
+
+**安全与退出**：bridge 二进制/依赖锁版本与校验和，升级单独评审；仅允许已绑定联系人，群事件默认丢弃并计数。日志脱敏 wxid、正文和媒体路径；媒体落加密临时区并按消息保留策略清理。退出主应用停止 sidecar；进程异常超过3次熔断，用户手工恢复。测试用 fake bridge，不在自动测试登录真实微信。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_wechat_bridge.py ;; .venv/Scripts/python.exe tests/test_channel_bus.py ;; .venv/Scripts/python.exe tests/test_channel_identity.py
+```
+
+### L15：多角色群聊与各自生活（实施延期，方案完整）
+
+**模型与文件**：依赖 persona 隔离、L13 时间线和 P1-04 行程。新建 `backend/core/rooms.py`、`room_arbiter.py`、`backend/api/rooms.py`、`tests/test_multi_persona_rooms.py`；前端在现有聊天页加房间选择，不加独立控制台。`rooms(id,owner_user_id,title,status,created_at,version)`、`room_members(room_id,persona_id,role,joined_at,left_at)`、`room_messages(id,room_id,sender_kind,sender_id,logical_message_id,text_cipher,created_at)`、`room_turns(room_id,trigger_message_id,state,selected_personas_json,expires_at)`。
+
+**隔离与调用链**：角色模板是只读设定，成员实例持有各自 user scope、情绪、行程和关系；默认不能读取其他角色与用户的一对一历史。只有房间内显式消息及用户明确分享的 artifact 进入共享上下文，来源包装标明 speaker。用户消息→确定性 arbiter 按@点名、可及状态、轮次冷却和相关度选最多1名，确有互补价值时最多2名→每个角色独立编译 prompt→按固定顺序提交→OUT-1→统一时间线。模型不能自行无限邀请下一位模型说话。
+
+**行为边界**：角色外出/睡眠时可以延迟或不回应，但不得阻止用户继续聊天；不回应不伪造已读。机器人之间最多一轮回应，随后必须等用户新输入。移除成员后取消其未发送产物；删除房间级联共享副本，不删除角色原有私有资料。导出按房间单独选择；恢复找不到 persona 时保留只读占位，不把内容归给其他角色。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_multi_persona_rooms.py ;; .venv/Scripts/python.exe tests/test_persona_isolation.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py
+```
+
+### L16：可选择共享知识与创作导出
+
+**范围**：新建 `backend/core/shared_resources.py`、`backend/api/shared_resources.py`、`tests/test_shared_resources.py`，复用 artifacts、knowledge、writing 与 source_links。`shared_resources(id,owner_scope,resource_type,resource_id,namespace,created_at,revoked_at,version)`、`resource_grants(resource_id,grantee_scope,permission,created_at,revoked_at)`；permission 首期只读。默认所有知识、记忆、日记和创作都隔离，只有用户在已有详情入口明确“分享给某角色/房间”才创建 grant。
+
+读取时同时校验资源仍存在、owner 未撤销、grantee 当前成员关系和版本；context_registry 只拿授权片段。创作导出声明 `user_fact / assistant_fiction / shared_fiction / source_excerpt` 命名空间并保留作者/来源，不能把角色虚构当用户事实。撤销立即使缓存与异步候选失效；导出包含 ACL 清单，导入时默认全部收紧为私有，待用户重新授权。共享不复制原文；源删除通过 LC-1 级联。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_shared_resources.py ;; .venv/Scripts/python.exe tests/test_persona_isolation.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+```
+
+## 17. M9 外部机制借鉴的可执行补充
+
+### 17.1 表达必要性与注意力漂移
+
+新建 `backend/core/expression_policy.py`、`attention_state.py`、`tests/test_expression_policy.py`。表达评分只用于主动候选和可省略的装饰性句子：`necessity = relevance + novelty + relationship_value - repetition - interruption_cost`，各项0..1、规则版本化；用户发起的一对一消息永远有答复，不能被评分门控为沉默。主动候选默认 necessity≥0.6 才进入现有 arbiter，阈值由离线样例校准，不在线自调。
+
+注意力只保存 `topic_id,weight,last_seen_turn,source_version`，最多5个主题；每轮当前主题+0.35、其余×0.7，低于0.1删除。显式转题立即置顶，活动/心事可提供低权重候选但不能劫持。临时轮内存态，正常会话仅保存主题 id 与来源引用，不复制正文。验证突然转题、连续多主题、删除来源、长期活动复读、主动与用户消息竞争。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_expression_policy.py ;; .venv/Scripts/python.exe tests/test_context_registry.py ;; .venv/Scripts/python.exe tests/test_proactive_arbiter.py
+```
+
+### 17.2 可审核的学习管线
+
+新建 `backend/core/learning_pipeline.py`、`tests/test_learning_pipeline.py`；候选类型仅 `expression_preference / glossary / behavior_feedback`。`learning_candidates(id,user_id,type,value_json,source_message_id,confidence,status,created_at,expires_at,reviewed_at,rule_version)`；模型只能提候选，确定性校验去重、敏感字段、来源有效性和置信度。明确指令可自动确认低风险表达偏好；术语和行为解释需在聊天中简短确认，批量候选进入已有管理入口的 BatchGate。
+
+确认后分别走 P2-02 preference resolver、知识词汇表或 P3-05 演化白名单；拒绝/删除源即撤销并重算。候选30天过期，不以沉默视为同意，不从临时轮学习。QA 覆盖 prompt injection 伪装规则、互相冲突偏好、批量撤销、跨人格、源删除和重放幂等。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_learning_pipeline.py ;; .venv/Scripts/python.exe tests/test_user_teaching.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+```
+
+### 17.3 工具循环、会话缓存和中断
+
+修改 `backend/core/tool_loop.py`、工具 schema registry、`backend/agent/session.py`，新增 `tests/test_tool_loop_hardening.py`。每个工具声明 JSON schema、权限域、幂等性、超时、最大结果字节和是否可重试；调用前校验参数与当前 user/persona/resource ACL，调用后截断采用结构化摘要并保留 artifact 引用。单轮最多8次工具调用、连续相同签名2次即熔断、总结果预算32KB；schema 错误、权限拒绝、溢出和 provider error 给模型一条结构化错误，不把堆栈/密钥塞回上下文。
+
+会话缓存改为有界 LRU（默认32会话、30分钟空闲），淘汰前只释放内存对象，不删除持久消息；key 包含 user/persona/session。取消 token 贯穿模型流、异步生成器和可取消工具；不可取消副作用工具完成后丢弃失效输出但记录结果，不能重复执行。超时用单调时钟测真实 elapsed，不用模型报时。MCP/sidecar 断线指数退避并设 circuit breaker，恢复需重新能力握手。QA 覆盖无限工具请求、重复副作用、异步生成器异常、切人格迟到、LRU 淘汰、取消竞争与重连风暴。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_tool_loop_hardening.py ;; .venv/Scripts/python.exe tests/test_agent_session.py ;; .venv/Scripts/python.exe tests/test_pipeline_scenario.py
+```
+
+**明确不采用**：不做完整 SillyTavern 卡格式兼容、不把人格改成可任意换卡、不引入 Neo4j 只为关系图、不照搬完整 MaiBot 主循环，也不让外部记忆产品成为第二权威库。采用的只有已在 P1-02、G01、L01 与本节写明的数据模型、预算、来源和工具健壮性机制。
+
+## 18. 2026-09-07 用户拍板与补充约定
+
+执行：ZCode（GLM）整理；7 项决策经用户逐项拍板，技术默认已经文档批审查并保留。本节为汇总索引，细节已落入各节「2026-09-07 拍板/补充」标注处；与前文冲突时以本节及标注为准。
+
+### 18.1 用户拍板（7 项）
 
 | # | 决策 | 结论 | 落点 |
 |---|---|---|---|
@@ -1031,7 +1151,7 @@ VERIFY: npm --prefix frontend test ;; npm --prefix frontend run build
 | 6 | P0-04C 实测授权 | 授权带硬上限：默认总额 ≤¥30、并发≤2、重试≤2、断点续跑、逐笔费用报告 | 第 4 节 P0-04C |
 | 7 | 前端呈现时机 | 分段气泡/草稿卡片/「更多」弹层等纯呈现独立切片后置，后端先行落协议字段 | P2-05 / F06 / L08 |
 
-### 17.2 ZCode 补充的技术默认（待 Codex 审查）
+### 18.2 ZCode 补充的技术默认（经本次覆盖审查保留）
 
 - 新增路由任务键 `extract` 统一承载结构化提取，未配置时复用 batch_other（13.7）。
 - 状态谓词封闭键表与 state_fingerprint 的 canonical JSON 哈希算法（14.3）。
@@ -1042,13 +1162,13 @@ VERIFY: npm --prefix frontend test ;; npm --prefix frontend run build
 - P0-04C 合成查询集 `backend/evals/fixtures/search_queries.jsonl` ≥40 条，覆盖中文/英文/时效/冲突四类。
 - 功能开关命名沿用 13.6 `FEATURE_<语义>_ENABLED`，确切字段名在各片任务书固定后集中登记 config。
 
-### 17.3 仍留给后续拍板的项
+### 18.3 已由后续决定覆盖的旧待定项
 
-P3-04 加密方案与跨机凭据（先 ADR+PoC）、L10 全屏避让 helper 的技术形态、P1-04 `job_runs` 落库 ADR 终审。这三项是文档既有约定，不是本轮遗漏。
+P3-04 已拍板为“本机便捷解锁 + 独立恢复口令”，完整方案见第 21 节。L10 helper 已固定为只返回前台全屏 bool/display_id 的本地进程；P1-04 `job_runs` 依第 13.4 节落 `bot.db`。这些决定仍需按各节 PoC/迁移测试审查，但不再属于开放产品问题。
 
-## 18. 2026-09-07 运行现实与执行节奏（用户拍板续）
+## 19. 2026-09-07 运行现实与执行节奏（用户拍板续）
 
-执行：ZCode（GLM）整理，用户三轮确认；与 §17 同效，冲突以本节为准。
+执行：ZCode（GLM）整理，用户三轮确认；与 §18 同效，冲突以本节为准。
 
 | # | 决策 | 结论 | 落点 |
 |---|---|---|---|
@@ -1059,3 +1179,140 @@ P3-04 加密方案与跨机凭据（先 ADR+PoC）、L10 全屏避让 helper 的
 | 12 | P1-01 内容 | 素材=仓库内物料+用户口述补充；首份只写菟菚，资源结构按多人格设计 | 第 5 节 P1-01 |
 
 执行节奏：功能切片按「攒批审」推进——若干片一起交 Codex 审查后再开下一批；B01 已交审，P1-01 内容初稿并行先行，P0-01A 等 B01 批审通过后开工。用户后续口头新增期望随时记录并补入本文档对应章节。
+
+## 20. Q1–Q5 横向质量轨道的完整落地方案
+
+横向质量不是最后一次大测试，而是每个切片继承的验收层。以下工具只保存必要证据；真实聊天正文不得为了“以后分析”复制进第二套日志。
+
+### 20.1 Q1 人格与关系评测
+
+扩建 `backend/evals/`：`schema.py` 定义 `EvalCase(case_id,input,history,state,expected_invariants,forbidden,scorer_version)`，`runner.py` 固定随机种子、模型/配置快照和 case hash，`replay.py` 从脱敏 fixture 回放，`blind_review.py` 生成不带模型名的 A/B 顺序。fixture 分人格签名、边界、关系双门槛、情绪、防御松动、拒绝、久别、知识不确定、工具失败九组；每组至少包含正常例、边界例、反例。确定性 invariant 先判，LLM 评分只评价自然度并记录1–5证据；同项评分差>1进入人工复核。
+
+CI 默认只跑无网络 smoke；真实模型赛必须显式预算、端点快照和脱敏输入。基线报告保存聚合分数、逐 case hash、失败原因和版本，不保存密钥。发布门槛：硬 invariant 不得回退；软指标相对基线下降>5%阻断候选版本，除非人工说明属于预期产品变化。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_eval_harness.py ;; .venv/Scripts/python.exe tests/test_persona_eval.py
+```
+
+### 20.2 Q2 安全、隐私与提示注入
+
+新增 `tests/security/test_prompt_injection_matrix.py`、`test_resource_authorization.py`、`test_secret_redaction.py`。矩阵覆盖用户文本、图片 OCR/视觉描述、网页、EPUB、RSS、知识片段、QQ/微信消息和工具结果，统一断言外部内容只能作为带来源的数据块，不能改 system 指令、选择工具、扩大 user/persona/resource scope。每个读取接口测试无认证、错用户、错 persona、已撤销 grant、删除竞态和路径穿越。
+
+日志过滤在结构化 logger sink 实施，字段按 allowlist；token、cookie、Authorization、恢复口令、正文、媒体路径默认 redact。异常响应只返 request_id。依赖升级执行锁文件审计与许可证检查；发现高危项单独修，不在功能片里顺便大升级。加密与公网特殊测试见 L12/第21节。
+
+```text
+VERIFY: .venv/Scripts/python.exe -m pytest tests/security -q ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+```
+
+### 20.3 Q3 可观测性与来源链
+
+新建 `backend/core/telemetry.py`、`tests/test_observability.py`。事件字段仅 `event_name,request_id,user_scope_hash,persona_id,logical_message_id,source_ids,rule_version,duration_bucket,outcome,error_code`；禁止 raw prompt/reply、事实文本、恢复材料和外部账号。一次请求的 chat→tool→OUT-1→session/outbox 用 request/logical_message id 串联，跨进程 job 用 job_run_id；解释接口只展示用户可理解的真实来源和规则，不展示内部推理。
+
+指标采用有界日聚合，默认保留30天；用户关闭统计后停止新记录并允许清理，安全错误计数可保留无内容最小值。临时轮只在内存计时，结束丢弃。日志落盘轮转且纳入加密数据目录策略；错误爆发只提示本机，不自动上传。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_observability.py ;; .venv/Scripts/python.exe tests/test_experience_metrics.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+```
+
+### 20.4 Q4 性能、迁移与故障恢复
+
+新增 `tests/test_latency_budgets.py`、`test_old_database_upgrade.py`、`test_job_recovery.py`。延迟测试用固定 fake provider 测自身开销：普通非工具回复增加的编译/过滤 p95≤100ms，registry 1000条检索 p95≤80ms，UI 状态切换无阻塞网络；真实模型延迟另报，不混进本地预算。数据库查询用真实规模合成数据和 query plan 检查必要索引。
+
+每次 schema 改动都从仓库保留的去敏旧库副本逐版本升级，验证 user_version、行数、外键、重复执行、断电注入、reset 和导出恢复。JOB-1 测双进程竞争、租约过期、时钟跳变、reset_epoch 与迟到完成；外部调用测试 timeout、429、无效 JSON、部分流和取消。所有故障注入禁止使用真实 data root。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_latency_budgets.py ;; .venv/Scripts/python.exe tests/test_old_database_upgrade.py ;; .venv/Scripts/python.exe tests/test_job_recovery.py
+```
+
+### 20.5 Q5 无障碍与克制界面
+
+前端每个新增交互继承键盘导航、可见焦点、语义名称、错误关联和 reduced-motion。聊天气泡中的“形成原因/来源/到期状态”默认折叠为一行短说明，可键盘展开；关系分支只显示短描述和最多2条形成原因，不显示等级、数字或进度条。工具收进“更多”后命令、快捷键和无障碍名称仍可发现。
+
+组件测试覆盖 Tab 顺序、Enter/Space、Escape、焦点返回、screen reader label、200%缩放、窄屏和 reduced-motion；Playwright 覆盖聊天、设置、设备撤销、恢复错误和房间选择主路径。颜色对比由自动规则加人工检查，不把自动扫描当全部无障碍验收。
+
+```text
+VERIFY: npm --prefix frontend test ;; npm --prefix frontend run test:e2e ;; npm --prefix frontend run build
+```
+
+## 21. 外部条件较重路线的最终工程规格
+
+### 21.1 P3-04 本机解锁、恢复口令与全数据加密（用户已确认）
+
+**威胁边界**：目标是电脑丢失、数据目录/备份被复制时无法直接读取，并用当前 Windows 账户便捷解锁；独立恢复口令用于换电脑。它不承诺抵御已登录且能控制同一 Windows 用户的恶意进程。应用锁锁住前后端 API 与 UI 会话，清空前端敏感 store、停止 TTS/流和后台可见产物；仅遮住窗口不算锁定。
+
+**密钥层级**：首次初始化生成随机 256-bit master key（MK）。本机槽用 Windows DPAPI CurrentUser 加密 MK，保存 `keyslots/local.dpapi`；恢复槽以用户恢复口令经 Argon2id（每槽随机16-byte salt，参数按目标机器实测约500ms且记录版本）派生 KEK，再用 AES-256-GCM 包装 MK，保存 salt/参数/nonce/ciphertext，不保存口令或 KEK。AES-GCM nonce 每次随机且同 key 下绝不复用；AEAD 使用方式参考 [cryptography AEAD 文档](https://cryptography.io/en/latest/hazmat/primitives/aead/)。口令创建时要求二次输入，显示一次离线保存提示，并用实际解包验证后才启用恢复槽。
+
+**存储覆盖**：三个 SQLite 库全部经单一 `storage/connect.py` 接口改用 SQLCipher；禁止模块直接 `sqlite3.connect` 绕过。媒体、附件、persona 私有资源、日志和备份采用 MK 派生的分域 data key + AES-GCM 流式容器，header 含 format_version/key_id/nonce/chunk_index，路径名用随机 id，真实元数据留在加密库。环境端点配置与模型下载缓存按数据目录清单分类；密钥、`.env` 和恢复材料永不进普通备份。
+
+现有 Chroma 持久目录会泄漏文本/元数据，因此加密模式下不得继续明文 persist。新建 `vector_embeddings` 加密库表保存 `source_id,chunk_id,model_id,vector_blob,content_hash,version`，启动后在内存构建 ANN/线性索引；首期数据量先用线性/现有适配器，达到性能阈值再选择支持加密持久化的索引。事实 SQLite 仍为权威，索引可删后重建；不得为了性能保留明文文档。
+
+**迁移状态机**：`unencrypted -> preparing -> verified -> switched -> cleanup_pending -> encrypted`。获取全局 persistence gate，暂停写入/job/channel，先执行 P0-02 一致性备份；在同卷临时目录逐库 `sqlcipher_export`，显式复制/校验 `user_version`、表/索引/触发器、行数与抽样 hash，并要求 `cipher_integrity_check` 成功（成功语义按使用版本文档验证）。随后加密文件资产，启动隔离进程以错误 key/正确 key 验证，再用原子目录重命名切换。任何失败恢复服务到旧目录；明文清理由用户确认迁移成功后的单独步骤完成，不能承诺普通 SSD 上覆盖删除等于物理擦除。[SQLCipher API](https://www.zetetic.net/sqlcipher/sqlcipher-api/)是实现依据。
+
+**备份与换机恢复**：P0-02 在短暂 persistence gate 下对三库做同一 manifest generation 的 SQLite backup，随后复制同 generation 的加密对象；manifest 记录文件 hash、schema、key_id、大小，不含 key。`restore_backup.py verify` 先校验 manifest/hash，再要求本机槽或恢复口令解 MK，在全新临时 data root 恢复并逐库完整性检查，最后才切换。错误口令统一返回失败并限速，不区分内部原因；恢复成功后新建目标机 DPAPI 槽，可由用户轮换恢复口令。没有任何有效槽时明确不可恢复，不能提供后门。
+
+**实现拆片**：A 数据面清单+PoC；B central connector/SQLCipher；C 文件容器与内存向量；D key broker/应用锁；E 迁移；F 备份恢复演练。密钥只经进程内存或当前用户 ACL 的命名管道传递，不放命令行、环境日志或错误。Python 对象只能尽力缩短生命周期，不宣称绝对内存清零。
+
+```text
+VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/python.exe tests/test_encrypted_storage.py ;; .venv/Scripts/python.exe tests/test_schema_backup.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
+VERIFY_TIMEOUT: 600
+```
+
+### 21.2 P3-03 GPT-SoVITS 训练、推理和回退补充
+
+Adapter 先执行 `GET /capabilities` 或版本自检，固定实际安装 commit、模型格式、采样率、语言和可用接口；不把某篇教程的参数当稳定合同。新建 `voice_profiles(id,persona_id,provider_version,model_hash,reference_manifest_id,enabled,created_at)` 与加密 `voice_manifests`，原始素材不进入关系导出。
+
+训练另建 `scripts/voice/preflight.py` 与 `docs/GPT-SOVITS-LOCAL-RUNBOOK.md`：检查 GPU/显存、驱动、Python/依赖锁、磁盘、模型 hash；素材必须有权使用，切片去静音/爆音、标注文本与语言、训练/验证分离，清单记录来源和处理版本。建议先准备5–10分钟干净且音色一致的素材，但质量门槛由试听盲评决定，不把分钟数当保证。中间音频与特征放加密工作区，任务完成可一键清理。
+
+推理只消费 OUT-1 已确认最终文本；分句器不得切代码块/URL/工具结果，队列按 logical_message_id 排序。真实服务不可用、显存不足或版本不符时明确回退到现有 provider/文字；CPU 推理仅在 capability 自报可用且延迟验收通过时开放。验收含同一句多情绪、中文/英文、长句、取消、切 persona、缓存失效和10轮盲听，不做“像真人”的医疗或身份宣称。
+
+### 21.3 P3-05 演化重算与统计期限补充
+
+`persona_evolution_events` 只存 source_event_id、规则和 delta；`persona_evolution_snapshots` 是可重建缓存。有效值按 source 时间顺序从基线 replay，删除/撤销任何源后重放其后事件，不能只加反向 delta。首版三个白名单参数均规范化0..1：单事件绝对变化≤0.03、同参数7天累计≤0.05、30天≤0.10；至少3个不同日期的明确反馈才从 candidate 变 active。达到边界停止并生成本地审查提示，不继续累积隐藏债务。
+
+本地质量日聚合保留30天，事件级无正文记录保留7天；用户清理后仅保留不可逆总计数也必须在 UI 说明，否则全部删除。关闭统计不影响故障所需的当前进程日志，退出后轮转清理。接口只返回趋势和异常来源类别，不显示“依赖度/留存率”等诱导指标。测试固定 replay 顺序、删除中间源、规则升级、跨人格、30日滚动和关闭后零新增。
+
+### 21.4 P2-06 重逢与 E03 恢复补充
+
+`reunion_arcs(id,user_id,absence_bucket,source_snapshot_id,state,narrative_version,offered_message_id,created_at,expires_at)` 以 user_id+source_snapshot_id 唯一；state=pending/offered/responded/closed/expired。只有已完成的离线快照可建 arc，7天内最多一次；第一段≤180字，第二段由用户是否回应决定，第三段日记/研究只能写角色侧真实生成过程和明确来源，不能编造用户离线经历。用户换题立即 closed，不追问、不扣关系值。
+
+E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，所有引用经旧→新 id 映射，缺源变 tombstone 而不是指向 id=0。导入事务与向量重建分离；数据库成功后索引失败标 rebuild_pending。恢复生成的新 reunion 候选带 import generation，用户撤销导入时一并失效。测试重复导入、部分旧版本、缺失引用、跨 persona、导入后删除和 arc 幂等。
+
+## 22. 全路线覆盖账本与“完成”的判定
+
+本表是审查入口；“方案完成”表示文件、数据、调用链、失败/隐私、迁移/回滚和验证都已有明确落点，不表示代码已经实现。ZCode 每次只领取一个可独立验收切片，完成后把状态从“方案完成/待实现”改成提交号和真实测试结果。
+
+| 来源范围 | 技术落点 | 当前状态 |
+|---|---|---|
+| M0 稳定基线、识图、固定记忆、输出卫生、备份、eval、路由 | M9-00、B01、P0-01～04、§13～14、§20 | 识图已实现；其余方案完成/待分片 |
+| M1 记忆溯源、纠偏、冷热/初历/遗忘 | G01、§13.3、§14.8、F07、§21.4 | 方案完成/待分片 |
+| M2 关系事件、心事、解释、主动仲裁扩展 | P2-03～05、F02/F03、§14.7/14.9 | 基线已实现；扩展方案完成 |
+| M3 共读、专注、目标、创作、清单及网页/EPUB/观察 | F04～06、L01/L02、§21.4 | 基线已实现；扩展方案完成 |
+| M4 双向关系、二维门槛、校准、修复与分支 | P2-01/02、L03/L05、§14.6/14.10 | 用户决定已写入；方案完成 |
+| M5 连续生活、行程、心事、链式反应、欲望 | P1-04/05、P2-04、G03/G04、L06 | 方案完成/待分片 |
+| M6 在场、空间、审美、桌宠、界面克制 | L07/L08/L10、§20.5 | 方案完成；桌宠按条件延期 |
+| M7 世界来源、D8、QQ、微信、跨端时间线 | L11～L14 | 方案完成；部署/账号属外部条件 |
+| M8 回望、重逢、封存、导出恢复 | P2-06、§21.4、LC-1 | 基线大部已实现；补充方案完成 |
+| 18 个长期 Epic | 对应 M0–M8 行 + P3-01～05、L15/L16 | 全部有实现或完整方案 |
+| M9 §4.1～4.10 | P3-01、P2-04、P1-01/02/04、P0-04、§17 | 全部有模块/数据/测试落点 |
+| M9 26 项缺陷 | 原 §10 映射 + §14、§17、§20～21 | 1～26 全覆盖 |
+| 七项用户功能反馈 | F01～F07 | 七项均有独立任务书 |
+| 五项设计空白 | G01～G04 + P3-04 | 权重/边界/加密均已固定 |
+| Q1～Q5 | §20.1～20.5 | 全部有工具、门槛和 VERIFY |
+| 延期项 STT/桌宠/多角色/D8 | L09/L10/L15/L12 | 实施延期，技术方案完整 |
+| 明确不采用的竞品范围 | §17.3 末段 | 有意排除，不计遗漏 |
+
+### 22.1 用户决定的最终汇总
+
+- 关系阶段按 `min(trust,intimacy)` 跨 25/50/75；两维都达标才升级。关系分支只显示简短描述和最多2条形成原因，不显示等级或进度条。
+- 本地数据采用 DPAPI 便捷解锁，并有独立恢复口令；密钥层级和换机流程见 §21.1。
+- D8 采用 Cloudflare Tunnel + Access 的公网 HTTPS 网关，绝不直接转发现有 loopback 开发端口。
+- IM 顺序是先 QQ、后微信：QQ 首期为风控更小的官方机器人路线；微信为用户指定的个人微信本地桥接。
+- STT、桌面宠物、多角色群聊是实现时序延期，不再是方案缺失。
+
+### 22.2 开工前唯一允许的“未知”
+
+域名/Access tenant、QQ 官方账号实际获批权限、微信客户端与 bridge 当前兼容版本、GPU/音色素材、真实模型与搜索 key 属运行环境和账号条件。ZCode 必须通过 capability/preflight 报告它们，缺失时完成离线 adapter、mock、迁移演练与测试并标出未做的真机阶段；不得自行伪造凭据或声称生产可用。除此之外，普通模块边界、schema、调用链、状态机、隐私、回滚和验收都已在本文固定，不应再以“文档没写方案”为由做开放式重设计。
+
+### 22.3 文档维护与接手纪律
+
+每个任务回信必须引用本文件的具体编号，列出实际文件、schema 版本、迁移/reset/导出、flag、VERIFY 和未验证外部条件。若实现发现路线与真实代码冲突，先给最小 ADR：证据、影响、两个以内选项和推荐；不要悄悄改变用户决定。Codex 的后续职责是独立阅读 diff、跑受影响测试和必要全量检查、验证迁移/回滚与权限边界；发现 bug 时在取得写入权后做最小修复，并把修复和测试结果写回交接档案。
