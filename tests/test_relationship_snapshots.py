@@ -412,10 +412,10 @@ def _test_restart_continuity() -> None:
         ).fetchone()[0]
         assert n >= 1, "重启后快照应仍在"
         version = int(raw.execute("PRAGMA user_version").fetchone()[0])
-        assert version == 17, f"schema 版本应为 17，实际 {version}"
+        assert version >= 17, f"关系快照需要 schema v17+，实际 {version}"
     finally:
         raw.close()
-    print("[OK] 重启连续性：快照落盘可见，schema v17")
+    print("[OK] 重启连续性：快照落盘可见")
 
 
 def _test_reset_clears_snapshots() -> None:
@@ -427,7 +427,7 @@ def _test_reset_clears_snapshots() -> None:
     assert not _rows("SELECT id FROM relationship_snapshots", ())
     with db._lock:
         version = int(db.conn.execute("PRAGMA user_version").fetchone()[0])
-    assert version == 17
+    assert version >= 17
     print("[OK] 重置：relationship_snapshots 清空且表结构保留")
 
 

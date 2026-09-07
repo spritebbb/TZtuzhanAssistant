@@ -64,7 +64,7 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        versions = {"bot.db": 17, "sessions.db": 1, "agent_tasks.db": 1}
+        versions = {"bot.db": 21, "sessions.db": 1, "agent_tasks.db": 1}
         for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")
@@ -99,6 +99,7 @@ def main() -> None:
                     "activity_viewpoints", "activity_goals", "goal_progress",
                     "relationship_events", "artifacts", "future_letters",
                     "relationship_snapshots", "dual_perspectives",
+                    "reunion_arcs",
                 } <= tables
                 # v6（M3.2 专注陪伴）：activities 复用计时字段，旧库自动补齐
                 activity_columns = {row[1] for row in conn.execute("PRAGMA table_info(activities)")}

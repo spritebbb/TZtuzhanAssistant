@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 20
+_SCHEMA_VERSION = 21
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -567,6 +567,23 @@ CREATE TABLE IF NOT EXISTS event_chains (
     updated_at TEXT NOT NULL,
     UNIQUE (user_id, source_event_id, rule_id)
 );
+-- P2-06 久别重逢三段式：只引用已完成的角色生活事件，不复制叙事原文。
+CREATE TABLE IF NOT EXISTS reunion_arcs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    absence_bucket TEXT NOT NULL,
+    source_snapshot_id INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending', -- pending/offered/responded/closed/expired
+    narrative_version INTEGER NOT NULL DEFAULT 1,
+    offered_message_id INTEGER,
+    response_message_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    UNIQUE (user_id, source_snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reunion_arcs_user
+    ON reunion_arcs(user_id, state, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_triples_user ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, id);
@@ -582,6 +599,18 @@ CREATE INDEX IF NOT EXISTS idx_profile_user ON user_profile(user_id);
 CREATE INDEX IF NOT EXISTS idx_terms_user ON user_terms(user_id);
 CREATE INDEX IF NOT EXISTS idx_style_map_user ON user_style_map(user_id);
 """
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """并发冷启动时等待另一个进程完成 WAL 切换。"""
+    for attempt in range(20):
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == 19:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _locked(method):
@@ -604,10 +633,10 @@ class UserDB:
         config.data_dir.mkdir(parents=True, exist_ok=True)
         path = config.data_dir / "bot.db"
         create_pre_upgrade_backup(path, config.data_dir / "backups", _SCHEMA_VERSION)
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA busy_timeout = 5000")
+        _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
         # 兼容旧库：补上 style_profile 列
@@ -1559,10 +1588,10 @@ class UserDB:
             except PermissionError:
                 time.sleep(0.3)
 
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA busy_timeout = 5000")
+        _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         if deleted:
             self.conn.executescript(_SCHEMA)
@@ -1578,7 +1607,7 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
-                "relationship_dimension_ledger", "user_preferences", "event_chains",
+                "relationship_dimension_ledger", "user_preferences", "event_chains", "reunion_arcs",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",

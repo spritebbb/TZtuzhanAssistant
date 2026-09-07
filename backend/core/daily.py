@@ -185,6 +185,12 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     await extract_promises(user_id, day, transcript)
     await extract_terms(user_id, day, transcript)
     await write_daily_diary(user_id, day, transcript)
+    try:
+        from .reunion import close_after_daily
+
+        close_after_daily(user_id, day)
+    except Exception:
+        logger.exception("[每日总结] 重逢日记收束失败（不影响批次）")
     await maybe_write_research_report(user_id)
     # 仅 LLM 判定成功才标记当日已完成；失败保留 done_key 空缺，下次可重试补判
     if llm_ok:

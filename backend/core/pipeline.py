@@ -671,6 +671,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     if not ephemeral:
         turn_id = db.add_message(user_id, "user", text)
 
+    # P2-06：久别问候后的第一条用户消息只推进重逢状态，不阻塞本轮正常聊天。
+    if not ephemeral:
+        try:
+            from .reunion import observe_user_turn
+
+            observe_user_turn(user_id, turn_id, text)
+        except Exception:
+            logger.exception("[pipeline] 重逢回应状态推进失败（不影响回复）")
+
     # 1.0b) P2-05：晚安/停止/换题取消旧追发；明确临时离开时，从紧邻的
     # assistant 来源挂一条有期限追发。临时轮不读写节奏状态。
     if not ephemeral:
