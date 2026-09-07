@@ -44,10 +44,12 @@ RESEARCH_PROMPT = """你是研究员菟菚，课题名《观察人类：以你�
 正文 180-420 个汉字，包含一个观察、一个仍不确定的假设、一个接下来想留意的小问题。语气聪明、有一点腹黑，但尊重对方；只使用材料中确有依据的内容，不做心理诊断，不编造事实。"""
 
 PROMISE_PROMPT = """你是约定记录员。根据对话，找出「双方明确许下的约定、承诺或计划中要做的事」，只输出 JSON：
-{"promises": [{"content": "一句短话概括约定（如：用户答应周五把新游戏 demo 发给菟菚看）", "follow_up": "YYYY-MM-DD 或空字符串"}]}
+{"promises": [{"content": "一句短话概括约定（如：用户答应周五把新游戏 demo 发给菟菚看）", "follow_up": "YYYY-MM-DD 或空字符串", "owner": "user 或 assistant", "due_at": "YYYY-MM-DD 或空字符串"}]}
 规则：
 - 只记明确说出口的约定（"明天给你看""周末一起""回头跟你说那件事"都算，但必须有具体事项）；
 - 客套话、已经做完的事、单方面的心愿不算；
+- owner 记许下这件事的人：用户许的填 user，菟菚许下的承诺填 assistant（分不清算 user）；
+- due_at 只在有明确期限（"周五之前""月底前"）时填；
 - follow_up 填最适合自然跟进的日期（约定当天或次日），判断不了就留空；
 - 没有约定就输出 {"promises": []}。"""
 
@@ -342,7 +344,14 @@ async def extract_promises(user_id: str, day: date, transcript: str) -> int:
         follow_up = str(item.get("follow_up") or "").strip()
         if not content:
             continue
-        if save_promise(user_id, content, follow_up, source=transcript[:200]) is not None:
+        owner = str(item.get("owner") or "user").strip()
+        if owner not in ("user", "assistant"):
+            owner = "user"
+        due_at = str(item.get("due_at") or "").strip() or None
+        # owner=assistant 且无可执行动作 → 只记为叙事约定，不后台执行任何工具（14.7）
+        action_kind = "narrative" if owner == "assistant" else None
+        if save_promise(user_id, content, follow_up, source=transcript[:200],
+                        owner=owner, due_at=due_at, action_kind=action_kind) is not None:
             added += 1
     return added
 
