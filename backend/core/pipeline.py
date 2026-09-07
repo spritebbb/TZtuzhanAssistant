@@ -671,6 +671,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     if not ephemeral:
         turn_id = db.add_message(user_id, "user", text)
 
+    # 1.0b) P2-05：晚安/停止/换题取消旧追发；明确临时离开时，从紧邻的
+    # assistant 来源挂一条有期限追发。临时轮不读写节奏状态。
+    if not ephemeral:
+        try:
+            from .conversation_rhythm import handle_user_turn
+
+            handle_user_turn(user_id, turn_id, text)
+        except Exception:
+            logger.exception("[pipeline] 会话节奏处理失败（不影响回复）")
+
     # 1.1b) P2-02 用户教学：明确指令（以后叫我X/别拿X开玩笑…）确定性提取入账；
     # 疑似推断不出手——只有显式教学模式才写偏好。临时轮不学习。
     if not ephemeral:
@@ -1385,6 +1395,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             )
     except Exception:
         logger.exception("[pipeline] 偏好约束注入失败（不影响回复）")
+    try:
+        from .conversation_rhythm import presence_line
+
+        presence = presence_line(user_id)
+        if presence:
+            messages.append({"role": "system", "content": presence})
+    except Exception:
+        logger.exception("[pipeline] 行程可及性提示失败（不影响回复）")
     if search_hits:
         snippets = "\n".join(f"- {h['title']}：{h['snippet']}" for h in search_hits[:5])
         messages.append(

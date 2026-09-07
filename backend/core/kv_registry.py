@@ -43,6 +43,7 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("surprise:last_artifact", "surprise", "上次惊喜使用的产物 id（素材轮换）", "runtime"),
     KvKeySpec("web_last_seen", "greeting", "久别问候的上次访问时间", "runtime"),
     KvKeySpec("web_greet_pending", "greeting", "问候生成中占位", "transient"),
+    KvKeySpec("rhythm:followups", "conversation_rhythm", "有期限追发实例（只存来源摘要）", "runtime"),
     KvKeySpec("daily_batch:{day}", "daily", "每日事实提炼批次完成标记", "daily"),
     KvKeySpec("bonus:{day}:{key}", "affection", "好感度彩蛋（夸奖/道歉等）每日去重与聊天计数", "daily"),
     KvKeySpec("reported_stage", "pipeline", "已向用户播报的关系阶段锚点", "runtime"),
