@@ -27,6 +27,9 @@ FLAG_DEFAULTS = {
     # P0-01A：用户可见回复在发送/持久化前统一检查。新功能按用户约定默认关闭，
     # 可由设置层显式开启；关闭时 pipeline 保持旧流式契约。
     "output_hygiene_enabled": False,
+    # P1-02：语境注册表接管共同清单语境（首期唯一 provider）。默认关闭，
+    # 关闭时走 colists.list_context 旧路径；两条路径互斥，不会双注入。
+    "context_registry_enabled": False,
 }
 
 

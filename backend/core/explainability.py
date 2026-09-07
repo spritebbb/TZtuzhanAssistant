@@ -19,6 +19,7 @@ def build_reply_explanation(
     memory_rows: Iterable[tuple[str, object]] = (),
     search_used: bool = False,
     media: str = "none",
+    contexts: Iterable[dict] = (),
 ) -> dict:
     """构造稳定、有限长的 UI 数据；不暴露 system prompt 或模型思考链。"""
     behavior = []
@@ -62,5 +63,14 @@ def build_reply_explanation(
         },
         "behavior": behavior,
         "memories": memories,
+        # P1-02 语境来源：只记录条目 id/命名空间/命中规则，不显示注入原文
+        "contexts": [
+            {
+                "id": _clean(c.get("id", ""), 60),
+                "namespace": _clean(c.get("namespace", ""), 40),
+                "reasons": [_clean(r, 24) for r in c.get("reasons", ())][:3],
+            }
+            for c in list(contexts)[:4]
+        ],
         "tools": {"search": bool(search_used), "media": media},
     }
