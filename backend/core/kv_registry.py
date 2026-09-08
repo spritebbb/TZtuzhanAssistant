@@ -55,6 +55,8 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("state:emotions", "emotion_state", "离散情绪有界快照（P1-03，≤3 条活跃情绪）", "runtime", export=True),
     KvKeySpec("state:emotion_repairs", "emotion_state", "每来源一次性修复记录（道歉/安抚）", "runtime"),
     KvKeySpec("state:schedule", "schedule", "行程状态机（当前块/能量记账/推进锚点，P1-04）", "runtime"),
+    KvKeySpec("state:life_templates", "life_templates", "L06 生活模板冷却/取消状态（last_used/vetoed_date）", "runtime"),
+    KvKeySpec("life_templates:outing_expressed:{day}", "life_templates", "L06 外出归来主动汇报每日去重", "daily"),
     KvKeySpec("state:calendar", "calendar_modulation", "日历阶段幂等状态（P1-05，近 8 天已见 phase）", "runtime"),
     KvKeySpec("state:relationship_tension", "state", "关系张力 0-100（修复期语气依据）", "runtime", export=True),
     KvKeySpec("state:emotion_memory", "state", "情绪记忆（跨天连续的心情素材）", "runtime", export=True),

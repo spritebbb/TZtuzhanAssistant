@@ -2,6 +2,8 @@
 """工具状态与元信息接口。"""
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -86,7 +88,11 @@ async def api_meta(session_id: str = ""):
 
 @router.get("/presence")
 async def api_presence():
-    """她此刻在做什么（行程只读）+ 最近的生活事件（体验收口状态行）。"""
+    """她此刻在做什么（行程只读）+ 最近的生活事件（体验收口状态行）。
+
+    L06 外出事件的消费：active_outing 非空表示她今天外出了（用户可见提醒，
+    拍板 #10「沉默但留提醒」）；recent_events 合并生活流与外出流（新→旧）。
+    """
     import asyncio
 
     from ..core.schedule import current_activity, latest_life_event
@@ -101,4 +107,23 @@ async def api_presence():
         events = await asyncio.to_thread(latest_life_event, uid)
     except Exception:
         events = []
-    return {"ok": True, "activity": activity, "recent_events": events}
+
+    active_outing = None
+    try:
+        from ..core.life_templates import latest_outing
+
+        today = datetime.now().astimezone().date().isoformat()
+        outings = await asyncio.to_thread(latest_outing, uid)
+        for outing in outings:
+            if outing.get("date") == today:
+                active_outing = outing
+                break
+        # 合并外出流进生活流（前端无需区分两种来源）
+        events = sorted(
+            events + outings, key=lambda e: str(e.get("occurred_at") or ""),
+            reverse=True,
+        )
+    except Exception:
+        pass
+    return {"ok": True, "activity": activity, "recent_events": events,
+            "active_outing": active_outing}
