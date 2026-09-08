@@ -417,14 +417,17 @@ _STYLE_HINT_TEXT = {
 
 
 def _evolution_line(user_id: str) -> str:
-    """P3-05 表达层演化 → 行为帧 evolution_line（无演化时为空串，行为不变）。"""
+    """P3-05 表达层演化 + L05 领域调制 + L03 气质倾向 → 行为帧 evolution_line。
+
+    三路都只给「轻倾向」的自然语言，不写分数；任一路失败即跳过，不阻塞回复。
+    """
+    fragments: list[str] = []
     try:
         from .persona_evolution import behavior_hints
 
         hints = behavior_hints(user_id)
         verbosity = float(hints.get("verbosity_preference", 0.5))
         humor = float(hints.get("humor_usage_rate", 0.5))
-        fragments: list[str] = []
         if verbosity >= 0.7:
             fragments.append("你最近更愿意多说一点，可以把想法铺开讲")
         elif verbosity <= 0.3:
@@ -433,9 +436,34 @@ def _evolution_line(user_id: str) -> str:
             fragments.append("你最近玩笑开得比平时多一点")
         elif humor <= 0.3:
             fragments.append("你最近收着玩笑，少玩梗")
-        return "；".join(fragments) + "。" if fragments else ""
     except Exception:
-        return ""
+        pass
+    # L05 领域调制：某域偏低 → 对应强度收敛（不碰阶段边界与隐私开关）
+    try:
+        from .domain_trust import behavior_hint as _domain_hint
+
+        domain = _domain_hint(user_id)
+        if domain.get("probing", 0.0) < 0:
+            fragments.append("最近你在情绪话题上更收敛，不急着往深里问")
+        if domain.get("humor", 0.0) < 0:
+            fragments.append("玩笑的分寸上你收着点")
+        if domain.get("initiative", 0.0) < 0:
+            fragments.append("最近别太主动张罗事情，顺着对方来")
+    except Exception:
+        pass
+    # L03 气质倾向：单轴 ±0.1 的轻修正（数值→语气词，不暴露轴名）
+    try:
+        from .relationship_style import behavior_hint as _style_hint, derive_style
+
+        style = derive_style(user_id)
+        axes = _style_hint(list(style.get("style_ids") or []))
+        if axes.get("humor", 0.0) > 0:
+            fragments.append("你们之间玩笑的默契已经在了，可以自然玩一下")
+        if axes.get("probing", 0.0) > 0:
+            fragments.append("你更敢接住对方的认真话题了")
+    except Exception:
+        pass
+    return "；".join(fragments) + "。" if fragments else ""
 
 
 def _style_line(user_id: str) -> str:
