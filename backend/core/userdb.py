@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 29  # v29: F03 thought context receipts
+_SCHEMA_VERSION = 30  # v30: L04 humor memory usage ledger
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -675,6 +675,23 @@ CREATE TABLE IF NOT EXISTS thought_context_receipts (
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, thought_id, turn_id)
 );
+-- L04 幽默记忆（runtime，不导出）：逐次使用/反馈明细。状态由明确反馈推导
+-- （7 天内 ≥2 次 positive → approved；负反馈优先 → retired），有效偏好仍由
+-- user_terms 承载并随关系包导出，本表只做冷却与授权判定。
+CREATE TABLE IF NOT EXISTS humor_usage (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    term_id        INTEGER NOT NULL,
+    source_turn_id INTEGER,
+    reaction       TEXT NOT NULL DEFAULT 'unknown',  -- positive / negative / unknown
+    last_used_at   TEXT,
+    blocked_until  TEXT,
+    status         TEXT NOT NULL DEFAULT 'candidate',  -- candidate / approved / retired
+    created_at     TEXT NOT NULL,
+    UNIQUE (user_id, term_id, source_turn_id)
+);
+CREATE INDEX IF NOT EXISTS idx_humor_usage_user
+    ON humor_usage(user_id, term_id);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1783,7 +1800,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
-                "thought_context_receipts",
+                "thought_context_receipts", "humor_usage",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

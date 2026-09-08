@@ -85,6 +85,10 @@ async def api_dismiss_thought(thought_id: int):
 @router.delete("/terms/{term_id}")
 async def api_delete_term(term_id: int):
     uid = active_user_id()
+    # L04：删共同语言时同步退役对应梗（侧表与偏好一致，删除后不能再讲）。
+    from ..core.humor_memory import retire_term
+
+    await asyncio.to_thread(retire_term, uid, term_id)
     if not await asyncio.to_thread(db.del_term, uid, term_id):
         return JSONResponse({"ok": False, "error": "这条共同语言不存在"}, status_code=404)
     logger.info("[记忆管理] 删除共同语言 #{}", term_id)
