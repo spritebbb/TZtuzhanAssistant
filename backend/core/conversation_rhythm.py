@@ -127,12 +127,17 @@ def ready_followups(user_id: str, *, now: datetime | None = None,
     return ready
 
 
-def cancel_followups(user_id: str, *, origin_turn_ids: list[int] | None = None) -> int:
-    """手动停止/晚安时取消未发追发（晚安只取消本会话追发，无惩罚）。"""
+def cancel_followups(user_id: str, *, origin_turn_ids: list[int] | None = None,
+                     now: datetime | None = None) -> int:
+    """手动停止/晚安时取消未发追发（晚安只取消本会话追发，无惩罚）。
+
+    now 可注入：过期判定必须与调用方同一时间基准，否则墙钟漂移会漏取消。
+    """
+    moment = now or _now()
     items = _load(user_id)
     n = 0
     for item in items:
-        if item.get("cancelled") or _expired(item, _now()):
+        if item.get("cancelled") or _expired(item, moment):
             continue
         if origin_turn_ids is None or item.get("origin_turn_id") in origin_turn_ids:
             item["cancelled"] = True
@@ -172,7 +177,7 @@ def handle_user_turn(
                 "cancelled": result["cancelled_followups"]}
     if _STOP_RE.search(text):
         return {"action": "stopped", "created": None,
-                "cancelled": cancel_followups(user_id)}
+                "cancelled": cancel_followups(user_id, now=now)}
 
     if _INTERRUPT_RE.search(text):
         with db._lock:

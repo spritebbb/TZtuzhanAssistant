@@ -269,6 +269,7 @@ async def api_chat(
                     continue
                 if isinstance(item, tuple) and item[0] == "__explanation__":
                     yield _sse({"explanation": item[1]})
+                    continue
                 if isinstance(item, tuple) and item[0] == "__draft__":
                     yield _sse({"draft": item[1]})
                     continue
