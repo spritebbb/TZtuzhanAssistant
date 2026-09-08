@@ -762,6 +762,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 开放问题登记失败（不影响回复）")
 
+    # L04：用户这句若是明确反馈（「这个梗好」/「别玩这个梗」），记到上一轮
+    # 她实际用过的梗上；「哈哈」单独出现不算明确认可。
+    if not ephemeral:
+        try:
+            from .humor_memory import record_feedback_from_reply
+
+            record_feedback_from_reply(user_id, text, turn_id=turn_id or None)
+        except Exception:
+            logger.exception("[pipeline] 幽默记忆反馈登记失败（不影响回复）")
+
     # G04：她刚发出过一个求助（24h 内），用户这句话若是接受/拒绝就走同一
     # respond 函数；归类不了就不打扰（不猜）。
     if not ephemeral:
@@ -1286,6 +1296,22 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             shared_terms = [
                 t for t in db.get_terms(user_id, limit=10) if (t.get("count") or 0) >= 2
             ][:5]
+            # L04：退役的梗不再出现；严肃/求助/修复场景默认不插。
+            from .humor_memory import filter_injectable, is_serious_context, select_humor
+
+            shared_terms = filter_injectable(user_id, shared_terms)
+            tension = int(getattr(reply_state, "tension", 0) or 0) if reply_state else 0
+            if is_serious_context(text, tension=tension):
+                shared_terms = []
+            elif shared_terms:
+                # 已授权（approved）的梗优先出现在注入里；其余共同语言行为不变。
+                picked = select_humor(
+                    user_id, stage=stage, serious=False, query=text,
+                )
+                if picked is not None:
+                    shared_terms.sort(
+                        key=lambda t: 0 if int(t["id"]) == int(picked["term_id"]) else 1
+                    )
         except Exception:
             logger.exception("[pipeline] 共同语言查询失败")
             shared_terms = []
@@ -1890,6 +1916,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             )
         except Exception:
             logger.exception("[pipeline] 表情包附带失败（不影响回复）")
+
+    # 5.10.05) L04 幽默记忆：回复里出现的共同语言记一次使用，供下一轮反馈归因
+    if not ephemeral:
+        try:
+            from .humor_memory import note_reply_usage
+
+            note_reply_usage(user_id, reply, turn_id or None)
+        except Exception:
+            logger.exception("[pipeline] 幽默记忆使用登记失败（不影响回复）")
 
     # 5.10.1) C4 解锁落账：回复已定稿，把「她说出口的话」摘要存进收集页
     if not ephemeral and pending_unlock is not None:
