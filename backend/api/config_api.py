@@ -20,6 +20,7 @@ _FLAG_LABELS = {
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
     "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",
+    "companion_requests_enabled": "她的请求：关系够近时她偶尔请你帮个小忙（挑歌/挑书）",
 }
 
 

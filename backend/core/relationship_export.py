@@ -32,7 +32,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs"),
+    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests"),
     "tasks": ("tasks", "promises", "open_questions"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -117,6 +117,7 @@ _REFERENCE_RULES = (
     _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
     _rule_static("relationship_style_evidence", "event_id", "relationship_events", frozenset()),
+    _rule_static("companion_requests", "life_event_id", "character_life_events", frozenset()),
     # open_questions.source_message_id 指向 messages（不属于关系包）：按
     # memory_policy.source_message_ids 先例不建引用规则，恢复时统一清空。
     _rule_dynamic("artifacts", "source_id", "source_type"),
@@ -401,6 +402,9 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     if table == "open_questions":
                         # 同上：源消息不在包内，清空编号避免指向目标库无关消息。
                         values["source_message_id"] = None
+                    if table == "companion_requests":
+                        # 同上：回应消息不在包内，清空编号。
+                        values["response_message_id"] = None
                     # 导入的是历史，不得让旧重逢弧在新命名空间继续等待回应。
                     if table == "reunion_arcs":
                         values["state"] = "closed"

@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 27  # v27: G03 open questions (cross-process research)
+_SCHEMA_VERSION = 28  # v28: G04 companion requests (song/book choice)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -648,6 +648,23 @@ CREATE TABLE IF NOT EXISTS open_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_open_questions_user
     ON open_questions(user_id, status, next_check_at);
+-- G04 她的求助/愿望：亲密与信任双门槛达标时，她偶尔请对方帮个小忙
+-- （挑歌/挑书）。候选经主动仲裁投递，24h 未回应过期不再问；接受只写
+-- 角色虚构产物，与现实承诺账分离。
+CREATE TABLE IF NOT EXISTS companion_requests (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             TEXT NOT NULL,
+    life_event_id       INTEGER,
+    kind                TEXT NOT NULL,           -- song_choice / book_choice
+    status              TEXT NOT NULL DEFAULT 'candidate',  -- candidate/offered/accepted/declined/expired
+    offered_at          TEXT,
+    expires_at          TEXT,
+    response_message_id INTEGER,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_companion_requests_user
+    ON companion_requests(user_id, status);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1755,7 +1772,7 @@ class UserDB:
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
-                "greeting_variant_usage", "open_questions",
+                "greeting_variant_usage", "open_questions", "companion_requests",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

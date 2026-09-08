@@ -762,6 +762,18 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 开放问题登记失败（不影响回复）")
 
+    # G04：她刚发出过一个求助（24h 内），用户这句话若是接受/拒绝就走同一
+    # respond 函数；归类不了就不打扰（不猜）。
+    if not ephemeral:
+        try:
+            from .companion_requests import respond_to_reply
+
+            responded = respond_to_reply(user_id, text, message_id=turn_id or None)
+            if responded:
+                logger.info("[pipeline] 求助回应已入账：{}", responded.get("status"))
+        except Exception:
+            logger.exception("[pipeline] 求助回应处理失败（不影响回复）")
+
     # 1.0b) P2-05：晚安/停止/换题取消旧追发；明确临时离开时，从紧邻的
     # assistant 来源挂一条有期限追发。临时轮不读写节奏状态。
     if not ephemeral:
