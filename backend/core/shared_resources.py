@@ -35,6 +35,16 @@ class SharedResourceError(ValueError):
     """共享授权的预期业务错误。"""
 
 
+def enabled() -> bool:
+    """L16 开关：关闭后停止新增授权，已有授权读取同样拒绝（默认开）。"""
+    try:
+        from .features import flag
+
+        return flag("shared_resources_enabled")
+    except Exception:
+        return False
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -58,6 +68,8 @@ def _resource_exists(user_id: str, resource_type: str, resource_id: int) -> bool
 def share(user_id: str, resource_type: str, resource_id: int,
           grantee_scope: str) -> dict:
     """把一件资源分享给 grantee 人格（幂等；重复分享复用既有授权）。"""
+    if not enabled():
+        raise SharedResourceError("共享功能已关闭，无法新增授权")
     if resource_type not in RESOURCE_TYPES:
         raise SharedResourceError(f"未知的资源类型：{resource_type}")
     if grantee_scope == user_id:
@@ -150,6 +162,8 @@ def check_access(grantee_scope: str, resource_type: str, resource_id: int,
     """
     from .userdb import db
 
+    if not enabled():
+        return False
     if _RESOURCE_TABLES.get(resource_type) is None:
         return False
     with db._lock:
@@ -183,6 +197,8 @@ def authorized_fragments(grantee_scope: str, resource_type: str,
 
     table = _RESOURCE_TABLES.get(resource_type)
     if table is None or resource_type not in ("kb_document", "artifact"):
+        return []
+    if not enabled():
         return []
     limit = max(1, min(100, int(limit)))
     with db._lock:
