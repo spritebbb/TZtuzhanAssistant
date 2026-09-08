@@ -858,6 +858,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 偏好教学提取失败（不影响回复）")
 
+    # 1.1c) §17.2 学习候选生产者：明确教学句式 → 候选（低风险表达偏好自动确认，
+    # 术语等用户确认；30 天未确认自动过期）。临时轮不学习。
+    if not ephemeral:
+        try:
+            from .learning_pipeline import propose_from_message
+
+            propose_from_message(user_id, text, source_message_id=turn_id or None)
+        except Exception:
+            logger.exception("[pipeline] 学习候选提取失败（不影响回复）")
+
     # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
     # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
     # 这里只保留两个语义感知不覆盖、始终走关键词的即时信号。

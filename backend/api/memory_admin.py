@@ -309,6 +309,41 @@ async def api_revoke_preference(pref_id: int):
     return {"ok": True, "item": row}
 
 
+@router.get("/learning-candidates")
+async def api_learning_candidates(include_revoked: bool = Query(False)):
+    """§17.2 学习候选：模型只能提候选，用户逐条确认/拒绝（BatchGate 语义）。"""
+    from ..core.learning_pipeline import list_candidates
+
+    uid = active_user_id()
+    items = await asyncio.to_thread(list_candidates, uid, include_revoked)
+    return {"ok": True, "items": items}
+
+
+@router.post("/learning-candidates/{candidate_id}/confirm")
+async def api_learning_confirm(candidate_id: int):
+    from ..core.learning_pipeline import LearningError, confirm
+
+    uid = active_user_id()
+    try:
+        result = await asyncio.to_thread(confirm, uid, candidate_id)
+    except LearningError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    logger.info("[学习] 用户确认候选 #{} → {}", candidate_id, result.get("routed_to"))
+    return {"ok": True, **result}
+
+
+@router.delete("/learning-candidates/{candidate_id}")
+async def api_learning_revoke(candidate_id: int):
+    from ..core.learning_pipeline import LearningError, revoke
+
+    uid = active_user_id()
+    try:
+        result = await asyncio.to_thread(revoke, uid, candidate_id)
+    except LearningError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    return {"ok": True, **result}
+
+
 @router.get("/domain-trust")
 async def api_domain_trust_get():
     """L05 领域信任：高层可依赖程度 + 每域最多 2 条来源（不含内部权重）。"""

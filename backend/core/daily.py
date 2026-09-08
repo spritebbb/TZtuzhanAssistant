@@ -137,6 +137,16 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     except Exception:
         logger.exception("[每日总结] {} 的开放问题复查失败", user_id)
 
+    # §17.2 学习候选到期收敛：30 天未确认的候选自动过期（沉默不是同意）。
+    try:
+        from .learning_pipeline import expire_stale
+
+        expired = await asyncio.to_thread(expire_stale, user_id)
+        if expired:
+            logger.info("[每日总结] {} 的学习候选过期 {} 条", user_id, expired)
+    except Exception:
+        logger.exception("[每日总结] {} 的学习候选过期扫描失败", user_id)
+
     # 幂等防重跑：同一天只执行一次（schedule 按 key 去重，这里再兜一道）
     done_key = f"daily_batch:{day.isoformat()}"
     if _kv_get(user_id, done_key):
