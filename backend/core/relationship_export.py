@@ -41,7 +41,8 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     ),
     "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot"),
-    "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources"),
+    "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources",
+                  "shared_resources", "resource_grants"),
     "conversations": ("messages",),
 }
 
@@ -104,6 +105,7 @@ def _rule_dynamic(table: str, column: str, type_column: str):
 _REFERENCE_RULES = (
     _rule_static("artifact_placements", "artifact_id", "artifacts", frozenset()),
     _rule_dynamic("aesthetic_preferences", "source_id", "source_type"),
+    _rule_static("resource_grants", "resource_id", "shared_resources", frozenset()),
     _rule_static("activity_notes", "activity_id", "activities"),
     _rule_static("reading_segments", "activity_id", "activities"),
     _rule_static("observation_entries", "activity_id", "activities"),
@@ -461,6 +463,13 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     (ref_new_id, row_new_id, target_user_id),
                 )
             _remap_snapshot_manifests(data, id_maps, target_user_id)
+            if "resource_grants" in data:
+                # L16：导入默认全部收紧为私有——授权撤销待用户重新分享。
+                db.conn.execute(
+                    "UPDATE resource_grants SET revoked_at=? WHERE user_id=? "
+                    "AND revoked_at IS NULL",
+                    (datetime.now().isoformat(timespec="seconds"), target_user_id),
+                )
             for key, value in kv_export.items():
                 db.conn.execute(
                     "INSERT INTO kv_store (user_id, key, value) VALUES (?, ?, ?) "
