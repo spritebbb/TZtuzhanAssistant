@@ -117,3 +117,23 @@ export async function unblockRelationshipStyle(style: string): Promise<void> {
   const response = await apiFetch(`/api/memory/relationship-style/${style}/block`, { method: 'DELETE' })
   if (!response.ok) throw new Error('撤销失败')
 }
+
+export interface DomainTrustItem {
+  domain: string
+  label: string
+  value: number
+  reasons: { event_id: number; delta: number; occurred_at: string }[]
+}
+
+/** L05 五域信任：高层可依赖程度 + 每域最多 2 条来源（不返回内部权重）。 */
+export async function getDomainTrust(): Promise<DomainTrustItem[]> {
+  const response = await apiFetch('/api/memory/domain-trust')
+  if (!response.ok) throw new Error('领域信任读取失败')
+  const data = await response.json()
+  return (data.domains ?? []).map((item: DomainTrustItem) => ({
+    domain: String(item.domain),
+    label: String(item.label),
+    value: Number(item.value ?? 0),
+    reasons: item.reasons ?? [],
+  }))
+}

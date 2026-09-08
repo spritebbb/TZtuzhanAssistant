@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { getDiaries, getResearchReports, type DiaryEntry, type ResearchReport } from '../api/diary'
 import { getUnlocks, type UnlockSlot } from '../api/unlocks'
-import { getRelationshipStyle, type RelationshipStyle } from '../api/relationship'
+import { getRelationshipStyle, getDomainTrust, type RelationshipStyle, type DomainTrustItem } from '../api/relationship'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -11,6 +11,7 @@ const diaries = ref<DiaryEntry[]>([])
 const reports = ref<ResearchReport[]>([])
 const unlocks = ref<UnlockSlot[]>([])
 const styleInfo = ref<RelationshipStyle | null>(null)
+const domainTrust = ref<DomainTrustItem[]>([])
 const loading = ref(false)
 const error = ref('')
 
@@ -36,9 +37,17 @@ async function loadStyle() {
   } catch { /* 展示性内容，失败静默 */ }
 }
 
+async function loadDomainTrust() {
+  if (domainTrust.value.length) return
+  try {
+    domainTrust.value = await getDomainTrust()
+  } catch { /* 展示性内容，失败静默 */ }
+}
+
 function toggleOurs() {
   tab.value = 'ours'
   void loadStyle()
+  void loadDomainTrust()
 }
 
 watch(() => props.show, (show) => { if (show) void load() })
@@ -102,6 +111,20 @@ watch(() => props.show, (show) => { if (show) void load() })
               <p class="hint">一起做的事情多了，这里会写下这段关系长成的样子</p>
             </template>
           </article>
+          <!-- L05 五域信任：只显示可依赖程度的高层描述，不显示内部权重与分数 -->
+          <article v-if="domainTrust.length" class="unlock domain-card">
+            <div class="meta"><time>——</time><span>她的可依赖程度</span></div>
+            <ul class="domains">
+              <li v-for="item in domainTrust" :key="item.domain">
+                <span class="domain-label">{{ item.label }}</span>
+                <span class="domain-bar" role="img" :aria-label="`${item.label}：${item.value} 分`">
+                  <i :style="{ width: item.value + '%' }"></i>
+                </span>
+                <span class="domain-value">{{ item.value }}</span>
+              </li>
+            </ul>
+            <p class="hint">这五个方面她各自积累到什么程度；数字来自真实发生的事，随时可以重来</p>
+          </article>
         </template>
       </div>
     </section>
@@ -128,4 +151,13 @@ p { margin: 10px 0 0; line-height: 1.78; white-space: pre-wrap; }
 article.unlock.locked { opacity: .55; border-style: dashed; }
 article.unlock.pending { border-color: var(--accent); }
 article.unlock .hint { color: var(--text-muted); font-size: 13px; }
+.domains { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.domains li { display: grid; grid-template-columns: 72px 1fr 34px; align-items: center; gap: 10px; }
+.domain-label { color: var(--text-muted); font-size: 13px; }
+.domain-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
+.domain-bar i { display: block; height: 100%; background: var(--accent); }
+.domain-value { text-align: right; font-size: 13px; color: var(--text-muted); }
+@media (max-width: 480px) {
+  .domains li { grid-template-columns: 64px 1fr 30px; gap: 6px; }
+}
 </style>
