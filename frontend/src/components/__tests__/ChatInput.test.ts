@@ -15,13 +15,14 @@ describe('ChatInput privacy mode', () => {
       },
     })
 
+    await wrapper.get('[title="快捷指令"]').trigger('click')
     const privacy = wrapper.get('.privacy-toggle')
     expect(privacy.attributes('aria-pressed')).toBe('false')
     await privacy.trigger('click')
     expect(wrapper.emitted('update:ephemeral')?.[0]).toEqual([true])
   })
 
-  it('disables image upload while no-trace mode is active', () => {
+  it('disables image upload while no-trace mode is active', async () => {
     const wrapper = mount(ChatInput, {
       props: {
         input: '',
@@ -33,6 +34,7 @@ describe('ChatInput privacy mode', () => {
 
     const imageButton = wrapper.findAll('.icon-btn')[1]
     expect(imageButton.attributes('disabled')).toBeDefined()
+    await wrapper.get('[title="快捷指令"]').trigger('click')
     expect(wrapper.get('.privacy-toggle').text()).toContain('已开启')
   })
 })

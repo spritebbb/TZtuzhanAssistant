@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ensureBaseUrl, getApiUrl } from '../api'
+import { visualQuiet, visualState } from '../state/visualState'
 
 const props = defineProps<{ size?: number }>()
 
@@ -15,6 +16,8 @@ onMounted(async () => {
 <template>
   <div
     class="portrait-wrap"
+    :class="{ quiet: visualQuiet }"
+    :data-presence="visualState.presence"
     :style="{ width: props.size + 'px', height: props.size + 'px' }"
   >
     <img
@@ -43,4 +46,5 @@ onMounted(async () => {
   object-position: center 12%;
   display: block;
 }
+.portrait-wrap.quiet .portrait { transition: none; animation: none; }
 </style>

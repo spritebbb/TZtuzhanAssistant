@@ -118,6 +118,7 @@ def _default_settings(profile_id: str, name: str) -> dict:
         "subtitle": "独立人格档案",
         "theme": "dark",
         "voice": DEFAULT_VOICE,
+        "motion_enabled": True,
         "created_at": int(time.time()),
         "data_key": scoped_user_id(DEFAULT_USER_ID, profile_id),
     }
@@ -265,11 +266,17 @@ def import_card(filename: str, data: bytes) -> dict:
 
 
 def update_profile(profile_id: str, updates: dict) -> dict:
-    allowed = {"name", "subtitle", "theme", "voice"}
+    allowed = {"name", "subtitle", "theme", "voice", "motion_enabled"}
     with _lock:
         profile = load_profile(profile_id)
         for key in allowed:
             if key not in updates:
+                continue
+            if key == "motion_enabled":
+                value = updates[key]
+                if not isinstance(value, bool):
+                    raise PersonaProfileError("motion_enabled 必须是布尔值")
+                profile[key] = value
                 continue
             value = str(updates[key]).strip()
             if key == "name" and not value:

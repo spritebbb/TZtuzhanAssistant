@@ -17,6 +17,7 @@ import { ensureBaseUrl, apiFetch } from './api'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
 import { useFocusMode } from './utils/focusMode'
+import { refreshVisualState, startVisualState, stopVisualState, switchVisualPersona, visualRecentEvents, visualState, visualQuiet } from './state/visualState'
 
 // M3.2 专注陪伴：全局计时与安静模式（body.focus-mode），应用存活期内持续对表
 const focusMode = useFocusMode()
@@ -32,6 +33,9 @@ const dashboardOpen = ref(false)
 const activityOpen = ref(false)
 const sidebarOpen = ref(false)
 const personaOpen = ref(false)
+const moreOpen = ref(false)
+const moreQuery = ref('')
+const compactUi = ref(true)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
 const chatReloadKey = ref(0)
@@ -46,43 +50,12 @@ const activePersona = ref<PersonaProfile>({
 const generating = ref(false)
 function onStreamingChange(v: boolean) {
   generating.value = v
-  // 一条回复流结束（v=false）＝好感度可能刚变动过 → 顺手刷新顶部好感度条
-  if (!v) refreshAffection()
+  if (!v) void refreshVisualState(activePersona.value.id).catch(() => {})
 }
-
-// === 顶部好感度条：从 /api/meta 读取好感度/阶段/羁绊 ===
-const affection = ref({ value: 0, stage: '初识', bond: '', next: '熟悉', next_at: 25, fill: 0 })
-async function refreshAffection() {
-  try {
-    const r = await apiFetch('/api/meta')
-    const d = await r.json()
-    if (d.affection) affection.value = d.affection
-  } catch { /* 好感度拉取失败保留旧值 */ }
-}
-
-// === 她此刻在做什么：从 /api/presence 读取行程状态与最近生活事件 ===
-const presence = ref({ activity_label: '', location_label: '', activity: '' })
-const recentLifeEvents = ref<Array<{ date: string; description: string }>>([])
 const presenceLabel = computed(() => {
-  if (!presence.value.activity_label) return ''
-  if (presence.value.activity === 'sleeping') return '睡觉了'
-  const where = presence.value.location_label ? `在${presence.value.location_label}` : ''
-  return `${where}${presence.value.activity_label}`
+  const labels: Record<string, string> = { home: '陪伴中', mobile: '在路上', announced_offline: '外出中', rest: '休息中', focus: '专注陪伴中' }
+  return labels[visualState.value.presence] || '陪伴中'
 })
-async function refreshPresence() {
-  try {
-    const r = await apiFetch('/api/presence')
-    const d = await r.json()
-    if (d.ok && d.activity) {
-      presence.value = {
-        activity_label: d.activity.activity_label || '',
-        location_label: d.activity.location_label || '',
-        activity: d.activity.activity || '',
-      }
-    }
-    if (d.ok && Array.isArray(d.recent_events)) recentLifeEvents.value = d.recent_events
-  } catch { /* 行程拉取失败保留旧值 */ }
-}
 
 // === 主动归档当前对话 ===
 const archiving = ref(false)
@@ -128,7 +101,7 @@ async function doReset() {
     chatReloadKey.value += 1
     currentId.value = CURRENT_SESSION_ID
     resetOpen.value = false
-    refreshAffection()  // 失忆后好感度归零，刷新顶部条
+    void refreshVisualState(activePersona.value.id).catch(() => {})
   } catch {
     window.alert?.('重置失败，请稍后重试')
   } finally {
@@ -197,6 +170,7 @@ function onKeydown(e: KeyboardEvent) {
     knowledgeOpen.value = false
     sidebarOpen.value = false
     personaOpen.value = false
+    moreOpen.value = false
   }
 }
 
@@ -218,6 +192,47 @@ function openBookshelfFromActivity() {
   knowledgeOpen.value = true
 }
 
+const moreTools = [
+  { id: 'dashboard', label: '成长总览' }, { id: 'diary', label: '日记' },
+  { id: 'memory', label: '记忆与了解她' }, { id: 'corner', label: '我们的角落' },
+  { id: 'usage', label: '用量账本' }, { id: 'knowledge', label: '书架' },
+  { id: 'agent', label: '任务代理' }, { id: 'archive', label: '归档当前对话' },
+  { id: 'theme', label: '切换主题' }, { id: 'motion', label: '切换动效' },
+  { id: 'settings', label: '设置' }, { id: 'reset', label: '重新开始' },
+]
+const recentToolIds = ref<string[]>([])
+const filteredTools = computed(() => {
+  const query = moreQuery.value.trim().toLowerCase()
+  const ranked = [...moreTools].sort((a, b) => recentToolIds.value.indexOf(b.id) - recentToolIds.value.indexOf(a.id))
+  return query ? ranked.filter(item => item.label.toLowerCase().includes(query)) : ranked
+})
+function rememberTool(id: string) {
+  recentToolIds.value = [id, ...recentToolIds.value.filter(item => item !== id)].slice(0, 4)
+  try { localStorage.setItem('tztuzhan-recent-tools', JSON.stringify(recentToolIds.value)) } catch { /* ignore */ }
+}
+async function toggleMotion() {
+  const enabled = activePersona.value.motion_enabled !== false
+  activePersona.value = await updatePersona(activePersona.value.id, { motion_enabled: !enabled })
+  await refreshVisualState(activePersona.value.id)
+}
+function useMoreTool(id: string) {
+  rememberTool(id)
+  moreOpen.value = false
+  moreQuery.value = ''
+  if (id === 'dashboard') dashboardOpen.value = true
+  else if (id === 'diary') diaryOpen.value = true
+  else if (id === 'memory') memoryOpen.value = true
+  else if (id === 'corner') cornerOpen.value = true
+  else if (id === 'usage') usageOpen.value = true
+  else if (id === 'knowledge') knowledgeOpen.value = true
+  else if (id === 'agent') agentOpen.value = true
+  else if (id === 'archive') void archiveNow()
+  else if (id === 'theme') toggleTheme()
+  else if (id === 'motion') void toggleMotion().catch(() => window.alert?.('动效设置保存失败'))
+  else if (id === 'settings') openSettings()
+  else if (id === 'reset') openResetConfirm()
+}
+
 async function loadActivePersona() {
   try {
     const data = await listPersonas()
@@ -235,8 +250,7 @@ function onPersonaSwitched(profile: PersonaProfile) {
   currentId.value = CURRENT_SESSION_ID
   sessionListKey.value += 1
   chatReloadKey.value += 1
-  refreshAffection()
-  refreshPresence()
+  void switchVisualPersona(profile.id).catch(() => {})
   window.dispatchEvent(new CustomEvent('tztuzhan:persona-switched', { detail: profile }))
 }
 
@@ -245,20 +259,28 @@ onMounted(async () => {
   loadTheme()
   await loadActivePersona()
   applyTheme(theme.value, false)
+  try {
+    const saved = JSON.parse(localStorage.getItem('tztuzhan-recent-tools') || '[]')
+    if (Array.isArray(saved)) recentToolIds.value = saved.filter(id => moreTools.some(item => item.id === id)).slice(0, 4)
+  } catch { /* ignore */ }
   document.addEventListener('keydown', onKeydown)
-  refreshAffection()  // 首屏载入好感度条
-  refreshPresence()   // 首屏载入「她此刻在做什么」状态行
+  try {
+    const flags = await (await apiFetch('/api/flags')).json()
+    compactUi.value = flags.flags?.compact_ui_enabled !== false
+  } catch { /* 保持简洁布局 */ }
+  startVisualState(() => activePersona.value.id)
   focusMode.start()   // 专注陪伴：恢复未结束的计时并对表
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   focusMode.stop()
+  stopVisualState()
 })
 </script>
 
 <template>
-  <div class="app-root">
+  <div class="app-root" :class="{ 'visual-quiet': visualQuiet }">
     <!-- 侧栏 -->
     <SessionList
       :key="sessionListKey"
@@ -296,7 +318,7 @@ onUnmounted(() => {
         <button v-if="focusMode.current.value" class="presence focus-chip" title="专注陪伴中，点击查看" @click="activityOpen = true">
           ⏱ {{ focusClockText }}
         </button>
-        <div class="header-right">
+        <div v-if="!compactUi" class="header-right">
           <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>
@@ -366,23 +388,23 @@ onUnmounted(() => {
             </svg>
           </button>
         </div>
-      </header>
-      <!-- 好感度条：细藤对你的依赖与亲近程度 -->
-      <div class="aff-bar">
-        <svg class="aff-heart" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 21s-6.7-4.4-9.3-8.5C.6 9.2 2.3 5.5 5.7 5.5c2 0 3.4 1.1 4.3 2.5h4c.9-1.4 2.3-2.5 4.3-2.5 3.4 0 5.1 3.7 3 7-2.6 4.1-9.3 8.5-9.3 8.5z"/>
-        </svg>
-        <div class="aff-track">
-          <div class="aff-fill" :style="{ width: Math.min(100, affection.fill) + '%' }"></div>
+        <div v-else class="header-right compact-actions">
+          <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">活动</button>
+          <button class="icon-btn" aria-haspopup="dialog" :aria-expanded="moreOpen" title="更多功能" @click="moreOpen = !moreOpen">更多</button>
         </div>
-        <span class="aff-label">{{ affection.value }} · {{ affection.bond || affection.stage }}</span>
-        <span v-if="affection.next" class="aff-next" :title="'距「' + affection.next + '」还需 ' + (affection.next_at - affection.value) + ' 点'">→ {{ affection.next }} {{ affection.next_at - affection.value }}</span>
-        <span v-else class="aff-next max">♥ 已至圆满</span>
+      </header>
+      <div v-if="compactUi && moreOpen" class="more-panel glass" role="dialog" aria-label="更多功能">
+        <label>查找功能<input v-model="moreQuery" autofocus placeholder="日记、书架、设置…" /></label>
+        <div class="more-grid">
+          <button v-for="tool in filteredTools" :key="tool.id" @click="useMoreTool(tool.id)">
+            {{ tool.label }}<small v-if="recentToolIds.includes(tool.id)">最近使用</small>
+          </button>
+        </div>
       </div>
       <!-- 她的生活：此刻在做什么 + 最近经历了什么（虚构日常，只读展示） -->
-      <div v-if="recentLifeEvents.length" class="life-strip" :title="'她的虚构日常，与你们的真实互动分开记录'">
+      <div v-if="!compactUi && visualRecentEvents.length" class="life-strip" :title="'她的虚构日常，与你们的真实互动分开记录'">
         <div class="life-now">{{ presenceLabel }}</div>
-        <div v-for="(ev, i) in recentLifeEvents.slice(0, 2)" :key="i" class="life-event">{{ ev.date.slice(5) }} · {{ ev.description }}</div>
+        <div v-for="(ev, i) in visualRecentEvents.slice(0, 2)" :key="i" class="life-event">{{ ev.date.slice(5) }} · {{ ev.description }}</div>
       </div>
       <ChatView :session-id="currentId" :reload-key="chatReloadKey" :persona-name="activePersona.name" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
@@ -648,6 +670,14 @@ onUnmounted(() => {
   position: relative;
   z-index: 1;
 }
+.compact-actions .icon-btn { width: auto; min-width: 48px; padding: 0 10px; font-size: .75rem; }
+.more-panel { position: absolute; z-index: 90; right: 16px; top: 66px; width: min(360px, calc(100vw - 32px)); padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.more-panel label { display: grid; gap: 6px; font-size: .75rem; color: var(--text-dim); }
+.more-panel input { border: 1px solid var(--border); border-radius: 8px; padding: 9px; color: var(--text); background: var(--bg-input); }
+.more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.more-grid button { display: flex; justify-content: space-between; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 9px; background: var(--bg-card); color: var(--text-dim); cursor: pointer; }
+.more-grid small { color: var(--text-faint); font-size: .62rem; }
+.visual-quiet *, .visual-quiet *::before, .visual-quiet *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 .icon-btn {
   display: flex;
   align-items: center;

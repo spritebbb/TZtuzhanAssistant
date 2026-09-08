@@ -27,7 +27,8 @@ from backend.core import life_templates as lt
 from backend.core.life_templates import LifeTemplate, LifeTemplateError
 from backend.core.userdb import db, kv_get, kv_set
 
-AT = datetime(2026, 9, 8, 12, 0).astimezone()
+# “今日外出”验收必须锚定运行日，避免跨日后把真实正确行为误判为失败。
+AT = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 def _tpl(**kw) -> LifeTemplate:

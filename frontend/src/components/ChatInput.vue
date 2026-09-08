@@ -52,6 +52,14 @@ function useShortcut(s: Shortcut) {
           <span class="sc-label">{{ s.label }}</span>
         </button>
       </div>
+      <button
+        class="privacy-toggle"
+        :class="{ active: ephemeral }"
+        :aria-pressed="ephemeral"
+        :disabled="busy || streaming"
+        title="仅本轮生效：消息和回复不进入会话、记忆、画像、日记或关系状态"
+        @click="ephemeral = !ephemeral"
+      >{{ ephemeral ? '本轮不留痕 · 已开启' : '本轮不留痕' }}</button>
     </div>
 
     <div class="input-box">
@@ -81,14 +89,6 @@ function useShortcut(s: Shortcut) {
       </button>
     </div>
     <div class="inputbar-foot">
-      <button
-        class="privacy-toggle"
-        :class="{ active: ephemeral }"
-        :aria-pressed="ephemeral"
-        :disabled="busy || streaming"
-        title="仅本轮生效：消息和回复只在当前界面暂时显示，不进入会话、记忆、画像、日记或关系状态"
-        @click="ephemeral = !ephemeral"
-      >{{ ephemeral ? '本轮不留痕 · 已开启' : '本轮不留痕' }}</button>
       <span class="foot-status" :class="{ live: streaming }">
         <span class="dot"></span>{{ streaming ? '正在输入…' : '菟丝缠绕' }}
       </span>
@@ -200,6 +200,7 @@ textarea::placeholder { color: var(--text-faint); }
   justify-content: space-between;
   padding: 6px 6px 0;
 }
+.inputbar-foot .foot-status { margin-left: auto; }
 .tip { font-size: 0.68rem; color: var(--text-faint); }
 .privacy-toggle {
   padding: 3px 8px;
