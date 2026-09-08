@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/latest"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=for-the-badge&logo=windows" alt="Windows 10/11" />
   <img src="https://img.shields.io/badge/Python-3.11--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11 to 3.13" />
   <img src="https://img.shields.io/badge/FastAPI-%2B%20Vue%203-009688?style=for-the-badge&logo=fastapi" alt="FastAPI and Vue 3" />
@@ -18,8 +18,10 @@
 
 <p align="center">
   <a href="#-快速开始">快速开始</a> ·
-  <a href="#-v300-更新亮点">v3.0 亮点</a> ·
+  <a href="#-v310-更新亮点">v3.1 亮点</a> ·
   <a href="#-核心能力">核心能力</a> ·
+  <a href="#-能力演示新手教程">能力演示</a> ·
+  <a href="#-mcp-扩展接你自己的工具">MCP 扩展</a> ·
   <a href="#-部署指南">部署指南</a> ·
   <a href="#-局域网访问与安全">局域网安全</a> ·
   <a href="#-配置项env">配置</a>
@@ -27,18 +29,32 @@
 
 ---
 
-## 📦 v3.0.0 已发布
+## 📦 v3.1.0 已发布
 
 | 推荐下载 | 适合谁 | 下载 |
 |---|---|---|
-| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-v3.0.0.zip) |
-| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-Full-v3.0.0-Large.zip) |
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-v3.1.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-Full-v3.1.0-Large.zip) |
 
 > 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0"><strong>查看完整 Release 说明 →</strong></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.1.0"><strong>查看完整 Release 说明 →</strong></a>
 </p>
+
+## ✨ v3.1.0 更新亮点
+
+v3.1 把菟菚从「有状态的伙伴」推进到「**能派活、能自己收尾的 Agent**」，并补齐了长期运行需要的治理与可观测能力：
+
+- 🤖 **Agent 全生命周期**：聊天里一句「帮我分几步做 X」即可建任务（自动拆成多步计划）；支持**定时执行**、**失败重试**、**任务产物落盘**（`workspace/agent-reports/`），并在任务面板逐步确认每一步。
+- 🌐 **MCP 标准协议接入**：客户端支持 Streamable HTTP 与旧版 HTTP+SSE 自动探测，可接生态里的真实 MCP 服务器（Playwright 浏览器自动化、Context7 实时文档已实测）；配套 **stdio→HTTP 桥**，让只讲 stdio 的服务器也能接；工具**按需注入**，工具表不会随服务器增加而膨胀。
+- 👀 **监控 Agent**：让她盯着某个网页，内容变化时主动告诉你——只比对内容指纹、不保存网页正文。
+- 🗣️ **主动引擎会做事**：到点且需要准备的约定，先派工具把材料备好再汇报（查不到就如实说，绝不编）。
+- 🎓 **内置能力演示（新手教程）**：说「新手教程」或点「更多 → 能力演示」，她按顺序**真实执行**七步能力展示，每步停下等你决定是否继续。
+- 🧩 **共享与授权**：知识/产物可显式「分享给某个角色」（默认全部隔离，首期只读），撤销即时生效。
+- 📈 **本地质量统计与演化日志**：延迟/失败规则/来源选择等聚合计数（默认本地、可关可清）；表达层参数小幅演化可撤销、可重算。
+- 🛠️ **工具循环加固**：同签名二次熔断、32KB 结果预算、结构化错误（不泄堆栈/密钥）、LLM 客户端缓存有界。
+- 🗂️ **文档与共创**：网页/EPUB 摄入、世界观与角色共创（含结构化大纲）、观察日志、阅读地图。
 
 ## ✨ v3.0.0 更新亮点
 
@@ -61,6 +77,49 @@ v3.0 相比 v2.5 完成了「关系连续性」大版本演进（M8 + M9 前三�
 | 🎭 **人格热切换**<br />直接加载 `.md` 人格卡；每套人格的会话、记忆、知识库和界面设置相互隔离。 | 🧠 **可信长期记忆**<br />SQLite + 本地向量检索；每条记忆有来源与置信度，可纠正、可衰减、可固定保留。 |
 | 🧰 **工具与 Agent**<br />插件热加载、MCP 接入、工具循环与逐步确认，关键动作可控。 | 💬 **实时流式对话**<br />SSE 打字机输出、工具进度、图片生成与随时停止。 |
 | 💖 **关系与情绪**<br />信任×亲密双维关系、七情绪状态机、季节与纪念日调制，形成连续的关系历史。 | 🛡️ **本机优先安全**<br />默认仅回环监听；LAN 请求受 token、Host 白名单与 SSRF 防护约束。 |
+| 🤖 **Agent 任务**<br />聊天派活 / 定时 / 重试 / 产物落盘 / 逐步确认；子代理并行分头干活。 | 🌐 **MCP 生态**<br />标准协议 + stdio 桥 + 按需注入，可接浏览器自动化、实时文档等外部服务器。 |
+
+## 🎓 能力演示（新手教程）
+
+第一次用不知道她能做什么？两种方式看一遍：
+
+- **聊天里说一句**：「新手教程」「演示一下」「带我看看你会什么」——她会按顺序**真实执行**七步演示，每步做完停下等你决定是否继续；
+- **点界面入口**：顶部「更多 → 能力演示」，每一步都有一句可直接发送的原话。
+
+演示顺序（从日常到硬核）：
+
+| # | 展示 | 建议原话 |
+|---|---|---|
+| 1 | 长期记忆 | 记住一件事：我明天要去看牙医。 |
+| 2 | 联网查实时信息 | 查一下今天武汉的天气。 |
+| 3 | 动手操作本机 | 在工作区建一个 demo.txt 写上今天日期再读回来。 |
+| 4 | **并行子代理** | 帮我比较 Python 和 Node.js 做后端，从性能、生态、学习成本三方面分析。 |
+| 5 | **浏览器自动化（MCP）** | 用浏览器打开 example.com，看看页面上写了什么。 |
+| 6 | 查实时文档（MCP） | 帮我查一下 fastapi 的文档，怎么定义带查询参数的路由？ |
+| 7 | 监控 Agent | 帮我盯着某个页面，有变化告诉我。 |
+
+第 4、5 步是 Agent 能力主秀。详细步骤与排查见 [docs/AGENT-TOUR.md](docs/AGENT-TOUR.md)。
+
+## 🔌 MCP 扩展（接你自己的工具）
+
+菟菚支持接入 **标准 MCP 服务器**，用外部工具扩展她的能力边界：
+
+- 客户端走标准协议（Streamable HTTP 为主，旧版 HTTP+SSE 自动回退），生态里的服务器可直接接；
+- 只讲 stdio 的服务器（如 Playwright MCP 默认模式）用内置的 **stdio→HTTP 桥**接进来；
+- MCP 工具**按需注入**：只有本轮对话/技能/任务命中触发词时才注入该服务器的工具，工具表不会无限膨胀；
+- 外部工具默认归类为「外部 + 需确认」，每次调用前征求同意。
+
+```bat
+:: 以 Playwright MCP 为例：先起桥（内部会拉起 npx @playwright/mcp）
+scripts\start-mcp-playwright.bat
+:: 再启动菟菚（start.bat 会先等桥就绪再起后端）
+start.bat
+```
+
+然后到设置页「MCP 服务器」确认工具已注册（如 `playwright::browser_navigate`）。
+完整说明（含回环放行开关、关键词配置、排查表）见 [docs/MCP-STANDARD.md](docs/MCP-STANDARD.md)。
+
+> 只建议接「本地工具做不到」的服务器（浏览器自动化、GitHub/Notion、数据库等）；与本地工具重复的（filesystem/shell/memory/搜索）不建议接入。
 
 ## 🚀 快速开始
 
@@ -121,8 +180,8 @@ voice: zh-CN-XiaoyiNeural
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v3.0.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-v3.0.0.zip) |
-| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v3.0.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-Full-v3.0.0-Large.zip) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v3.1.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-v3.1.0.zip) |
+| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v3.1.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-Full-v3.1.0-Large.zip) |
 | **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
 
@@ -145,7 +204,7 @@ voice: zh-CN-XiaoyiNeural
 
 ### 步骤
 
-1. **下载**：到 [v3.0.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0) 下载部署包：
+1. **下载**：到 [v3.1.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.1.0) 下载部署包：
    - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
    - `TZtuzhanAssistant-Deploy-Full-vX.X.X-Large.zip` — 大杯版 / Large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
@@ -158,9 +217,9 @@ voice: zh-CN-XiaoyiNeural
 4. **填写 API Key**：在弹出的记事本里把 `LLM_API_KEY=sk-你的真实Key` 填好，保存关闭，回到黑窗口按任意键继续。
 5. 浏览器自动打开菟菚界面，开始聊天 🎉
 
-### 从 v2.x 升级
+### 从 v2.x / v3.0 升级
 
-直接用 v3.0 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到 v22（信任/亲密双维、情绪状态、事件链等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
+直接用 v3.1 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到 v22（信任/亲密双维、情绪状态、事件链等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
 
 ### 日常使用
 
@@ -315,21 +374,34 @@ backend/                      # Python 后端
 │   ├── knowledge.py          # 知识库（文档/分块/观点/来源）
 │   ├── imagegen.py           # 文生图
 │   ├── vision.py             # 识图
-│   ├── initiative.py         # 主动性引擎（统一仲裁器）
+│   ├── initiative.py         # 主动性引擎（统一仲裁器 + 必要性门 + 先做事再汇报）
 │   ├── greeting.py           # 久别问候逻辑
+│   ├── watchers.py           # 监控 Agent（网页变化监视，只存哈希）
+│   ├── demo_tour.py          # 内置能力演示脚本（唯一数据源）
+│   ├── domain_trust.py       # 五域可依赖程度（L05）
+│   ├── relationship_style.py # 长期关系气质（L03）
+│   ├── aesthetic_preferences.py # 共同审美与房间陈列（L07）
+│   ├── shared_resources.py   # 可选择共享与授权（L16）
+│   ├── learning_pipeline.py  # 可审核的学习管线（§17.2）
+│   ├── persona_evolution.py  # 表达层演化日志（P3-05）
+│   ├── expression_policy.py  # 表达必要性与注意力（§17.1）
+│   ├── attention_state.py    # 注意力主题衰减（§17.1）
 │   └── ...                   # 更多模块
 ├── tools/                    # 工具层
 │   ├── base.py               # 工具注册表
 │   ├── tool_loop.py          # 工具调用循环（原生 Function Calling + 文本回退）
+│   ├── hardening.py          # 工具循环加固（熔断/预算/结构化错误）
 │   ├── service.py            # 工具轮次调度
 │   ├── confirm.py            # 每步确认钩子
+│   ├── mcp_client.py         # 标准 MCP 客户端（Streamable HTTP + HTTP+SSE）
+│   ├── mcp_stdio_bridge.py   # stdio → Streamable HTTP 桥
 │   ├── mcp_server.py         # 内置 MCP 协议服务器（/mcp/*）
 │   └── builtin/              # 内置工具（仅记忆系统；其余已插件化）
 ├── plugins/                  # 插件（web_search/web_fetch/file_ops/code_exec 等，热加载）
 │   ├── loader.py             # 插件发现/加载/卸载/热加载
 │   └── context.py            # 插件钩子上下文
-├── agent/                    # 外部 Agent 桥
-│   └── session.py            # Codex/DSH 任务会话
+├── agent/                    # Agent 任务
+│   └── session.py            # 多步计划/定时/重试/产物落盘 + 外部 Agent 桥
 ├── session/                  # 会话存储
 │   └── store.py              # SQLite 会话/消息/归档持久化
 ├── maintenance/              # 后台维护（周期任务/时间滴答/备份/快照）
@@ -398,8 +470,8 @@ persona-菟菚.md               # 人格源文件
 
 ## 开发状态
 
-- 当前版本：**v3.0.0**（schema v22）
-- 后端聚合回归 93/93、前端 Vitest 69/69、vue-tsc 与生产构建通过（2026-09-08 全量实跑）
+- 当前版本：**v3.1.0**（schema v40）
+- 后端聚合回归 **141/141**、前端 Vitest **90/90**、vue-tsc 与生产构建通过（2026-09-09 全量实跑）
 - 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
 - 欢迎提 Issue 与 PR；提交请保持小切片、一个主题一个提交
 
