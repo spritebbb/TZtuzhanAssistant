@@ -102,8 +102,8 @@ def record(
         if commit:
             db.conn.commit()
 
-    # L03 气质证据：事件落库成功后按类型登记（幂等 user/event/style；
-    # commit=False 的试探路径不登记——与事务提交语义保持一致）。
+    # L03 气质证据 + G01 初历标记 + G01 锚点重评：事件落库成功后统一登记
+    # （幂等；commit=False 的试探路径不登记——与事务提交语义保持一致）。
     if commit and event_id is not None:
         try:
             from . import relationship_style
@@ -115,6 +115,18 @@ def record(
 
             logging.getLogger(__name__).warning(
                 "[关系气质] 证据登记失败（不影响事件）: event=%s", event_id)
+        try:
+            from . import memory_salience
+
+            memory_salience.note_event_for_first_occurrence(
+                user_id, event_id, event_type)
+            memory_salience.reevaluate_recent_facts_after_event(
+                user_id, occurred_at=occurred)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "[记忆显著度] 事件来源登记失败（不影响事件）: event=%s", event_id)
     return event_id
 
 
@@ -254,7 +266,7 @@ def record_memory_corrected(
     commit: bool = True,
 ) -> int | None:
     """用户改写或确认了一条记忆（管理页改写/冲突确认；对话内真删不在此列）。"""
-    return record(
+    event_id = record(
         user_id,
         "memory_corrected",
         "fact",
@@ -264,6 +276,21 @@ def record_memory_corrected(
         payload={"action": action, "old": old_content[:200], "new": new_content[:200]},
         commit=commit,
     )
+    # G01 视角注释生产来源：记忆被用户亲手改写/确认，说明用户在乎这条记忆
+    # 的准确性——对相应事实记一条 user_teaching 注释（不改写事实文本；
+    # 每事实只保留最近一条，避免确认动作堆积）。
+    if event_id is not None and commit and action in {"rewrite", "conflict_accept"}:
+        try:
+            from . import memory_salience
+
+            memory_salience.record_user_teaching_annotation(
+                user_id, int(fact_id), event_id=event_id)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "[记忆显著度] 用户教学注释登记失败（不影响纠正）: fact=%s", fact_id)
+    return event_id
 
 
 # ---- 聊天内自然回忆（唯一的表达出口；不做主动推送）----

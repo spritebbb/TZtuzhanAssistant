@@ -299,6 +299,133 @@ async def test_extraction_produces_policy() -> int:
     return 0
 
 
+def test_production_sources() -> int:
+    """G01 片3：锚点/初历/注释的生产来源（真实事件链路，非手工调用）。"""
+    from backend.core.fact_lifecycle import update_fact_everywhere
+    from backend.core.relationship_events import record, invalidate_for_source
+
+    uid = "g01-production"
+    db.ensure_user(uid)
+    # 1) 用户亲手改写记忆 → memory_corrected 事件 → user_teaching 注释自动登记；
+    #    同一事实重复确认不堆积（只保留最近一条 user_teaching）。
+    fid = _fact(uid, "用户喜欢猫")
+    with patch("backend.core.fact_lifecycle._delete_vectors"), \
+         patch("backend.core.fact_lifecycle._index_vector"):
+        assert update_fact_everywhere(uid, fid, "用户非常喜欢猫")
+    anns = ms.annotations_for(uid, fid)
+    assert any(a["origin"] == "user_teaching" for a in anns), anns
+    fid_rewrite = next(f["id"] for f in db.conn.execute(
+        "SELECT id FROM facts WHERE user_id=?", (uid,)).fetchall())
+    with patch("backend.core.fact_lifecycle._delete_vectors"), \
+         patch("backend.core.fact_lifecycle._index_vector"):
+        update_fact_everywhere(uid, fid_rewrite, "用户特别喜欢猫")
+    anns = ms.annotations_for(uid, fid_rewrite)
+    teaching = [a for a in anns if a["origin"] == "user_teaching"]
+    assert len(teaching) == 1, teaching
+
+    # 2) 关系事件落库 → 邻近窗口内的新事实自动获得锚点加成（score 0→20）。
+    anchored = _fact(uid, "用户周末想学摄影")
+    ms.observe_fact(uid, anchored, [], new_fact=True)
+    assert ms.get_policy(uid, anchored)["score"] == 0
+    with db._lock:
+        cur = db.conn.execute(
+            "INSERT INTO activities (user_id, kind, document_id, status, title, created_at, updated_at) "
+            "VALUES (?, 'goal', 0, 'completed', '周末摄影计划', datetime('now'), datetime('now'))", (uid,))
+        activity_id = cur.lastrowid
+        db.conn.commit()
+    event_id = record(uid, "goal_completed", "activity", activity_id,
+                      subject=uid, obj="周末摄影计划")
+    assert event_id is not None
+    policy = ms.get_policy(uid, anchored)
+    assert policy["relationship_anchor"] == 1 and policy["score"] == 20, policy
+
+    # 3) 事件落库时按事件主题自动建立初历；重复事件不吃首次加成；
+    #    源事件作废 → 初历级联消失，但锚点已入账的 policy 不回滚。
+    assert ms.is_first_occurrence(uid, "goal_completed", "学画") is True, \
+        "不同主题仍是初历"
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT COUNT(*) n FROM first_occurrences WHERE user_id=? AND source_event_id=?",
+            (uid, event_id)).fetchone()
+    assert row["n"] == 1
+    repeat = record(uid, "goal_completed", "activity", activity_id,
+                    subject=uid, obj="周末摄影计划")
+    assert repeat is None, "同一 (user,type,source) 幂等不重复登记"
+    invalidate_for_source(uid, "activity", activity_id)
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT COUNT(*) n FROM first_occurrences WHERE user_id=? AND source_event_id=?",
+            (uid, event_id)).fetchone()
+    assert row["n"] == 0
+    print("[OK] 生产来源：改写→user_teaching 注释 / 事件→锚点重评 / 事件→初历与级联")
+    return 0
+
+
+def test_lifecycle_display_and_fading() -> int:
+    """G01 片4：解释层露出（非敏感元数据 + 二次授权）与可见遗忘候选。"""
+    from backend.core.explainability import build_reply_explanation
+    from backend.core.state import AgentState
+    from backend.core.userdb import update_fact_pinned
+
+    uid = "g01-display"
+    db.ensure_user(uid)
+    now = datetime.now()
+    pinned = _fact(uid, "用户喜欢猫")
+    short = _fact(uid, "用户最近在学吉他")
+    secret = db.add_fact(uid, "用户不提的私事", surface_policy="never_surface")
+    dated = db.add_fact(uid, "用户这周在赶项目",
+                        expires_at=(now + timedelta(days=2)).isoformat(timespec="seconds"))
+    update_fact_pinned(uid, pinned, True)
+    ms.observe_fact(uid, short, [], now=now - timedelta(days=28), new_fact=True)
+    ms.observe_fact(uid, dated, [], now=now - timedelta(days=1), new_fact=True)
+    ms.record_user_teaching_annotation(uid, pinned)
+
+    meta = ms.lifecycle_for_facts(uid, [pinned, short, secret, dated, 999999])
+    assert meta[pinned]["retention"] == "长期保留" and meta[pinned]["user_confirmed"]
+    assert meta[short]["retention"].startswith("保留到 "), meta[short]
+    assert secret not in meta, "never_surface 不进入解释层（二次授权）"
+    assert meta[dated]["retention"].startswith("保留到 ")
+    assert 999999 not in meta, "已删除/不存在的事实不出现"
+    for entry in meta.values():
+        assert "score" not in entry and "confidence" in entry and entry["can_edit"]
+    # 二次授权是返回时查询：改策略后同一批 id 的露出立即收敛。
+    db.conn.execute("UPDATE facts SET surface_policy='never_surface' WHERE id=?", (short,))
+    db.conn.commit()
+    assert short not in ms.lifecycle_for_facts(uid, [short])
+
+    # 解释快照：只给实际引用的事实行附 lifecycle，其余行不带。
+    state = AgentState()
+    frame = __import__("backend.core.behavior", fromlist=["BehaviorFrame"]).BehaviorFrame(
+        mood_line="", stage_line="", texture_line="", initiative="", reaction_line="",
+        rest_line="", tension_line="", archive_line="", event_line="",
+    )
+    snapshot = build_reply_explanation(
+        state, frame,
+        memory_rows=[("长期事实", "用户喜欢猫", pinned), ("相关对话", "随便聊聊")],
+        fact_ids=[pinned], user_id=uid,
+    )
+    fact_row = next(m for m in snapshot["memories"] if m["text"] == "用户喜欢猫")
+    assert fact_row["lifecycle"]["retention"] == "长期保留", fact_row
+    other_row = next(m for m in snapshot["memories"] if m["text"] == "随便聊聊")
+    assert "lifecycle" not in other_row
+    # 旧客户端兼容：不传 fact_ids 时快照结构不变。
+    plain = build_reply_explanation(state, frame, memory_rows=[("长期事实", "用户喜欢猫")])
+    assert "lifecycle" not in plain["memories"][0]
+
+    # 可见遗忘：到期前候选只给元数据（无原文），到期后由既有衰减物理删除。
+    candidates = ms.expiring_soon_candidates(uid, within_days=3, now=now)
+    ids = {c["fact_id"] for c in candidates}
+    assert dated in ids and pinned not in ids and secret not in ids
+    assert all("content" not in c for c in candidates), "候选不含原文"
+    from backend.core.pending_thoughts import due_thoughts, sync_pending_thoughts
+
+    assert sync_pending_thoughts(uid) >= 1
+    fading = [t for t in due_thoughts(uid, 10) if t["kind"] == "memory_fading"]
+    assert fading and dated in {t["source_id"] for t in fading}, fading
+    print("[OK] 解释层露出（二次授权/不含 score）+ 可见遗忘到期前候选")
+    return 0
+
+
 def test_policy_lifecycle_consumption() -> int:
     from backend.core.fact_decay import decay_expired_facts
     from backend.core.userdb import update_fact_pinned
@@ -363,6 +490,8 @@ async def main() -> int:
         + test_observation_sources_and_replay()
         + test_v24_policy_upgrade()
         + await test_extraction_produces_policy()
+        + test_production_sources()
+        + test_lifecycle_display_and_fading()
         + test_policy_lifecycle_consumption()
     )
     if failed:

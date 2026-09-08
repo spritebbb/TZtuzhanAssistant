@@ -20,8 +20,15 @@ def build_reply_explanation(
     search_used: bool = False,
     media: str = "none",
     contexts: Iterable[dict] = (),
+    fact_ids: Iterable[int] = (),
+    user_id: str = "",
 ) -> dict:
-    """构造稳定、有限长的 UI 数据；不暴露 system prompt 或模型思考链。"""
+    """构造稳定、有限长的 UI 数据；不暴露 system prompt 或模型思考链。
+
+    fact_ids：本轮实际注入并允许展示的事实 id；G01 生命周期露出（F07）
+    只对这些条目附非敏感元数据（保留说明/她被确认过的标记），不另外
+    召回事实，也不展示评分权重等算法内部值。
+    """
     behavior = []
     for label, value in (
         ("情绪与精力", frame.mood_line),
@@ -38,14 +45,31 @@ def build_reply_explanation(
         if cleaned:
             behavior.append({"label": label, "text": cleaned})
 
+    # F07 记忆生命周期露出：仅对已引用的合法事实附非敏感生命周期元数据。
+    lifecycle_map: dict[int, dict] = {}
+    ids = [int(i) for i in fact_ids if int(i) > 0]
+    if ids and user_id:
+        try:
+            from .memory_salience import lifecycle_for_facts
+
+            lifecycle_map = lifecycle_for_facts(user_id, ids)
+        except Exception:
+            lifecycle_map = {}  # 露出失败不影响解释快照本身
+
     memories = []
     seen: set[str] = set()
-    for kind, value in memory_rows:
+    for row in memory_rows:
+        kind, value = row[0], row[1]
+        row_fact_id = row[2] if len(row) > 2 else None
         cleaned = _clean(value)
         if not cleaned or cleaned in seen:
             continue
         seen.add(cleaned)
-        memories.append({"kind": _clean(kind, 20), "text": cleaned})
+        entry: dict = {"kind": _clean(kind, 20), "text": cleaned}
+        meta = lifecycle_map.get(int(row_fact_id)) if row_fact_id else None
+        if meta:
+            entry["lifecycle"] = meta
+        memories.append(entry)
         if len(memories) >= 4:
             break
 

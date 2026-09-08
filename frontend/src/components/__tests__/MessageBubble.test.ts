@@ -1,0 +1,90 @@
+import { mount } from '@vue/test-utils'
+import { describe, expect, it } from 'vitest'
+
+import type { Message } from '../../api/sessions'
+import MessageBubble from '../MessageBubble.vue'
+
+function botMessage(explanation: Message['explanation']): Message {
+  return { role: 'bot', content: '我记得你喜欢猫', ts: 1757300000, explanation }
+}
+
+function baseExplanation(memories: NonNullable<Message['explanation']>['memories']) {
+  return {
+    version: 1,
+    state: {
+      affection: 40, stage: '熟悉', mood: 60, mood_label: '平静', energy: 80,
+    },
+    behavior: [],
+    memories,
+    tools: { search: false, media: 'none' as const },
+  }
+}
+
+describe('MessageBubble 记忆生命周期露出（G01/F07）', () => {
+  it('展示保留说明与「你确认过」标记，且不出现评分', async () => {
+    const wrapper = mount(MessageBubble, {
+      props: {
+        message: botMessage(baseExplanation([
+          {
+            kind: '长期事实',
+            text: '用户喜欢猫',
+            lifecycle: {
+              pinned: true,
+              expires_at: null,
+              tier: 'long',
+              retention: '长期保留',
+              confidence: 0.9,
+              verified_at: null,
+              user_confirmed: true,
+              can_edit: true,
+            },
+          },
+        ])),
+        isStreamingLast: false,
+        ttsKey: 'k1',
+      },
+    })
+    await wrapper.get('.whybtn').trigger('click')
+    const chip = wrapper.get('.why-lifecycle')
+    expect(chip.text()).toContain('长期保留')
+    expect(chip.text()).toContain('你确认过')
+    expect(wrapper.text()).not.toContain('score')
+  })
+
+  it('旧快照（无 lifecycle）不渲染保留行，短期待到期显示日期', async () => {
+    const legacy = mount(MessageBubble, {
+      props: {
+        message: botMessage(baseExplanation([{ kind: '长期事实', text: '用户喜欢猫' }])),
+        isStreamingLast: false,
+        ttsKey: 'k2',
+      },
+    })
+    await legacy.get('.whybtn').trigger('click')
+    expect(legacy.find('.why-lifecycle').exists()).toBe(false)
+
+    const dated = mount(MessageBubble, {
+      props: {
+        message: botMessage(baseExplanation([
+          {
+            kind: '长期事实',
+            text: '用户最近在学吉他',
+            lifecycle: {
+              pinned: false,
+              expires_at: '2026-10-08T12:00:00',
+              tier: 'short',
+              retention: '保留到 2026-10-08',
+              confidence: 0.7,
+              verified_at: null,
+              user_confirmed: false,
+              can_edit: true,
+            },
+          },
+        ])),
+        isStreamingLast: false,
+        ttsKey: 'k3',
+      },
+    })
+    await dated.get('.whybtn').trigger('click')
+    expect(dated.get('.why-lifecycle').text()).toContain('保留到 2026-10-08')
+  })
+})
