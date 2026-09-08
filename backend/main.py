@@ -40,6 +40,18 @@ def main() -> None:
     args = ap.parse_args()
 
     print(f"🌿 菟菚桌面助手后端: http://{args.host}:{args.port}")
+    # 演示模式：权限放宽必须显式可见，避免事后忘记还开着
+    try:
+        from backend.core.config import config as _cfg
+
+        if _cfg.agent_demo_mode:
+            print(
+                "⚠️  演示模式已开启（AGENT_DEMO_MODE=1）：工具确认一律自动放行，"
+                "仅保留危险命令黑名单/路径白名单/critical 工具三道硬底线。\n"
+                "   演示结束请在 .env 把 AGENT_DEMO_MODE 改为 0 并重启后端。"
+            )
+    except Exception:
+        pass
     # 把绑定地址告知运行时（remote.py 的空 token 防护需要据此收紧）
     os.environ["TZT_BIND_HOST"] = args.host.strip().lower() or "127.0.0.1"
     if args.host not in ("127.0.0.1", "::1", "localhost"):
