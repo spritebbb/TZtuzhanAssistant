@@ -32,6 +32,7 @@ export interface MessageExplanation {
 
 /** G01/F07 记忆生命周期露出：只含非敏感元数据，不含评分权重。 */
 export interface MemoryLifecycle {
+  fact_id: number
   pinned: boolean
   expires_at: string | null
   tier: 'short' | 'long' | 'legacy' | null
@@ -40,6 +41,7 @@ export interface MemoryLifecycle {
   verified_at: string | null
   user_confirmed: boolean
   can_edit: boolean
+  version: string
 }
 
 export interface ProactiveMessage {

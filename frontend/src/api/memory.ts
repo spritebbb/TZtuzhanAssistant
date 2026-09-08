@@ -32,9 +32,10 @@ export async function updateFact(id: number, content: string): Promise<void> {
   if (!response.ok) throw new Error('改写失败')
 }
 
-export async function deleteFact(id: number): Promise<void> {
-  const response = await apiFetch(`/api/memory/facts/${id}`, { method: 'DELETE' })
-  if (!response.ok) throw new Error('删除失败')
+export async function deleteFact(id: number, expectedVersion?: string): Promise<void> {
+  const query = expectedVersion ? `?expected_version=${encodeURIComponent(expectedVersion)}` : ''
+  const response = await apiFetch(`/api/memory/facts/${id}${query}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error(response.status === 404 ? '这条记忆不存在' : '删除失败')
 }
 
 export async function updateFactSurfacePolicy(

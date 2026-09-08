@@ -604,6 +604,7 @@ def lifecycle_for_facts(user_id: str, fact_ids: list[int], *,
         else:
             retention = "尚待确认"
         result[int(row["id"])] = {
+            "fact_id": int(row["id"]),
             "pinned": pinned,
             "expires_at": expires_at,
             "tier": tier,
@@ -612,8 +613,20 @@ def lifecycle_for_facts(user_id: str, fact_ids: list[int], *,
             "verified_at": row["verified_at"],
             "user_confirmed": int(row["id"]) in taught_ids,
             "can_edit": True,
+            # F07 版本化编辑：可变字段的稳定指纹，客户端带它提交以避免覆盖并发改动
+            "version": fact_version(row),
         }
     return result
+
+
+def fact_version(row) -> str:
+    """事实可变字段的稳定指纹（乐观并发；无新表、无 schema 变更）。"""
+    import hashlib
+
+    payload = "|".join(str(row[key]) for key in (
+        "id", "content", "pinned", "expires_at", "surface_policy", "status",
+    ) if key in row.keys())
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def _auto_retention_until(row, *, now: datetime | None = None) -> str | None:

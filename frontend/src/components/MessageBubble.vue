@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import type { Message } from '../api/sessions'
+import type { MemoryLifecycle } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
 import { renderMarkdown } from '../utils/markdown'
 import { TTS_STATE_EVENT, playTts, stopTts, type TtsState, type TtsStatus } from '../utils/tts'
@@ -25,6 +26,47 @@ const copied = ref(false)
 const ttsStatus = ref<TtsStatus>('idle')
 const whyOpen = ref(false)
 // F06 活动草稿：确认后调用权威创建接口
+// F07 记忆生命周期操作：版本化编辑，删除后本地立刻收起正文
+const lifecycleBusy = ref(false)
+const lifecycleGoneIds = ref<number[]>([])
+
+function lifecycleGone(item: { lifecycle?: { fact_id?: number } }) {
+  return !!item.lifecycle?.fact_id && lifecycleGoneIds.value.includes(item.lifecycle.fact_id)
+}
+
+async function togglePin(item: { lifecycle?: MemoryLifecycle }) {
+  const meta = item.lifecycle
+  if (!meta?.fact_id || lifecycleBusy.value) return
+  lifecycleBusy.value = true
+  try {
+    const { updateFactPinned } = await import('../api/memory')
+    await updateFactPinned(meta.fact_id, !meta.pinned)
+    meta.pinned = !meta.pinned
+    meta.retention = meta.pinned ? '长期保留' : (meta.expires_at ? `保留到 ${meta.expires_at.slice(0, 10)}` : meta.retention)
+  } finally {
+    lifecycleBusy.value = false
+  }
+}
+
+async function forgetFact(item: { lifecycle?: MemoryLifecycle; text?: string }) {
+  const meta = item.lifecycle
+  if (!meta?.fact_id || lifecycleBusy.value) return
+  lifecycleBusy.value = true
+  try {
+    const { deleteFact } = await import('../api/memory')
+    await deleteFact(meta.fact_id, meta.version)
+    lifecycleGoneIds.value = [...lifecycleGoneIds.value, meta.fact_id]
+  } catch (e) {
+    // 404/410：事实已不在，按「已删除」处理，不再展示正文
+    const message = e instanceof Error ? e.message : ''
+    if (message.includes('不存在') || message.includes('404')) {
+      lifecycleGoneIds.value = [...lifecycleGoneIds.value, meta.fact_id]
+    }
+  } finally {
+    lifecycleBusy.value = false
+  }
+}
+
 const draftBusy = ref(false)
 const draftNotice = ref('')
 
@@ -212,10 +254,17 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
         <div v-if="message.explanation.memories.length" class="why-section">
           <div class="why-label">用到的记忆</div>
           <div v-for="(item, i) in message.explanation.memories" :key="i" class="why-row">
-            <b>{{ item.kind }}</b><span>{{ item.text }}</span>
+            <b>{{ item.kind }}</b><span v-if="!lifecycleGone(item)">{{ item.text }}</span><span v-else class="lc-gone-text">（这条已经删掉了）</span>
             <span v-if="item.lifecycle" class="why-lifecycle">
               {{ item.lifecycle.retention }}
               <template v-if="item.lifecycle.user_confirmed"> · 你确认过</template>
+              <template v-if="item.lifecycle.can_edit && !lifecycleGone(item)">
+                <button class="lc-btn" :disabled="lifecycleBusy" @click="togglePin(item)">
+                  {{ item.lifecycle.pinned ? '取消固定' : '固定' }}
+                </button>
+                <button class="lc-btn danger" :disabled="lifecycleBusy" @click="forgetFact(item)">删掉</button>
+              </template>
+              <em v-if="lifecycleGone(item)" class="lc-gone">已删除</em>
             </span>
           </div>
         </div>
@@ -452,6 +501,9 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 .why-row span { min-width: 0; overflow-wrap: anywhere; }
 .why-lifecycle { grid-column: 2; color: var(--text-dim); font-size: 11px; }
 .draft-card { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 13px; }
+.lc-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; }
+.lc-btn.danger { color: var(--danger, #d9534f); }
+.lc-gone, .lc-gone-text { color: var(--text-dim); font-size: 11px; }
 .draft-tag { color: var(--text-muted); font-size: 11px; }
 .draft-note { color: var(--text-dim); font-size: 12px; }
 .why-tools { margin-top: 10px; }

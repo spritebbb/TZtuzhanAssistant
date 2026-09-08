@@ -99,12 +99,30 @@ async def api_list_facts(limit: int = Query(200, ge=1, le=500)):
     return {"ok": True, "facts": list_facts(active_user_id(), limit)}
 
 
+def _version_conflict(uid: str, fact_id: int, expected: str | None) -> bool:
+    """F07 版本化编辑：客户端带了 version 且与现状不符 → 409。"""
+    if not expected:
+        return False
+    from ..core.memory_salience import fact_version
+
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT * FROM facts WHERE user_id=? AND id=?", (uid, int(fact_id))
+        ).fetchone()
+    if row is None:
+        return False  # 不存在交给 404 分支
+    return fact_version(row) != str(expected)
+
+
 @router.put("/facts/{fact_id}")
-async def api_update_fact(fact_id: int, content: str = Body(..., embed=True)):
+async def api_update_fact(fact_id: int, content: str = Body(..., embed=True),
+                          expected_version: str | None = Body(None, embed=True)):
     uid = active_user_id()
     content = content.strip()
     if not content:
         return JSONResponse({"ok": False, "error": "内容不能为空"}, status_code=400)
+    if await asyncio.to_thread(_version_conflict, uid, fact_id, expected_version):
+        return JSONResponse({"ok": False, "error": "这条记忆已变化，请刷新后再改"}, status_code=409)
     if not await asyncio.to_thread(update_fact_everywhere, uid, fact_id, content):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
     logger.info("[记忆管理] 改写事实 #{}: {}", fact_id, content[:40])
@@ -112,8 +130,10 @@ async def api_update_fact(fact_id: int, content: str = Body(..., embed=True)):
 
 
 @router.delete("/facts/{fact_id}")
-async def api_delete_fact(fact_id: int):
+async def api_delete_fact(fact_id: int, expected_version: str | None = None):
     uid = active_user_id()
+    if await asyncio.to_thread(_version_conflict, uid, fact_id, expected_version):
+        return JSONResponse({"ok": False, "error": "这条记忆已变化，请刷新后再删"}, status_code=409)
     if not await asyncio.to_thread(delete_fact_everywhere, uid, fact_id):
         return JSONResponse({"ok": False, "error": "这条记忆不存在"}, status_code=404)
     logger.info("[记忆管理] 删除事实 #{}", fact_id)
