@@ -32,6 +32,7 @@ _TABLES = (
     "activity_writings", "writing_turns", "activity_lists", "list_items",
     "relationship_events", "artifacts", "context_lifecycle",
     "character_life_events", "relationship_dimension_ledger", "relationship_style_evidence",
+    "memory_policy", "memory_annotations", "first_occurrences",
     "user_preferences", "event_chains",
     "reunion_arcs",
     "knowledge_opinion_sources", "knowledge_opinions",

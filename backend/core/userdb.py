@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 23  # v23: L03 relationship_style_evidence（气质证据表）
+_SCHEMA_VERSION = 24  # v24: G01 memory_policy / memory_annotations / first_occurrences
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -576,6 +576,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_style_evidence_unique
     ON relationship_style_evidence(user_id, event_id, style);
 CREATE INDEX IF NOT EXISTS idx_style_evidence_user
     ON relationship_style_evidence(user_id, occurred_at);
+-- G01 记忆显著度：policy 一条事实一条（shadow 记录分层，不改写 facts）；
+-- annotations 她的事实视角侧表；first_occurrences 初历标记（topic_key 规范化唯一）。
+-- 三表全部 reset 清空 + LC-1 记忆类别导出。
+CREATE TABLE IF NOT EXISTS memory_policy (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    fact_id INTEGER NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'short',   -- short / long / legacy
+    score INTEGER NOT NULL DEFAULT 0,
+    score_version INTEGER NOT NULL DEFAULT 1,
+    explicit_importance INTEGER NOT NULL DEFAULT 0,
+    relationship_anchor INTEGER NOT NULL DEFAULT 0,
+    distinct_days INTEGER NOT NULL DEFAULT 0,
+    first_event INTEGER NOT NULL DEFAULT 0,
+    legacy INTEGER NOT NULL DEFAULT 0,
+    review_at TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_policy_unique
+    ON memory_policy(user_id, fact_id);
+CREATE TABLE IF NOT EXISTS memory_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    fact_id INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'assistant',
+    emotion TEXT NOT NULL DEFAULT '',
+    viewpoint TEXT NOT NULL DEFAULT '',
+    origin TEXT NOT NULL DEFAULT 'observed',   -- observed / user_teaching / inference
+    confidence REAL NOT NULL DEFAULT 0.7,
+    source_event_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_memory_annotations_fact
+    ON memory_annotations(user_id, fact_id);
+CREATE TABLE IF NOT EXISTS first_occurrences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    topic_key TEXT NOT NULL,
+    source_event_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, event_type, topic_key)
+);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1651,6 +1694,7 @@ class UserDB:
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
+                "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
@@ -1906,6 +1950,11 @@ def delete_fact_cascade(user_id: str, fact_id: int) -> list[int]:
                 f"DELETE FROM facts WHERE user_id = ? AND id IN ({placeholders})",
                 (user_id, *ids),
             )
+            for table in ("memory_policy", "memory_annotations"):
+                db.conn.execute(
+                    f"DELETE FROM {table} WHERE user_id = ? AND fact_id IN ({placeholders})",
+                    (user_id, *ids),
+                )
             db.conn.commit()
         except Exception:
             db.conn.rollback()
