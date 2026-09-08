@@ -20,7 +20,11 @@ from backend.maintenance.schema_backup import (
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="tz_schema_backup_") as raw:
+    # ignore_cleanup_errors：Windows 下 SQLite 连接关闭后文件句柄偶发滞留
+    # （杀软/索引器扫描新建库），会让 TemporaryDirectory 清理抛 WinError 32；
+    # 该异常与被测逻辑无关，不应让版本守卫测试假红。
+    with tempfile.TemporaryDirectory(prefix="tz_schema_backup_",
+                                     ignore_cleanup_errors=True) as raw:
         root = Path(raw)
         database = root / "bot.db"
         conn = sqlite3.connect(database)
@@ -64,7 +68,7 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        versions = {"bot.db": 39, "sessions.db": 1, "agent_tasks.db": 1}
+        versions = {"bot.db": 40, "sessions.db": 1, "agent_tasks.db": 3}
         for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")
