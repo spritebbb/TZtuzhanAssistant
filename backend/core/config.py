@@ -179,6 +179,12 @@ class Config:
         # 无 SSE 通道时的确认策略：deny=写/命令/外部工具默认拒绝（安全默认）；
         # allow=放行（旧版本地信任行为，谨慎使用）
         self.agent_confirm_no_channel: str = os.getenv("AGENT_CONFIRM_NO_CHANNEL", "deny").strip().lower()
+        # 演示模式（AGENT_DEMO_MODE=1）：工具确认一律自动放行，供演示/录屏时免点击。
+        # 硬底线不变：危险命令黑名单、路径白名单、critical 级工具仍拒绝；
+        # 每次自动放行都会写审计并打日志。演示结束请置 0 并重启后端。
+        self.agent_demo_mode: bool = os.getenv("AGENT_DEMO_MODE", "0").strip().lower() in {
+            "1", "true", "on", "yes",
+        }
         # 允许读写操作的根目录白名单（分号分隔；文件/命令工具只允许在此范围内操作）
         self.agent_allowed_roots: list[str] = [
             p.strip() for p in os.getenv("AGENT_ALLOWED_ROOTS", "").split(";") if p.strip()

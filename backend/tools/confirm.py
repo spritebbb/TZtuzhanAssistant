@@ -186,8 +186,16 @@ async def default_confirm_hook(name: str, args: dict, spec: Any, ctx: dict) -> s
 
     有 SSE 通道且确认开启 → 挂起等用户确认；
     无通道（MCP 直调/后台任务/未知来源）→ write/run/external 类工具默认拒绝，
-    只读工具放行；AGENT_CONFIRM_NO_CHANNEL=allow 可恢复旧的本地信任行为。
+    只读工具放行；AGENT_CONFIRM_NO_CHANNEL=allow 可恢复旧的本地信任行为；
+    AGENT_DEMO_MODE=1（演示模式）→ 一律自动放行（危险命令黑名单/路径白名单/
+    critical 级工具仍由各自闸门拒绝），每次放行写日志便于事后核查。
     """
+    if config.agent_demo_mode:
+        logger.warning(
+            "[确认] 演示模式自动放行：{}（危险命令黑名单、路径白名单与 critical 工具仍生效）",
+            name,
+        )
+        return "allow"
     if not config.agent_confirm_enabled:
         return "allow"
     push = current_sse_push.get()
