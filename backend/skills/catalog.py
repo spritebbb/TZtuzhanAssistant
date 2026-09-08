@@ -16,8 +16,10 @@ triggers: [关键词1, 关键词2]
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 # 技能目录：项目根下 skills/（与 persona 同级）
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
@@ -98,3 +100,25 @@ def match_skills(text: str, skills: list[Skill] | None = None) -> list[Skill]:
                 hits.append(s)
                 break
     return hits
+
+
+def skills_reference_tools(skills: list[Skill] | None, tool_names: Iterable[str]) -> list[str]:
+    """返回被技能描述/正文点名的工具名（按 tool_names 顺序，去重）。
+
+    技能里「用 agent_fanout 并行派发」这类指令，只有在模型拿得到工具 schema 的
+    轮次才可执行；调用方据此判断该轮是否必须打开工具通道。
+
+    工具名按 ASCII 词边界匹配（两侧不能是字母/数字/下划线），既能命中中文紧邻的
+    写法「用agent_fanout并行」，也不会让 edit 误吃 editor / credit。
+    """
+    if not skills:
+        return []
+    texts = [f"{s.description}\n{s.content}" for s in skills]
+    hit: list[str] = []
+    for name in tool_names:
+        if not name or name in hit:
+            continue
+        pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
+        if any(pat.search(t) for t in texts):
+            hit.append(name)
+    return hit

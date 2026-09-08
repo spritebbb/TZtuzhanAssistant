@@ -331,6 +331,38 @@ def _needs_tool_loop(text: str, intent: dict | None) -> bool:
     return any(k in t for k in _TOOL_LOOP_KEYS)
 
 
+def _skills_need_tools(skills: list | None) -> bool:
+    """命中的技能正文点名了某个已注册工具 → 该轮必须给模型工具通道。
+
+    否则「用 agent_fanout 并行派发」这类技能指令会落在没有工具的纯流式轮次里，
+    模型只能照着技能的方法论嘴上说、却调不动工具（子代理工具零调用的根因）。
+    """
+    if not skills:
+        return False
+    try:
+        from ..skills import skills_reference_tools
+        from ..tools.base import ToolRegistry
+
+        return bool(skills_reference_tools(skills, [t.name for t in ToolRegistry.list()]))
+    except Exception:
+        logger.exception("[pipeline] 技能工具识别失败（按无工具处理）")
+        return False
+
+
+def _tool_loop_enabled(
+    text: str,
+    intent: dict | None,
+    skills: list | None,
+    *,
+    ephemeral: bool,
+    mock: bool,
+) -> bool:
+    """这一轮是否走工具调用循环：关键词命中，或命中的技能点名了工具。"""
+    if ephemeral or mock:
+        return False
+    return _needs_tool_loop(text, intent) or _skills_need_tools(skills)
+
+
 # 常见城市名 → wttr.in 查询名（中文城市直接用中文名查询即可，wttr.in 支持中文；
 # 这里主要处理英文/拼音别名和易歧义名，其余城市名原样透传）
 _CITY_ALIASES: dict[str, str] = {
@@ -1626,34 +1658,19 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 话题锚定失败（不影响回复）")
 
-    # 5.1) 工具调用循环：有明确工具需求（搜索/生图/回忆/待办/文件/命令等）时启用，
-    # 让 LLM 按需自主调用工具，结果注入下一轮；纯聊天直接走流式生成
-    # （打字机效果），避免流式分支成为死代码。
-    # 临时对话禁用工具循环，避免待办、文件、记忆工具把本轮内容写到旁路存储。
-    # 只读的内建搜索仍可在上方按需使用。
-    use_tool_loop = not ephemeral and not mock and _needs_tool_loop(text, intent)
-
-    # 5.1.5) 生图提示：图片已在 4.0.1 生成好，告诉 LLM 让它在回复里自然提及
-    # （图会由前端另行渲染，这里只负责让菟菚"知道自己画了"、回一句自然的话）
-    drawn_note = None
-    if drawn_image_path:
-        drawn_note = (
-            "你已经为对方生成了一张图片（图片文件在本地已就绪，无需你在回复里贴路径或链接）。"
-            "回复时自然提一句图已经画好了（比如让对方看看、问满不满意），"
-            "不要解释生成过程，不要说技术细节，用你平时的语气带过。"
-        )
-
-    # 5.1.4) 技能匹配：命中 trigger 的技能注入为"本次任务的干活姿势"（对标 Harness skills）。
+    # 5.1) 技能匹配：命中 trigger 的技能注入为"本次任务的干活姿势"（对标 Harness skills）。
     # 只在用户有明确任务倾向（非闲聊）时注入，且只注入命中项，避免每次堆一堆模板。
+    # 必须排在工具循环判定之前：技能正文点名了工具（如「用 agent_fanout 并行派发」）时，
+    # 这一轮就得给模型工具通道，否则指令落进纯流式轮次只能嘴上照做。
+    matched_skills: list = []
     try:
         if not is_chitchat:
             from ..skills import load_catalog, match_skills
 
-            skills = load_catalog()
-            matched = match_skills(text, skills)
-            if matched:
+            matched_skills = match_skills(text, load_catalog())
+            if matched_skills:
                 skill_texts = []
-                for s in matched:
+                for s in matched_skills:
                     skill_texts.append(
                         f"【技能：{s.name}】{s.description}\n{s.content}"
                     )
@@ -1668,6 +1685,25 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 })
     except Exception:
         logger.exception("[pipeline] 技能注入失败（不影响回复）")
+
+    # 5.2) 工具调用循环：有明确工具需求（搜索/生图/回忆/待办/文件/命令等）时启用，
+    # 让 LLM 按需自主调用工具，结果注入下一轮；纯聊天直接走流式生成
+    # （打字机效果），避免流式分支成为死代码。
+    # 临时对话禁用工具循环，避免待办、文件、记忆工具把本轮内容写到旁路存储。
+    # 只读的内建搜索仍可在上方按需使用。
+    use_tool_loop = _tool_loop_enabled(
+        text, intent, matched_skills, ephemeral=ephemeral, mock=mock
+    )
+
+    # 5.3) 生图提示：图片已在 4.0.1 生成好，告诉 LLM 让它在回复里自然提及
+    # （图会由前端另行渲染，这里只负责让菟菚"知道自己画了"、回一句自然的话）
+    drawn_note = None
+    if drawn_image_path:
+        drawn_note = (
+            "你已经为对方生成了一张图片（图片文件在本地已就绪，无需你在回复里贴路径或链接）。"
+            "回复时自然提一句图已经画好了（比如让对方看看、问满不满意），"
+            "不要解释生成过程，不要说技术细节，用你平时的语气带过。"
+        )
 
     # 思考/话题/生图三类 system 提示统一在 user 之前注入，保证「user 是最后一条」。
     # 若放在 user 之后追加，普通流式路径会形成 user→system 的非法顺序（多数 LLM API
@@ -1860,7 +1896,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             memory_rows.extend(("相关对话", value) for value in remembered[:2])
             fact_ids_used: list[int] = []
             for value in facts[:2]:
-                fact_id = fact_id_map.get(value)
+                fact_id = fact_id_map.get(str(value).strip())
                 memory_rows.append(("长期事实", value, fact_id))
                 if fact_id:
                     fact_ids_used.append(fact_id)

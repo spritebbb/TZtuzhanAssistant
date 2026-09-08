@@ -6,6 +6,14 @@ from .catalog import (
     load_catalog,
     load_skill_file,
     match_skills,
+    skills_reference_tools,
 )
 
-__all__ = ["SKILLS_DIR", "Skill", "load_catalog", "load_skill_file", "match_skills"]
+__all__ = [
+    "SKILLS_DIR",
+    "Skill",
+    "load_catalog",
+    "load_skill_file",
+    "match_skills",
+    "skills_reference_tools",
+]
