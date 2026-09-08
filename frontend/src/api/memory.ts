@@ -112,3 +112,35 @@ export async function deleteUserTerm(id: number): Promise<void> {
   const response = await apiFetch(`/api/memory/terms/${id}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('删除失败')
 }
+
+export interface PendingThought {
+  id: number
+  kind: string
+  content: string
+  earliest_at: string
+  expires_at: string | null
+  priority: number
+  attempts: number
+  max_attempts: number
+  status: string
+}
+
+export interface PendingThoughtsData {
+  thoughts: PendingThought[]
+  stats: { total: number; pending: number; expressed: number; dismissed: number }
+}
+
+export async function getPendingThoughts(): Promise<PendingThoughtsData> {
+  const response = await apiFetch('/api/memory/pending-thoughts')
+  if (!response.ok) throw new Error('心事读取失败')
+  const data = await response.json()
+  return {
+    thoughts: (Array.isArray(data.thoughts) ? data.thoughts : []) as PendingThought[],
+    stats: data.stats ?? { total: 0, pending: 0, expressed: 0, dismissed: 0 },
+  }
+}
+
+export async function dismissPendingThought(id: number): Promise<void> {
+  const response = await apiFetch(`/api/memory/pending-thoughts/${id}/dismiss`, { method: 'POST' })
+  if (!response.ok) throw new Error('放下失败')
+}

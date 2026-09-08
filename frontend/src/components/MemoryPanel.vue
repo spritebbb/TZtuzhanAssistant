@@ -3,9 +3,11 @@ import { ref, watch } from 'vue'
 import {
   deleteFact,
   deleteUserTerm,
+  dismissPendingThought,
   getFacts,
   getHerProfile,
   getInteractionStyle,
+  getPendingThoughts,
   resetInteractionStyle,
   resolveFactConflict,
   updateFact,
@@ -13,6 +15,7 @@ import {
   updateFactSurfacePolicy,
   type FactItem,
   type HerProfileSection,
+  type PendingThought,
   type UserTerm,
 } from '../api/memory'
 import {
@@ -38,6 +41,17 @@ const profileSections = ref<HerProfileSection[]>([])
 const userStyle = ref('')
 const userTerms = ref<UserTerm[]>([])
 const activeTab = ref<'facts' | 'profile' | 'backup'>('facts')
+
+// ---- 她惦记的事（M5 未完成心事） ----
+const pendingThoughts = ref<PendingThought[]>([])
+const thoughtStats = ref<{ total: number; pending: number; expressed: number; dismissed: number } | null>(null)
+const thoughtsLoading = ref(false)
+const THOUGHT_KIND_LABEL: Record<string, string> = {
+  resume_reading: '想跟进一起读的书',
+  confirm_memory: '想确认一条记忆',
+  goal_checkin: '想问问目标的进展',
+  chain_aftermath: '想回望完成的事',
+}
 const restoreBusy = ref(false)
 const restoreNotice = ref('')
 const restoreErrors = ref<string[]>([])
@@ -118,6 +132,32 @@ async function load() {
     error.value = '记忆匣子卡住了，过会儿再试'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadThoughts() {
+  thoughtsLoading.value = true
+  try {
+    const data = await getPendingThoughts()
+    pendingThoughts.value = data.thoughts
+    thoughtStats.value = data.stats
+  } catch {
+    /* 心事读取失败不打扰主列表 */
+  } finally {
+    thoughtsLoading.value = false
+  }
+}
+
+async function dismissThought(thought: PendingThought) {
+  try {
+    await dismissPendingThought(thought.id)
+    pendingThoughts.value = pendingThoughts.value.filter((t) => t.id !== thought.id)
+    if (thoughtStats.value) {
+      thoughtStats.value.dismissed += 1
+      thoughtStats.value.pending = Math.max(0, thoughtStats.value.pending - 1)
+    }
+  } catch {
+    error.value = '没放下，稍后再试'
   }
 }
 
@@ -303,7 +343,7 @@ async function resolveConflict(fact: FactItem, action: 'accept_new' | 'keep_exis
   }
 }
 
-watch(() => props.show, (show) => { if (show) { void load(); void loadStyle() } }, { immediate: true })
+watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); void loadThoughts() } }, { immediate: true })
 </script>
 
 <template>
@@ -393,6 +433,21 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle() } 
             <button class="term-del" @click="removeTerm(term)">删</button>
           </p>
           <button v-if="userStyle || userTerms.length" class="reset-btn" @click="resetStyle">重置互动偏好</button>
+        </article>
+        <article class="profile-card">
+          <small>她惦记的事</small>
+          <p class="hint small" style="margin: 4px 0 8px;">有些话她在等合适的时机才说；等不到的可以替她放下</p>
+          <p v-if="thoughtsLoading">· 正在回想…</p>
+          <p v-else-if="!pendingThoughts.length">· 现在没有惦记的事</p>
+          <template v-else>
+            <p v-for="thought in pendingThoughts" :key="thought.id" class="thought-row">
+              · <b>{{ THOUGHT_KIND_LABEL[thought.kind] || '想聊点什么' }}</b>：{{ thought.content }}
+              <button class="term-del" title="放下这条心事，她不会再提" @click="dismissThought(thought)">放下</button>
+            </p>
+          </template>
+          <p v-if="thoughtStats" class="hint small">
+            曾挂心 {{ thoughtStats.total }} 件 · 说过 {{ thoughtStats.expressed }} 件 · 放下 {{ thoughtStats.dismissed }} 件
+          </p>
         </article>
       </div>
       <div v-else class="entries">
