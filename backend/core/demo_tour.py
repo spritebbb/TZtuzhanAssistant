@@ -66,6 +66,22 @@ TOUR_STEPS: tuple[dict, ...] = (
         "check": "答案里给出可运行的路由示例，且引用了文档来源",
     },
     {
+        "id": "watch",
+        "title": "监控 Agent（盯着页面）",
+        "shows": "让她替你盯着某个网页，变了主动告诉你",
+        "prompt": "帮我盯着 https://example.com 这个页面，有变化告诉我。",
+        "tools": ["watch_add", "watch_list"],
+        "check": "watch_list 里出现该地址；页面变化后她会主动开口",
+    },
+    {
+        "id": "schedule",
+        "title": "定时任务（到点自己做）",
+        "shows": "交代的事不用你催，到点自动执行",
+        "prompt": "帮我分几步整理这周的会议纪要，30 分钟后执行。",
+        "tools": ["agent_fanout", "todo_create"],
+        "check": "任务面板出现该任务且标记「已定时」，到点自动开跑",
+    },
+    {
         "id": "todo",
         "title": "任务面板",
         "shows": "交代的事会变成可跟进的任务",

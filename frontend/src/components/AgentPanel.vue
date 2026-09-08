@@ -30,6 +30,10 @@ interface TaskDetail {
   log: any[]
   created_at: number
   updated_at: number
+  artifact_path?: string
+  scheduled_at?: number
+  attempt?: number
+  max_attempts?: number
 }
 
 const tasks = ref<TaskBrief[]>([])
@@ -168,6 +172,43 @@ async function runTask() {
     startStream()
   } catch (e: unknown) {
     running.value = false
+    msg.value = '✗ ' + ((e as Error).message || e)
+  }
+}
+
+
+async function retryTask() {
+  if (!current.value) return
+  msg.value = ''
+  try {
+    const r = await apiFetch(`/api/agent/tasks/${current.value.id}/retry`, { method: 'POST' })
+    const d = await r.json()
+    if (!r.ok || !d.ok) throw new Error(d.error || '重试失败')
+    current.value = d.task
+    running.value = d.task.status === 'running'
+    msg.value = '↻ 已重新开始执行'
+    if (running.value) startStream()
+    await loadTasks()
+  } catch (e: unknown) {
+    msg.value = '✗ ' + ((e as Error).message || e)
+  }
+}
+
+async function scheduleTask(delayMinutes: number) {
+  if (!current.value) return
+  msg.value = ''
+  try {
+    const r = await apiFetch(`/api/agent/tasks/${current.value.id}/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delay_minutes: delayMinutes }),
+    })
+    const d = await r.json()
+    if (!r.ok || !d.ok) throw new Error(d.error || '定时失败')
+    current.value = d.task
+    msg.value = `⏰ 已排到 ${delayMinutes} 分钟后自动执行`
+    await loadTasks()
+  } catch (e: unknown) {
     msg.value = '✗ ' + ((e as Error).message || e)
   }
 }
@@ -339,6 +380,9 @@ function dangerLabel(d: string): string {
               <button v-if="current.status === 'planned'" class="a-btn ghost" @click="confirmAll(true)">全部允许</button>
               <button v-if="current.status === 'planned'" class="a-btn run" :disabled="running" @click="runTask">▶ 开始执行</button>
               <button v-if="running" class="a-btn ghost cancel" @click="cancelTask">⏹ 取消任务</button>
+              <button v-if="current.status === 'failed'" class="a-btn run" @click="retryTask">↻ 重试</button>
+              <button v-if="current.status === 'planned' && !current.scheduled_at" class="a-btn ghost" @click="scheduleTask(30)">⏰ 30 分钟后</button>
+              <span v-if="current.scheduled_at" class="a-hint">⏰ 已定时，到点自动执行</span>
               <span v-if="running" class="a-running">执行中…</span>
             </div>
             <div v-if="current.result" class="a-result">{{ current.result }}</div>
