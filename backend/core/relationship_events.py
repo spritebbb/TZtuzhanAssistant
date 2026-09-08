@@ -170,9 +170,13 @@ def invalidate_for_source(
 ) -> int:
     """来源记录被删除时作废其事件，返回作废条数。"""
     with db._lock:
-        for table in ("memory_annotations", "first_occurrences"):
+        for table, column in (
+            ("memory_annotations", "source_event_id"),
+            ("first_occurrences", "source_event_id"),
+            ("relationship_style_evidence", "event_id"),
+        ):
             db.conn.execute(
-                f"DELETE FROM {table} WHERE user_id = ? AND source_event_id IN "
+                f"DELETE FROM {table} WHERE user_id = ? AND {column} IN "
                 "(SELECT id FROM relationship_events WHERE user_id = ? "
                 "AND source_type = ? AND source_id = ?)",
                 (user_id, user_id, source_type, int(source_id)),

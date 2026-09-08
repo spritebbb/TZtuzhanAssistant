@@ -182,6 +182,21 @@ def test_api_endpoints() -> int:
     return 0
 
 
+def test_real_event_invalidation() -> int:
+    from backend.core.relationship_events import record, invalidate_for_source
+
+    uid = "style-real-invalidation"
+    db.ensure_user(uid)
+    for i in range(3):
+        record(uid, "story_finished", "activity", 8000 + i,
+               occurred_at=(datetime.now() - timedelta(days=i)).isoformat())
+    assert not rs.derive_style(uid)["forming"]
+    assert invalidate_for_source(uid, "activity", 8000) == 1
+    assert rs.derive_style(uid)["forming"], "deleted source must stop contributing"
+    assert invalidate_for_source(uid, "activity", 8000) == 0
+    return 0
+
+
 async def main() -> int:
     failed = (
         test_event_mapping_and_romantic_gate()
@@ -191,6 +206,7 @@ async def main() -> int:
         + test_record_hook_and_switch()
         + test_behavior_hint_clamp()
         + test_api_endpoints()
+        + test_real_event_invalidation()
     )
     if failed:
         print(f"\n=== L03 关系气质：{failed} 项失败 ===")
