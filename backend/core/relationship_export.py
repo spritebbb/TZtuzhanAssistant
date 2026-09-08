@@ -37,7 +37,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
     ),
-    "events": ("relationship_events", "pending_thoughts"),
+    "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence"),
     "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources"),
     "conversations": ("messages",),
 }
@@ -111,6 +111,7 @@ _REFERENCE_RULES = (
     _rule_static("future_letters", "goal_id", "activities"),
     _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
+    _rule_static("relationship_style_evidence", "event_id", "relationship_events", frozenset()),
     _rule_dynamic("artifacts", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
     _rule_dynamic("pending_thoughts", "source_id", "source_type"),

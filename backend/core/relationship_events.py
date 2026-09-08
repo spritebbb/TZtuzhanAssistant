@@ -101,6 +101,20 @@ def record(
             return None
         if commit:
             db.conn.commit()
+
+    # L03 气质证据：事件落库成功后按类型登记（幂等 user/event/style；
+    # commit=False 的试探路径不登记——与事务提交语义保持一致）。
+    if commit and event_id is not None:
+        try:
+            from . import relationship_style
+
+            relationship_style.record_evidence(user_id, event_id, event_type,
+                                               occurred_at=occurred)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "[关系气质] 证据登记失败（不影响事件）: event=%s", event_id)
     return event_id
 
 

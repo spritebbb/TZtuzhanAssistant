@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { getDiaries, getResearchReports, type DiaryEntry, type ResearchReport } from '../api/diary'
 import { getUnlocks, type UnlockSlot } from '../api/unlocks'
+import { getRelationshipStyle, type RelationshipStyle } from '../api/relationship'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -9,6 +10,7 @@ const tab = ref<'diary' | 'research' | 'ours'>('diary')
 const diaries = ref<DiaryEntry[]>([])
 const reports = ref<ResearchReport[]>([])
 const unlocks = ref<UnlockSlot[]>([])
+const styleInfo = ref<RelationshipStyle | null>(null)
 const loading = ref(false)
 const error = ref('')
 
@@ -27,6 +29,18 @@ async function load() {
   }
 }
 
+async function loadStyle() {
+  if (styleInfo.value) return
+  try {
+    styleInfo.value = await getRelationshipStyle()
+  } catch { /* 展示性内容，失败静默 */ }
+}
+
+function toggleOurs() {
+  tab.value = 'ours'
+  void loadStyle()
+}
+
 watch(() => props.show, (show) => { if (show) void load() })
 </script>
 
@@ -43,7 +57,7 @@ watch(() => props.show, (show) => { if (show) void load() })
       <nav>
         <button :class="{ active: tab === 'diary' }" @click="tab = 'diary'">私人日记</button>
         <button :class="{ active: tab === 'research' }" @click="tab = 'research'">观察人类</button>
-        <button :class="{ active: tab === 'ours' }" @click="tab = 'ours'">我们之间</button>
+        <button :class="{ active: tab === 'ours' }" @click="toggleOurs">我们之间</button>
       </nav>
       <div class="entries">
         <p v-if="loading" class="empty">正在悄悄拉开抽屉…</p>
@@ -76,6 +90,18 @@ watch(() => props.show, (show) => { if (show) void load() })
             <p v-else-if="slot.status === 'locked'" class="hint">还没走到这一页</p>
           </article>
           <p v-if="!unlocks.length" class="empty">日子还长，慢慢来</p>
+          <!-- L03 长期关系气质：只显示气质名 + 最多 2 条形成原因，不显示等级/分数 -->
+          <article class="unlock style-card">
+            <div class="meta"><time>——</time><span>长期气质</span></div>
+            <template v-if="styleInfo && !styleInfo.forming && styleInfo.style_labels.length">
+              <h3>{{ styleInfo.style_labels.join(' × ') }}</h3>
+              <p v-for="reason in styleInfo.reasons" :key="reason" class="hint">{{ reason }}</p>
+            </template>
+            <template v-else>
+              <h3>还在慢慢形成</h3>
+              <p class="hint">一起做的事情多了，这里会写下这段关系长成的样子</p>
+            </template>
+          </article>
         </template>
       </div>
     </section>

@@ -16,6 +16,7 @@ _FLAG_LABELS = {
     "context_registry_enabled": "语境注册表：统一管理注入对话的语境（含知识观点的召回）",
     "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
+    "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
 }
 
 

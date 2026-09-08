@@ -85,3 +85,35 @@ export async function restoreRelationship(
   if (!response.ok || !data.ok) throw new Error(data.error || '恢复失败')
   return { total: data.total as number }
 }
+
+// ---- L03 长期关系气质 ----
+export interface RelationshipStyle {
+  style_ids: string[]
+  style_labels: string[]
+  forming: boolean
+  reasons: string[]
+  valid_until: string
+}
+
+export async function getRelationshipStyle(): Promise<RelationshipStyle> {
+  const response = await apiFetch('/api/memory/relationship-style')
+  if (!response.ok) throw new Error('关系气质读取失败')
+  const data = await response.json()
+  return {
+    style_ids: data.style_ids ?? [],
+    style_labels: data.style_labels ?? [],
+    forming: Boolean(data.forming),
+    reasons: data.reasons ?? [],
+    valid_until: String(data.valid_until ?? ''),
+  }
+}
+
+export async function blockRelationshipStyle(style: string): Promise<void> {
+  const response = await apiFetch(`/api/memory/relationship-style/${style}/block`, { method: 'POST' })
+  if (!response.ok) throw new Error('屏蔽失败')
+}
+
+export async function unblockRelationshipStyle(style: string): Promise<void> {
+  const response = await apiFetch(`/api/memory/relationship-style/${style}/block`, { method: 'DELETE' })
+  if (!response.ok) throw new Error('撤销失败')
+}

@@ -374,6 +374,34 @@ def _extract_city(text: str) -> str | None:
     return None
 
 
+# L03 关系气质 → 行为帧轻倾向（不显示分数/等级，表达带宽微调）
+_STYLE_HINT_TEXT = {
+    "companion": "长期相处让你们的氛围偏向安稳的陪伴，她可以更放松地闲聊",
+    "playful": "互相玩梗的默契已经形成，她可以偶尔先开一个无伤大雅的玩笑",
+    "confidant": "你愿意跟她聊心事，她可以更自然地接住认真话题",
+    "growth": "一起做事的经历不少，她可以更主动地拉你聊共同目标或正在进行的事",
+    "romantic": "浪漫氛围已经稳定，她可以自然地表达在意，不刻意掩饰",
+}
+
+
+def _style_line(user_id: str) -> str:
+    """derive_style → 行为帧 style_line；关闭/未形成时为空串。"""
+    try:
+        from .relationship_style import derive_style
+
+        result = derive_style(user_id)
+        if result.get("forming") or not result.get("style_ids"):
+            return ""
+        fragments: list[str] = []
+        for style in result["style_ids"][:2]:
+            text = _STYLE_HINT_TEXT.get(style)
+            if text:
+                fragments.append(text)
+        return "；".join(fragments) + "。" if fragments else ""
+    except Exception:
+        return ""
+
+
 # 天气查询专用：用城市查真实天气（wttr.in，含温度/风速），
 # 避免"问天气不带城市"时搜索返回全国杂乱结果、LLM 只能瞎猜。
 def _fetch_weather(city: str) -> str | None:
@@ -1012,6 +1040,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         reply_frame = build_behavior_frame(
             reply_state, season_line=reply_season["line"],
             calendar_line=compose_line(cal_mod),
+            style_line=_style_line(user_id),
         )
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
