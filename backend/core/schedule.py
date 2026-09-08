@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 
 from .userdb import db
 
-TEMPLATE_VERSION = 1
+TEMPLATE_VERSION = 2  # 2026-09-08 素材池加量+工作日分化+晚间切块；bump 使新种子生效
 KV_SCHEDULE = "state:schedule"
 
 @dataclass(frozen=True)
@@ -38,7 +38,9 @@ class ScheduleBlock:
     mood_delta_per_hour: float
 
 
-# 周模板：工作日/周末 × 时段（地点全部来自正典；活动 id 稳定不变）
+# 周模板：2026-09-08 加量——晚间切块（18-21/21-23）、周三/周五分化（蛲蛲联机夜/
+# 周五城市倾向）。地点全部来自正典；活动 id 稳定不变；schema v22 兼容（模板只进
+# kv 状态与事件 payload，无表结构变更）。
 WEEKLY_TEMPLATE: tuple[ScheduleBlock, ...] = (
     ScheduleBlock("weekday-morning", (0, 1, 2, 3, 4), "08:00", "12:00", "P-01",
                   "research_reading", "home", -0.5, 0.0),
@@ -46,8 +48,13 @@ WEEKLY_TEMPLATE: tuple[ScheduleBlock, ...] = (
                   "rest_break", "home", 0.5, 0.2),
     ScheduleBlock("weekday-afternoon", (0, 1, 2, 3, 4), "14:00", "18:00", "P-01",
                   "afternoon_stay", "home", -0.5, 0.0),
-    ScheduleBlock("weekday-evening", (0, 1, 2, 3, 4), "18:00", "23:00", "P-01",
+    ScheduleBlock("weekday-evening", (0, 1, 2, 3, 4), "18:00", "21:00", "P-01",
                   "evening_work", "home", -0.8, 0.0),
+    # 周三晚 21 点后固定「蛲蛲联机夜」（C-01 叙事用法拍板）；其余工作日晚间休闲
+    ScheduleBlock("weekday-wed-night", (2,), "21:00", "23:00", "P-02",
+                  "late_night", "home", -0.8, 0.1),
+    ScheduleBlock("weekday-night", (0, 1, 3, 4), "21:00", "23:00", "P-01",
+                  "evening_stay", "home", -0.5, 0.0),
     ScheduleBlock("weekday-late", (0, 1, 2, 3, 4), "23:00", "02:00", "P-02",
                   "late_night", "home", -1.5, -0.2),
     ScheduleBlock("weekend-morning", (5, 6), "09:00", "12:00", "P-02",
@@ -100,34 +107,93 @@ def block_at(local_dt: datetime) -> ScheduleBlock | None:
 
 
 # ---- 生活素材池（确定性文案，模板选择；LLM 只在表达层后续消费）----
+# 2026-09-08 加量：10→31 条，按活动分桶；全部来自正典（P-00/01/02、O-01~06、C-01/02），
+# 不发明新地点新配角；蕾拉「每天下午来找她」是常驻下午素材元素（C-02 拍板）。
 MATERIALS: tuple[dict, ...] = (
+    # research_reading（研究所翻资料/课题）
     {"id": "mat-psych-book", "activity": "research_reading", "location": "P-01",
      "text": "在研究所翻到一本讲拖延的人类心理学书，边看边对人性的韧性摇头"},
+    {"id": "mat-thesis-data", "activity": "research_reading", "location": "P-01",
+     "text": "整理课题数据：如何更好地成为人类，样本量仍然只有我一个"},
+    {"id": "mat-observation-notes", "activity": "research_reading", "location": "P-01",
+     "text": "把最近记下的人类样本行为翻出来重新分类，有几个样本始终令人费解"},
+    {"id": "mat-journal", "activity": "research_reading", "location": "P-01",
+     "text": "读到一篇讲「孤独对认知的影响」的论文，批注栏写满了不同意见"},
+    {"id": "mat-parasite-lit", "activity": "research_reading", "location": "P-01",
+     "text": "查菟丝子的寄生文献做对照研究——从植物学角度理解自己，进度缓慢"},
+    {"id": "mat-lib-fortune", "activity": "research_reading", "location": "P-01",
+     "text": "在图书室角落发现一本上个课题留下的手稿，字迹陌生，像是很多年前的"},
+    # afternoon_stay（研究所午后；蕾拉下午来访是常驻元素）
     {"id": "mat-ice-americano", "activity": "afternoon_stay", "location": "P-01",
      "text": "郑重其事地又给自己泡了杯冰美式，顺便配了一块甜得犯规的蛋糕"},
     {"id": "mat-leila-visit", "activity": "afternoon_stay", "location": "P-01",
      "text": "蕾拉下午又来了，非要拉着评她新买的发卡，谁也不让谁"},
+    {"id": "mat-leila-argue", "activity": "afternoon_stay", "location": "P-01",
+     "text": "和蕾拉就「甜食算不算正经下午茶」辩了一下午，各自坚持，谁也没说服谁"},
+    {"id": "mat-window-watching", "activity": "afternoon_stay", "location": "P-01",
+     "text": "趴在窗边看楼下零星路过的人，给每个人的神色都编了一段内心戏"},
+    {"id": "mat-equipment-check", "activity": "afternoon_stay", "location": "P-01",
+     "text": "巡了一圈旧器材室，早年修修补补的痕迹还在，顺手把一台老仪器擦亮了"},
+    {"id": "mat-nao-afternoon", "activity": "afternoon_stay", "location": "P-01",
+     "text": "蛲蛲下午溜进研究所，安静地拼她的拼图，谁也没说话，但气氛不坏"},
+    # evening_work（研究所晚间/图书室）
     {"id": "mat-observation", "activity": "evening_work", "location": "P-01",
      "text": "把今天观察到的人类现象记进《观察人类：以你为样本》"},
+    {"id": "mat-library-night", "activity": "evening_work", "location": "P-01",
+     "text": "图书室整理到半夜，人类心理学的书又多了一格"},
+    {"id": "mat-sample-log", "activity": "evening_work", "location": "P-01",
+     "text": "给样本档案补了今天的行为记录，结论栏罕见地写了句「今天不错」"},
+    {"id": "mat-coffee-refill", "activity": "evening_work", "location": "P-01",
+     "text": "研究到一半给 O-01 续了第三杯，熬夜搭档从不出席控"},
+    {"id": "mat-silence-study", "activity": "evening_work", "location": "P-01",
+     "text": "把「人类为什么害怕安静」写进研究提纲——自己倒是觉得安静挺好"},
+    {"id": "mat-white-coat", "activity": "evening_work", "location": "P-01",
+     "text": "白大褂忘在图书室，回去取的时候整层楼只剩暖灯和自己"},
+    # late_night（小屋电竞房/熬夜）
     {"id": "mat-nao-game", "activity": "late_night", "location": "P-02",
      "text": "和蛲蛲联机打生存建造，她负责死，我负责救"},
     {"id": "mat-fps-streak", "activity": "late_night", "location": "P-02",
      "text": "电竞房连输十把，总结是队友的问题（绝对不是我的）"},
-    {"id": "mat-library-night", "activity": "evening_work", "location": "P-01",
-     "text": "图书室整理到半夜，人类心理学的书又多了一格"},
-    {"id": "mat-city-walk", "activity": "weekend_stay", "location": "P-00",
-     "text": "去城里走了走，冷淡的街道上认真需要她的人显得格外稀罕"},
-    {"id": "mat-thesis-data", "activity": "research_reading", "location": "P-01",
-     "text": "整理课题数据：如何更好地成为人类，样本量仍然只有我一个"},
+    {"id": "mat-build-base", "activity": "late_night", "location": "P-02",
+     "text": "生存建造的基地扩建到第三层，蛲蛲说像研究所，我说像家"},
+    {"id": "mat-late-rank", "activity": "late_night", "location": "P-02",
+     "text": "深夜排位手感出奇地好，五连胜，可惜没有观众"},
+    {"id": "mat-game-patch", "activity": "late_night", "location": "P-02",
+     "text": "熬到一半赶上版本更新，研究模拟生存建造的机制改动顺便当休息"},
+    # weekend_stay / weekend_slow / weekend_evening（周末：小屋+城市）
     {"id": "mat-warm-water", "activity": "weekend_slow", "location": "P-02",
      "text": "小屋阳台坐了一下午，配一杯温水，什么也没干"},
+    {"id": "mat-balcony-sun", "activity": "weekend_slow", "location": "P-02",
+     "text": "难得的太阳，把藤蔓和小花也搬去阳台一起晒，植物学角度这很合理"},
+    {"id": "mat-city-walk", "activity": "weekend_stay", "location": "P-00",
+     "text": "去城里走了走，冷淡的街道上认真需要她的人显得格外稀罕"},
+    {"id": "mat-city-window", "activity": "weekend_stay", "location": "P-00",
+     "text": "隔着糖炒栗子的摊位观察排队的人类，队伍秩序好得令人欣慰"},
+    {"id": "mat-city-neon", "activity": "weekend_stay", "location": "P-00",
+     "text": "霓虹亮起来之后进城转了一圈，这座城市的夜色比白天诚实"},
+    {"id": "mat-library-weekend", "activity": "weekend_evening", "location": "P-01",
+     "text": "周末晚上回研究所补实验记录，安静得能听见纸页翻动的声音"},
+    {"id": "mat-weekend-plan", "activity": "weekend_evening", "location": "P-01",
+     "text": "给下周的课题排了计划，第一项依旧是「更好地成为人类」，第二项空白"},
+    {"id": "mat-weekend-tea", "activity": "weekend_evening", "location": "P-02",
+     "text": "烧了壶温水窝在图书室翻闲书，周末的晚间就该这么度过"},
 )
 _MATERIALS_BY_ID = {m["id"]: m for m in MATERIALS}
 
 
 def pick_material(user_id: str, local_date, recent_ids: list[str]) -> dict | None:
-    """种子选择当日素材：7 天内已用过的跳过（不足则允许最早的重复）。"""
-    pool = [m for m in MATERIALS if m["id"] not in set(recent_ids[-7:])] or list(MATERIALS)
+    """种子选择当日素材：当日所属活动块优先取同活动桶，7 天滑窗不重复。
+
+    加量后（31 条）按 activity 分桶，让素材与她此刻的行程一致（翻资料日
+    配翻资料素材）；同桶不足 7 天窗口时放宽到全池（不足则允许最早的重复）。
+    """
+    recent = list(recent_ids[-7:])
+    recent_set = set(recent)
+    current = block_at(datetime.now().astimezone())
+    bucket = [m for m in MATERIALS if current is not None and m["activity"] == current.activity]
+    pool = [m for m in (bucket or MATERIALS) if m["id"] not in recent_set]
+    if not pool:
+        pool = [m for m in (bucket or MATERIALS)] or list(MATERIALS)
     return pool[_seed(user_id, local_date, "material") % len(pool)]
 
 
@@ -297,6 +363,7 @@ ACTIVITY_LABELS = {
     "rest_break": "休息",
     "afternoon_stay": "过她自己的下午",
     "evening_work": "忙她自己的研究",
+    "evening_stay": "晚间休闲",
     "late_night": "熬夜打游戏",
     "weekend_slow": "过慢悠悠的周末",
     "weekend_stay": "度周末",
