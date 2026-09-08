@@ -161,6 +161,8 @@ def observe_fact(user_id: str, fact_id: int, message_ids: list[int], *,
         if fact is None or fact["surface_policy"] == "never_surface":
             return None
         current = get_policy(user_id, fact_id)
+        if current and fact_id in policy_expired_ids(user_id, now=moment):
+            return None  # 到期后的旧事实不能通过迟到的评分重新获得召回资格
         requested = {int(i) for i in message_ids if isinstance(i, int) and not isinstance(i, bool)}
         rows = []
         if requested:
@@ -352,3 +354,49 @@ def tier_distribution(user_id: str) -> dict:
             (user_id,),
         ).fetchall()
     return {str(r["tier"]): int(r["n"]) for r in rows}
+
+
+def short_retention_days(content: str) -> int:
+    """确定性的类别候选：临时事件一天、当前状态七天、其余短期三十天。"""
+    if re.search(r"今天|今晚|此刻|临时", content):
+        return 1
+    if re.search(r"最近|当前|这周|正在|这几天", content):
+        return 7
+    return 30
+
+
+def policy_expired_ids(user_id: str, *, now: datetime | None = None,
+                       database=None) -> set[int]:
+    """policy 仅补充无既有期限的事实；facts.expires_at 始终优先。
+
+    无观察起点的旧 policy、legacy、long 和 pinned 不受此自动期限影响。
+    关闭生命周期开关即保持 shadow；不复制或改写事实正文与原始期限。
+    """
+    from .features import flag
+    from .userdb import db
+
+    if not flag("memory_lifecycle_enabled") or not flag("memory_salience_enabled"):
+        return set()
+    database = database or db
+    moment = now or datetime.now()
+    expired: set[int] = set()
+    with database._lock:
+        rows = database.conn.execute(
+            "SELECT f.id, f.content, p.first_observed_at FROM facts f "
+            "JOIN memory_policy p ON p.user_id=f.user_id AND p.fact_id=f.id "
+            "WHERE f.user_id=? AND f.status='active' AND f.pinned=0 "
+            "AND f.expires_at IS NULL "
+            "AND p.tier='short' AND p.legacy=0 AND p.first_observed_at IS NOT NULL",
+            (user_id,),
+        ).fetchall()
+    for row in rows:
+        try:
+            start = datetime.fromisoformat(row["first_observed_at"])
+            if start.tzinfo is not None:
+                start = start.astimezone().replace(tzinfo=None)
+            local_now = moment.astimezone().replace(tzinfo=None) if moment.tzinfo else moment
+            if start + timedelta(days=short_retention_days(row["content"])) <= local_now:
+                expired.add(int(row["id"]))
+        except (ValueError, TypeError):
+            continue  # 无法解释旧时间时保守保留，绝不批量删除
+    return expired

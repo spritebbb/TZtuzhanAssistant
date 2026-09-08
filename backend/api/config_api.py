@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api", tags=["config"])
 
 # 功能开关说明（设置页展示用）：键名 → 一句话用途。
 _FLAG_LABELS = {
+    "memory_lifecycle_enabled": "记忆保留：让短期状态随时间淡出，固定的记忆始终保留",
     "memory_salience_enabled": "记忆重要性：整理你明确重视和反复提及的记忆线索",
     "output_hygiene_enabled": "输出卫生：回复发送前统一安全检查（关闭时保持旧流式契约）",
     "context_registry_enabled": "语境注册表：统一管理注入对话的语境（含知识观点的召回）",
