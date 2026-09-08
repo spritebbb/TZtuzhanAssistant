@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 39  # v39: L16 shared resources and grants
+_SCHEMA_VERSION = 39  # v39: L16 shared resources, P3-05 evolution log and metrics
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -296,6 +296,33 @@ CREATE INDEX IF NOT EXISTS idx_shared_resources_user
     ON shared_resources(user_id, resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_resource_grants_resource
     ON resource_grants(resource_id, grantee_scope);
+-- P3-05A 演化日志：白名单参数小步演化，可撤销、重算（撤销重放不覆盖历史）。
+CREATE TABLE IF NOT EXISTS persona_evolution_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         TEXT NOT NULL,
+    source_event_id INTEGER,               -- 来源关系事件（源删偏移失效）
+    parameter       TEXT NOT NULL,         -- 仅限 WHITELIST 表达层三参数
+    old             REAL NOT NULL,
+    new             REAL NOT NULL,
+    delta           REAL NOT NULL,
+    rule_version    INTEGER NOT NULL DEFAULT 1,
+    reason          TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    reverted_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_evolution_user_param
+    ON persona_evolution_log(user_id, parameter, id);
+-- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
+CREATE TABLE IF NOT EXISTS experience_metrics (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL,   -- latency / rule_failure / repetition / source_pick / user_feedback
+    value      TEXT NOT NULL,   -- 档位或对象名（≤120 字，不含聊天正文）
+    count      INTEGER NOT NULL DEFAULT 1,
+    day        TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, kind, value, day)
+);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1998,6 +2025,7 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
+                "persona_evolution_log", "experience_metrics",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",

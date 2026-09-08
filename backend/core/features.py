@@ -60,6 +60,13 @@ FLAG_DEFAULTS = {
     "focus_wrapup_enabled": True,
     # F06：聊天意图自动预填草稿。关闭后不再产草稿，原手动创建入口保留。
     "activity_drafts_enabled": True,
+    # P3-05B：本地质量统计（延迟/失败规则/重复率/来源选择/明确反馈计数）。
+    # 默认本地记录、可关可清；临时轮不写；不属于关系包。
+    "experience_metrics_enabled": os.getenv("FEATURE_EXPERIENCE_METRICS_ENABLED", "1").lower()
+        not in {"0", "false", "off"},
+    # L16：可选择共享知识。默认全部隔离；只有用户明确「分享给某角色」才生效。
+    "shared_resources_enabled": os.getenv("FEATURE_SHARED_RESOURCES_ENABLED", "1").lower()
+        not in {"0", "false", "off"},
 }
 
 
