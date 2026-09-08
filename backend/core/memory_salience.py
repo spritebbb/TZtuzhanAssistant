@@ -31,6 +31,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from datetime import datetime, timedelta
@@ -38,6 +39,9 @@ from datetime import datetime, timedelta
 from .log import logger
 
 SCORE_VERSION = 1
+
+_IMPORTANCE_RE = re.compile(r"(?:很重要|非常重要|对我重要|一定要记住|请记住|别忘了)")
+_NO_MEMORY_RE = re.compile(r"(?:别记住|不要记|别记下来|不保存|不留痕|临时聊)")
 
 # 分层阈值（§14.8 原文）：滞回区间 31..59 保持原 tier
 _LONG_THRESHOLD = 60
@@ -134,6 +138,75 @@ def get_policy(user_id: str, fact_id: int) -> dict | None:
             (user_id, int(fact_id)),
         ).fetchone()
     return dict(row) if row is not None else None
+
+
+def observe_fact(user_id: str, fact_id: int, message_ids: list[int], *,
+                 now: datetime | None = None, new_fact: bool = False) -> dict | None:
+    """消费已落库用户消息；LLM 仅提供候选 id，归属、日期和重要性由代码裁定。
+
+    旧事实没有 policy 时仅允许显式重要性重评。无来源的新事实可建立零分
+    shadow，但不从整段 transcript 推测重复天数。重复调用不延后观察起点。
+    """
+    from .features import flag
+    from .userdb import db
+
+    if not flag("memory_salience_enabled"):
+        return None
+    moment = now or datetime.now()
+    with db._lock:
+        fact = db.conn.execute(
+            "SELECT * FROM facts WHERE user_id=? AND id=? AND status='active'",
+            (user_id, int(fact_id)),
+        ).fetchone()
+        if fact is None or fact["surface_policy"] == "never_surface":
+            return None
+        current = get_policy(user_id, fact_id)
+        requested = {int(i) for i in message_ids if isinstance(i, int) and not isinstance(i, bool)}
+        rows = []
+        if requested:
+            placeholders = ",".join("?" for _ in requested)
+            rows = db.conn.execute(
+                f"SELECT id, content, ts FROM messages WHERE user_id=? AND role='user' "
+                f"AND id IN ({placeholders})", (user_id, *sorted(requested)),
+            ).fetchall()
+        rows = [r for r in rows if not _NO_MEMORY_RE.search(r["content"])]
+        explicit = any(_IMPORTANCE_RE.search(r["content"]) for r in rows)
+        if current is None and not new_fact and not explicit:
+            return None  # 不把旧事实静默转为 short
+        previous_ids = set(json.loads(current["source_message_ids"] or "[]")) if current else set()
+        ids = previous_ids | {int(r["id"]) for r in rows}
+        days: set[str] = set()
+        valid_ids: list[int] = []
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            evidence = db.conn.execute(
+                f"SELECT id, ts, content FROM messages WHERE user_id=? AND role='user' "
+                f"AND id IN ({placeholders})", (user_id, *sorted(ids)),
+            ).fetchall()
+            for row in evidence:
+                if _NO_MEMORY_RE.search(row["content"]):
+                    continue
+                try:
+                    day = datetime.fromisoformat(row["ts"]).date()
+                except (TypeError, ValueError):
+                    continue
+                if day > moment.date():
+                    continue
+                days.add(day.isoformat())
+                valid_ids.append(int(row["id"]))
+                explicit = explicit or bool(_IMPORTANCE_RE.search(row["content"]))
+        first_observed = (current or {}).get("first_observed_at") or moment.isoformat(timespec="seconds")
+        evaluate_fact(user_id, fact_id, explicit=explicit,
+                      distinct_days=len(days), pinned=bool(fact["pinned"]))
+        # 原始正文只留 messages；policy 只保存经校验的引用和计数。
+        review_at = (datetime.fromisoformat(first_observed) + timedelta(days=14)).isoformat(timespec="seconds")
+        db.conn.execute(
+            "UPDATE memory_policy SET source_message_ids=?, first_observed_at=?, review_at=? "
+            "WHERE user_id=? AND fact_id=?",
+            (json.dumps(sorted(valid_ids)), first_observed, review_at, user_id, fact_id),
+        )
+        db.conn.commit()
+        return get_policy(user_id, fact_id)
 
 
 def evaluate_fact(user_id: str, fact_id: int, *, explicit: bool = False,

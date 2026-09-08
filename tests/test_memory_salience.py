@@ -11,12 +11,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sqlite3
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
+from unittest.mock import AsyncMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -202,6 +205,100 @@ def test_annotation_event_remap() -> int:
     return 0
 
 
+def test_observation_sources_and_replay() -> int:
+    uid = "g01-observation"
+    db.ensure_user(uid)
+    fid = _fact(uid, "用户热爱天文学")
+    moment = datetime(2026, 9, 8, 12)
+    ids = [db.add_message(uid, "user", "天文学对我很重要") for _ in range(3)]
+    assistant_id = db.add_message(uid, "assistant", "一定要记住")
+    foreign_id = db.add_message("foreign-observation", "user", "一定要记住")
+    with db._lock:
+        db.conn.execute("UPDATE messages SET ts=? WHERE user_id=?",
+                        (moment.isoformat(), uid))
+        db.conn.commit()
+    first = ms.observe_fact(uid, fid, ids + [assistant_id, foreign_id, 999999],
+                            now=moment, new_fact=True)
+    assert first["score"] == 50 and first["distinct_days"] == 1
+    assert json.loads(first["source_message_ids"]) == ids
+    deadline = first["review_at"]
+    for day in range(1, 15):
+        mid = db.add_message(uid, "user", "继续讨论天文学")
+        with db._lock:
+            db.conn.execute("UPDATE messages SET ts=? WHERE id=?",
+                            ((moment + timedelta(days=day)).isoformat(), mid))
+            db.conn.commit()
+        policy = ms.observe_fact(uid, fid, [mid], now=moment + timedelta(days=day))
+        assert policy["review_at"] == deadline
+    assert policy["score"] == 70 and policy["tier"] == "long"
+    row = db.conn.execute("SELECT expires_at, confidence FROM facts WHERE id=?", (fid,)).fetchone()
+    assert row["expires_at"] is None and row["confidence"] == 0.7
+    legacy = _fact(uid, "用户有一把吉他")
+    assert ms.observe_fact(uid, legacy, [], now=moment) is None
+    with patch("backend.core.features.flag", return_value=False):
+        assert ms.observe_fact(uid, legacy, ids, new_fact=True) is None
+    from backend.core.relationship_export import export_bundle, restore_bundle
+    restore_bundle(export_bundle(uid, ["memory"]), "g01-observation-restored")
+    restored = db.conn.execute(
+        "SELECT source_message_ids FROM memory_policy WHERE user_id=?",
+        ("g01-observation-restored",),
+    ).fetchone()
+    assert json.loads(restored["source_message_ids"]) == []
+    return 0
+
+
+def test_v24_policy_upgrade() -> int:
+    from backend.core.userdb import UserDB, _SCHEMA
+    from backend.core.config import config
+    with tempfile.TemporaryDirectory(prefix="g01-upgrade-") as raw:
+        root = Path(raw)
+        conn = sqlite3.connect(root / "bot.db")
+        old_schema = _SCHEMA.replace("    source_message_ids TEXT NOT NULL DEFAULT '[]',\n", "")
+        old_schema = old_schema.replace("    first_observed_at TEXT,\n", "")
+        conn.executescript(old_schema)
+        conn.execute("INSERT INTO memory_policy(user_id,fact_id,tier,score,updated_at) "
+                     "VALUES ('upgrade',1,'legacy',10,'2026-09-08')")
+        conn.execute("PRAGMA user_version=24")
+        conn.commit()
+        conn.close()
+        with patch.object(config, "data_dir", root):
+            upgraded = UserDB()
+            try:
+                row = upgraded.conn.execute("SELECT * FROM memory_policy").fetchone()
+                assert row["tier"] == "legacy" and row["source_message_ids"] == "[]"
+                assert row["first_observed_at"] is None
+                assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 25
+                assert list((root / "backups").glob("schema-bot-v24-to-v25-*/bot.db"))
+            finally:
+                upgraded.conn.close()
+    return 0
+
+
+async def test_extraction_produces_policy() -> int:
+    from backend.core import daily
+    uid = "g01-extract-policy"
+    db.ensure_user(uid)
+    ids = [db.add_message(uid, "user", "观星这件事对我很重要") for _ in range(8)]
+    content = "用户喜欢观星"
+    response = {"facts": [{"content": content, "source_message_ids": ids}], "style": ""}
+    with patch("backend.core.daily.chat", new=AsyncMock(return_value=json.dumps(response))), \
+         patch("backend.core.vector_store.index", return_value=True), \
+         patch("backend.core.date_memory.extract_from_transcript", new=AsyncMock()):
+        await daily.extract_facts(uid)
+    fact = db.conn.execute("SELECT id FROM facts WHERE user_id=?", (uid,)).fetchone()
+    policy = ms.get_policy(uid, fact["id"])
+    assert policy["score"] == 50 and policy["distinct_days"] == 1
+    more = [db.add_message(uid, "user", "又想聊聊星空") for _ in range(8)]
+    response["facts"][0].update(existing_fact_id=fact["id"], source_message_ids=more)
+    with patch("backend.core.daily.chat", new=AsyncMock(return_value=json.dumps(response))), \
+         patch("backend.core.vector_store.index", return_value=True), \
+         patch("backend.core.date_memory.extract_from_transcript", new=AsyncMock()):
+        await daily.extract_facts(uid)
+    assert db.conn.execute("SELECT COUNT(*) FROM facts WHERE user_id=?", (uid,)).fetchone()[0] == 1
+    assert len(json.loads(ms.get_policy(uid, fact["id"])["source_message_ids"])) == 16
+    return 0
+
+
 async def main() -> int:
     failed = (
         test_score_formula()
@@ -212,6 +309,9 @@ async def main() -> int:
         + test_export_restore_roundtrip()
         + test_real_lifecycle_and_scope()
         + test_annotation_event_remap()
+        + test_observation_sources_and_replay()
+        + test_v24_policy_upgrade()
+        + await test_extraction_produces_policy()
     )
     if failed:
         print(f"\n=== G01 记忆显著度：{failed} 项失败 ===")

@@ -26,6 +26,7 @@ JUDGE_PROMPT = """你是「菟菚」的好感度管理员。根据以下某用�
 """
 
 FACT_PROMPT = """你是记忆提取员。根据下面的对话，提取两样东西，只输出一个 JSON：
+每条 facts 还应提供 source_message_ids（直接支持该事实的 user 消息编号数组，禁止引用 assistant 或编造编号）。如果是在再次提到已有事实，提供 existing_fact_id，且 content 必须逐字使用该已有事实的内容；不要为重复提及另建事实。重要性不由模型打分。
 1) facts：值得记住的关于用户的事实——喜好、习惯、工作/生活状态、约定承诺、关系进展、重要经历、家人朋友等。**不要**把毫无后续价值的一次性话题记进去（比如"今天吃了饺子"，除非它反映长期习惯）。每条包含：content（以「用户」开头的一句短话）、confidence（0-1）、conflicts_with_fact_id（与已有事实明确矛盾时填其编号，否则为 null）、retention_days（保留天数）。明确长期稳定的身份/偏好/习惯/重要经历填 null；带“最近/当前/临时/这周/正在”等时效的状态填 7-180 的整数，期限越明确越贴近实际。用户明确说出的事实可为 0.9，依据间接或存在推断时不得高于 0.7。最多 5 条。不得自行覆盖或删除冲突事实。
 2) style：对「用户说话风格」的简要描述（1-2 句），包括：句子长短、是否爱用语气词/表情、常用口头禅、语气是直接还是委婉、爱不爱开玩笑等。
 
@@ -420,7 +421,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         rows = db.messages_between(user_id, day, day)
         if not rows:
             return
-        transcript = "\n".join(f"{r['role']}: {r['content']}" for r in rows[-60:])
+        transcript = "\n".join(f"[{r['id']}] {r['role']}: {r['content']}" for r in rows[-60:])
         # 用该日最后一条消息的 id 推进游标，避免吞掉今天的新消息。
         # 注意：不能回退游标——若上次惰性提炼已推进到更大 id，本次取 max。
         done = max(rows[-1]["id"], last_id) if rows else last_id
@@ -428,7 +429,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         rows = db.messages_after(user_id, last_id, 60)
         if len(rows) < 8:  # 太少不值得提炼，省一次调用
             return
-        transcript = "\n".join(f"{r['role']}: {r['content']}" for r in rows)
+        transcript = "\n".join(f"[{r['id']}] {r['role']}: {r['content']}" for r in rows)
         done = rows[-1]["id"]
 
     try:
@@ -473,8 +474,22 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
         style = ""
     if isinstance(facts, list):
         for f in facts:
+            evidence_ids = []
             if isinstance(f, dict):
                 content = str(f.get("content") or "").strip()[:100]
+                allowed_ids = {int(r["id"]) for r in rows[-60:] if r["role"] == "user"}
+                supplied_ids = f.get("source_message_ids")
+                if isinstance(supplied_ids, list):
+                    evidence_ids = [i for i in supplied_ids
+                                    if type(i) is int and i in allowed_ids]
+                existing_id = f.get("existing_fact_id")
+                if type(existing_id) is int and existing_id in active_fact_ids:
+                    matching = next((old for old in existing
+                                     if int(old["id"]) == existing_id and old["content"] == content), None)
+                    if matching is not None:
+                        from .memory_salience import observe_fact
+                        observe_fact(user_id, existing_id, evidence_ids)
+                        continue
                 try:
                     confidence = float(f.get("confidence", 0.7))
                 except (TypeError, ValueError):
@@ -512,6 +527,8 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
             )
             # 给新事实建稠密向量索引（失败静默）
             if fid is not None and conflict_id is None:
+                from .memory_salience import observe_fact
+                observe_fact(user_id, fid, evidence_ids, new_fact=True)
                 try:
                     import asyncio as _asyncio
                     from .vector_store import index as vec_index
