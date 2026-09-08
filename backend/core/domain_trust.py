@@ -134,11 +134,14 @@ def apply_domain_event(user_id: str, event_id: int, rule_id: str) -> dict | None
 
 
 def get_snapshot(user_id: str) -> dict:
-    """高层可依赖程度 + 每域最多 2 条来源（不暴露内部权重）。"""
+    """高层可依赖程度 + 每域最多 2 条来源（不暴露内部权重）。
+
+    **只读**：缺失的域按当前全局 trust 现算返回，不落行——读路径有副作用会让
+    临时轮/纯展示路径污染用户数据（2026-09-09 实测：行为帧调用本函数导致
+    domain_trust_snapshot 多出 5 行）。落行只发生在 apply_domain_event。
+    """
     from .userdb import db
 
-    for domain in DOMAINS:
-        _ensure_snapshot(user_id, domain)
     with db._lock:
         rows = db.conn.execute(
             "SELECT domain, value FROM domain_trust_snapshot WHERE user_id=?",
@@ -150,6 +153,9 @@ def get_snapshot(user_id: str) -> dict:
             (user_id,),
         ).fetchall()
     values = {str(r["domain"]): int(r["value"]) for r in rows}
+    default_value = max(0, min(100, _global_trust(user_id)))
+    for domain in DOMAINS:
+        values.setdefault(domain, default_value)
     reasons: dict[str, list[dict]] = {}
     for row in source_rows:
         domain = str(row["domain"])

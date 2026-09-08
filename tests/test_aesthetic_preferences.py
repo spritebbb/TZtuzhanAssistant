@@ -133,7 +133,8 @@ def main():
             assert client.delete(f'/api/memory/aesthetics/{pref_id}').status_code == 404
         from backend.core.reset import _TABLES
         assert {'aesthetic_preferences', 'artifact_placements'} <= set(_TABLES)
-        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 38
+        from backend.core.userdb import _SCHEMA_VERSION
+        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == _SCHEMA_VERSION
     print('[OK] L07 source lifetime, rollback, bounds, isolation, preferences, restore and API')
 
 
