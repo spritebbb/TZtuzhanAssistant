@@ -907,6 +907,36 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 学习候选提取失败（不影响回复）")
 
+    # 1.1d) 聊天派活：明确说「分几步做/用任务代理…」时创建 Agent 任务（多步计划，
+    # 用户在任务面板逐步确认），同时建一条待办做跟进锚点。临时轮不派活。
+    if not ephemeral:
+        try:
+            from ..agent.session import create_task as _agent_create, detect_dispatch_request
+
+            objective = detect_dispatch_request(text)
+            if objective:
+                task = await _agent_create(user_id, objective)
+                try:
+                    from .userdb import db as _db
+
+                    with _db._lock:
+                        _db.create_task(user_id, f"[Agent任务] {objective}", priority="P1",
+                                        phase="agent")
+                except Exception:
+                    logger.exception("[pipeline] Agent 任务关联待办失败（不影响任务）")
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"（系统提示：已按用户要求创建 Agent 任务 #{task.id}，"
+                        f"目标「{objective}」，拆成 {len(task.plan)} 步。"
+                        "请在回复里自然地告诉用户：计划已生成，去「任务代理」面板确认要执行哪几步；"
+                        "不要假装已经开始执行。）"
+                    ),
+                })
+                logger.info("[pipeline] 聊天派活 → Agent 任务 {}（{} 步）", task.id, len(task.plan))
+        except Exception:
+            logger.exception("[pipeline] 聊天派活失败（不影响回复）")
+
     # 1.1) 即时关键词奖励（不打 LLM、不依赖语义感知结果，同步执行保证即时反馈）
     # 语义感知/关键词兜底的「主从决策」已整体移入后台 _perceive_and_settle，
     # 这里只保留两个语义感知不覆盖、始终走关键词的即时信号。
