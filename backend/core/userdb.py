@@ -20,9 +20,22 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 37  # v37: L05 domain trust ledger and snapshot
+_SCHEMA_VERSION = 38  # v38: L07 aesthetic preferences and artifact placements
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS aesthetic_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+    owner TEXT NOT NULL CHECK(owner IN ('user','assistant')),
+    category TEXT NOT NULL CHECK(category IN ('color','style','motif','layout')),
+    value TEXT NOT NULL, origin TEXT NOT NULL, source_type TEXT, source_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'active', UNIQUE(user_id,owner,category)
+);
+CREATE TABLE IF NOT EXISTS artifact_placements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, artifact_id INTEGER NOT NULL,
+    slot TEXT NOT NULL DEFAULT 'room' CHECK(slot='room'), x REAL NOT NULL CHECK(x BETWEEN 0 AND 1),
+    y REAL NOT NULL CHECK(y BETWEEN 0 AND 1), theme_version INTEGER NOT NULL DEFAULT 1 CHECK(theme_version=1),
+    hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)), UNIQUE(user_id,artifact_id)
+);
 CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,
     affection       INTEGER NOT NULL DEFAULT 0,
@@ -925,6 +938,22 @@ class UserDB:
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
+        self.conn.executescript("""
+        CREATE TRIGGER IF NOT EXISTS room_artifact_deleted AFTER DELETE ON artifacts BEGIN
+          DELETE FROM artifact_placements WHERE user_id=OLD.user_id AND artifact_id=OLD.id;
+          DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='artifact' AND source_id=OLD.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS room_event_deleted AFTER DELETE ON relationship_events BEGIN
+          DELETE FROM artifacts WHERE user_id=OLD.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=OLD.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS room_event_invalidated AFTER UPDATE OF status ON relationship_events
+        WHEN NEW.status!='active' BEGIN
+          DELETE FROM artifacts WHERE user_id=NEW.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=NEW.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS aesthetic_opinion_deleted AFTER DELETE ON knowledge_opinions BEGIN
+          DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='knowledge_opinion' AND source_id=OLD.id;
+        END;
+        """)
         # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
         # L02：共创壳增加 subtype 与结构化大纲列（旧库 ALTER 补齐）
         writing_columns = {
@@ -1951,6 +1980,7 @@ class UserDB:
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
                 "domain_trust_events", "domain_trust_snapshot",
+                "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

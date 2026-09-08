@@ -41,6 +41,7 @@ import {
 } from '../../api/relationshipVersions'
 import CornerPanel from '../CornerPanel.vue'
 
+vi.mock('../RoomPanel.vue', () => ({ default: { template: '<section aria-label="共同房间" />' } }))
 vi.mock('../../api/artifacts', () => ({ listArtifacts: vi.fn() }))
 vi.mock('../../api/futureLetters', () => ({
   listFutureLetters: vi.fn(),

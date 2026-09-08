@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from .chat import _user_id
 from ..core.fact_lifecycle import (
@@ -20,6 +22,7 @@ from ..core.fact_lifecycle import (
 from ..core.her_profile import her_profile
 from ..core.log import logger
 from ..core import pending_thoughts
+from ..core import aesthetic_preferences as aesthetics
 from ..core import user_preferences as _prefs
 from ..core.userdb import (
     db,
@@ -30,6 +33,53 @@ from ..core.userdb import (
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+
+
+class AestheticInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner: Literal["user", "assistant"] = "user"
+    category: Literal["color", "style", "motif", "layout"]
+    value: str = Field(max_length=20)
+    source_type: Literal["artifact", "knowledge_opinion"] | None = None
+    source_id: int | None = Field(default=None, gt=0)
+
+
+@router.get("/aesthetics")
+async def api_aesthetics():
+    return {"ok": True, **await asyncio.to_thread(aesthetics.room, active_user_id())}
+
+
+@router.put("/aesthetics")
+async def api_put_aesthetic(body: AestheticInput):
+    try:
+        await asyncio.to_thread(aesthetics.put_preference, active_user_id(), **body.model_dump())
+        return {"ok": True}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+
+
+@router.delete("/aesthetics/{preference_id}")
+async def api_delete_aesthetic(preference_id: int):
+    ok = await asyncio.to_thread(aesthetics.remove_preference, active_user_id(), preference_id)
+    return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+
+
+class PlacementInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(default=.5, ge=0, le=1, allow_inf_nan=False)
+    y: float = Field(default=.5, ge=0, le=1, allow_inf_nan=False)
+    hidden: bool = False
+    slot: Literal["room"] = "room"
+    theme_version: Literal[1] = 1
+
+
+@router.put("/aesthetics/placements/{artifact_id}")
+async def api_place_artifact(artifact_id: int, body: PlacementInput):
+    try:
+        await asyncio.to_thread(aesthetics.place, active_user_id(), artifact_id, **body.model_dump())
+        return {"ok": True}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
 
 
 @router.get("/her-profile")
