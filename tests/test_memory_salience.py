@@ -299,6 +299,57 @@ async def test_extraction_produces_policy() -> int:
     return 0
 
 
+def test_policy_lifecycle_consumption() -> int:
+    from backend.core.fact_decay import decay_expired_facts
+    from backend.core.userdb import update_fact_pinned
+    uid = "g01-lifecycle"
+    db.ensure_user(uid)
+    now = datetime.now()
+    expired = _fact(uid, "用户最近在筹备火星展览")
+    pinned = _fact(uid, "用户今天临时去看海")
+    legacy = _fact(uid, "用户收藏古典唱片")
+    explicit_deadline = db.add_fact(uid, "用户最近参与数学竞赛",
+                                    expires_at=(now + timedelta(days=20)).isoformat())
+    ms.observe_fact(uid, explicit_deadline, [], now=now - timedelta(days=8), new_fact=True)
+    ms.observe_fact(uid, expired, [], now=now - timedelta(days=8), new_fact=True)
+    ms.add_annotation(uid, expired, viewpoint="相关的感受")
+    ms.observe_fact(uid, pinned, [], now=now - timedelta(days=2), new_fact=True)
+    update_fact_pinned(uid, pinned, True)
+    assert ms.policy_expired_ids(uid, now=now) == {expired}
+    assert expired not in db.recallable_fact_ids(uid, [expired, pinned, legacy])
+    assert db.recallable_fact_ids(uid, [pinned, legacy]) == {pinned, legacy}
+    assert explicit_deadline in db.recallable_fact_ids(uid, [explicit_deadline])
+    assert db.search_facts(uid, "火星展览", 10) == []
+    assert ms.observe_fact(uid, expired, [], now=now) is None
+    real_flag = __import__("backend.core.features", fromlist=["flag"]).flag
+    with patch("backend.core.features.flag", side_effect=lambda name: False if name == "memory_lifecycle_enabled" else real_flag(name)):
+        assert ms.policy_expired_ids(uid, now=now) == set()
+        assert expired in db.recallable_fact_ids(uid, [expired])
+    with patch("backend.core.fact_lifecycle._delete_vectors"):
+        assert decay_expired_facts(uid, now=now) == [expired]
+    assert ms.get_policy(uid, expired) is None and not ms.annotations_for(uid, expired)
+    assert ms.get_policy(uid, pinned) is not None
+    # 长期分层不能延长用户期限。
+    hard = db.add_fact(uid, "用户明天到期的明确期限", expires_at=(now - timedelta(seconds=1)).isoformat())
+    ms.evaluate_fact(uid, hard, explicit=True, anchor=True)
+    assert hard not in db.recallable_fact_ids(uid, [hard])
+    assert ms.short_retention_days("用户今天出差") == 1
+    assert ms.short_retention_days("用户正在写书") == 7
+    assert ms.short_retention_days("用户喜欢咖啡") == 30
+    late_pin = _fact(uid, "临时借用紫色自行车")
+    ms.observe_fact(uid, late_pin, [], now=now - timedelta(days=2), new_fact=True)
+    original_expired = ms.policy_expired_ids
+    def pin_after_scan(*args, **kwargs):
+        candidates = original_expired(*args, **kwargs)
+        update_fact_pinned(uid, late_pin, True)
+        return candidates
+    with patch("backend.core.memory_salience.policy_expired_ids", side_effect=pin_after_scan), \
+         patch("backend.core.fact_lifecycle._delete_vectors"):
+        decay_expired_facts(uid, now=now)
+    assert db.conn.execute("SELECT pinned FROM facts WHERE id=?", (late_pin,)).fetchone()[0] == 1
+    return 0
+
+
 async def main() -> int:
     failed = (
         test_score_formula()
@@ -312,6 +363,7 @@ async def main() -> int:
         + test_observation_sources_and_replay()
         + test_v24_policy_upgrade()
         + await test_extraction_produces_policy()
+        + test_policy_lifecycle_consumption()
     )
     if failed:
         print(f"\n=== G01 记忆显著度：{failed} 项失败 ===")

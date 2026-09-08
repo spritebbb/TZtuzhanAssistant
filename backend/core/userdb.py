@@ -1398,15 +1398,18 @@ class UserDB:
             return []
         now = datetime.now().isoformat(timespec="seconds")
         rows = self.conn.execute(
-            "SELECT content FROM facts WHERE user_id = ? "
+            "SELECT id, content FROM facts WHERE user_id = ? "
             "AND status = 'active' "
             "AND surface_policy != 'never_surface' "
             "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC LIMIT 500",
             (user_id, now),
         ).fetchall()
         min_overlap = 1 if len(q_bigrams) != 2 else 2
+        allowed = self.recallable_fact_ids(user_id, [int(row["id"]) for row in rows])
         scored = []
         for r in rows:
+            if int(r["id"]) not in allowed:
+                continue
             content_bigrams = _bigrams(r["content"])
             overlap = len(q_bigrams & content_bigrams)
             if overlap >= min_overlap:
@@ -1441,7 +1444,9 @@ class UserDB:
             "AND (expires_at IS NULL OR expires_at > ?)",
             (user_id, *clean_ids, now),
         ).fetchall()
-        return {int(row["id"]) for row in rows}
+        from .memory_salience import policy_expired_ids
+
+        return {int(row["id"]) for row in rows} - policy_expired_ids(user_id, database=self)
 
     # ---- 用户画像（user_profile）----
 
