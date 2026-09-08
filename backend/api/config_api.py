@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
-"""配置编辑接口（查询/保存 .env 配置）。"""
+"""配置编辑接口（查询/保存 .env 配置 + 功能开关读写）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from ..core.config import config, update_env_file
+from ..core.features import all_flags, set_flag
 
 router = APIRouter(prefix="/api", tags=["config"])
+
+# 功能开关说明（设置页展示用）：键名 → 一句话用途。
+_FLAG_LABELS = {
+    "output_hygiene_enabled": "输出卫生：回复发送前统一安全检查（关闭时保持旧流式契约）",
+    "context_registry_enabled": "语境注册表：统一管理注入对话的语境（含知识观点的召回）",
+    "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
+}
 
 
 def _mask_key(key: str) -> str:
@@ -123,3 +131,28 @@ async def api_config_set(request: Request):
         pass
 
     return {"ok": True, "updated": updated}
+
+
+@router.get("/flags")
+async def api_flags_get():
+    """功能开关面板：返回全部开关当前值（含默认）与用途说明。"""
+    return {"ok": True, "flags": all_flags(), "labels": _FLAG_LABELS}
+
+
+@router.post("/flags")
+async def api_flags_set(request: Request):
+    """功能开关面板：写入单个开关，立即生效（pipeline 注入前动态读取）。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 解析失败"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "请求体必须是对象"}, status_code=400)
+    name = str(body.get("name", "")).strip()
+    value = body.get("value")
+    if not name or not isinstance(value, bool):
+        return JSONResponse({"ok": False, "error": "需要 name 与布尔 value"}, status_code=400)
+    if name not in _FLAG_LABELS:
+        return JSONResponse({"ok": False, "error": f"未知开关: {name}"}, status_code=400)
+    set_flag(name, value)
+    return {"ok": True, "name": name, "value": value, "flags": all_flags()}

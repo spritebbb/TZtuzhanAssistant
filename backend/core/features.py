@@ -24,12 +24,14 @@ _write_lock = threading.Lock()
 # 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
     "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
-    # P0-01A：用户可见回复在发送/持久化前统一检查。新功能按用户约定默认关闭，
-    # 可由设置层显式开启；关闭时 pipeline 保持旧流式契约。
-    "output_hygiene_enabled": False,
-    # P1-02：语境注册表接管共同清单语境（首期唯一 provider）。默认关闭，
+    # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
+    # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
+    # 关闭时 pipeline 保持旧流式契约。
+    "output_hygiene_enabled": True,
+    # P1-02：语境注册表接管共同清单语境（首期唯一 provider）。实现与测试
+    # 已稳定（test_context_registry.py），设置页有开关入口，默认开启；
     # 关闭时走 colists.list_context 旧路径；两条路径互斥，不会双注入。
-    "context_registry_enabled": False,
+    "context_registry_enabled": True,
 }
 
 
@@ -55,8 +57,7 @@ def flag(name: str) -> bool:
 def set_flag(name: str, value: bool) -> None:
     """写入开关值（同时清缓存）；原子写避免读到半截 JSON。
 
-    当前无前端/API 入口调用（Web UI 面板尚未接入），保留作为未来
-    功能开关面板的写入端。"""
+    写入端：设置页功能开关面板（POST /api/flags）。"""
     if name not in FLAG_DEFAULTS:
         return  # 只接受已知开关名
     with _write_lock:  # 串行化读-改-写，避免并发覆盖

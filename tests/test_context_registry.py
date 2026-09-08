@@ -139,10 +139,11 @@ def test_flag_default_off_and_reset_table() -> int:
     from backend.core.features import flag
     from backend.core.userdb import db
 
-    assert flag("context_registry_enabled") is False, "新开关默认关闭"
+    # 2026-09-08 拍板：开关接入设置页面板后默认开启（体验收口迭代）。
+    assert flag("context_registry_enabled") is True, "开关默认开启（设置页可关闭）"
     db.conn.execute("DELETE FROM context_lifecycle")
     db.conn.commit()
-    print("[OK] 开关默认关 + 生命周期表可清理（已入 reset 清单）")
+    print("[OK] 开关默认开 + 生命周期表可清理（已入 reset 清单）")
     return 0
 
 
