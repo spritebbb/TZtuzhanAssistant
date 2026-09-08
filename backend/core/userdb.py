@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 39  # v39: L16 shared resources, P3-05 evolution log and metrics
+_SCHEMA_VERSION = 40  # v40: watch subscriptions for the monitoring agent
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -330,6 +330,22 @@ CREATE TABLE IF NOT EXISTS learning_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_learning_user_status
     ON learning_candidates(user_id, status, id);
+-- 监控 Agent：网页/订阅变化监视（只存 URL 与内容哈希，不存网页正文）。
+CREATE TABLE IF NOT EXISTS watches (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         TEXT NOT NULL,
+    url             TEXT NOT NULL,
+    label           TEXT NOT NULL DEFAULT '',
+    interval_minutes INTEGER NOT NULL DEFAULT 360,
+    last_checked_at TEXT,
+    last_hash       TEXT NOT NULL DEFAULT '',
+    last_changed_at TEXT,
+    status          TEXT NOT NULL DEFAULT 'active',   -- active / paused
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE (user_id, url)
+);
+CREATE INDEX IF NOT EXISTS idx_watches_user ON watches(user_id, status);
 -- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
 CREATE TABLE IF NOT EXISTS experience_metrics (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2044,7 +2060,7 @@ class UserDB:
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
                 "persona_evolution_log", "experience_metrics",
-                "learning_candidates",
+                "learning_candidates", "watches",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
