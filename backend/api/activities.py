@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
@@ -174,6 +174,65 @@ async def api_complete_activity(activity_id: int):
     except activities.ActivityError as exc:
         return _error(exc, 404)
     return {"ok": True, "activity": row}
+
+
+# ---- F05 阅读地图与书签 ----
+
+
+@router.get("/{activity_id}/reading-map")
+async def api_reading_map(activity_id: int):
+    from ..core import reading_map
+
+    try:
+        data = await asyncio.to_thread(
+            reading_map.get_map, _active_user_id(), activity_id)
+    except reading_map.ReadingMapError as exc:
+        return _error(exc, 404)
+    return {"ok": True, **data}
+
+
+@router.post("/{activity_id}/segments/{index}/finish")
+async def api_finish_segment(activity_id: int, index: int,
+                             expected_version: str | None = Body(None, embed=True)):
+    from ..core import reading_map
+
+    try:
+        data = await asyncio.to_thread(
+            reading_map.finish_segment, _active_user_id(), activity_id, index,
+            expected_version=expected_version)
+    except reading_map.ReadingMapConflict as exc:
+        return _error(exc, 409)
+    except reading_map.ReadingMapError as exc:
+        return _error(exc, 404)
+    return {"ok": True, **data}
+
+
+@router.post("/{activity_id}/segments/{segment_id}/bookmark-draft")
+async def api_bookmark_draft(activity_id: int, segment_id: int):
+    from ..core import reading_map
+
+    try:
+        draft = await asyncio.to_thread(
+            reading_map.bookmark_draft, _active_user_id(), segment_id)
+    except reading_map.ReadingMapError as exc:
+        return _error(exc, 404)
+    return {"ok": True, "draft": draft}
+
+
+@router.put("/{activity_id}/segments/{segment_id}/bookmark")
+async def api_save_bookmark(activity_id: int, segment_id: int,
+                            user_view: str = Body("", embed=True),
+                            tuzhan_view: str = Body("", embed=True),
+                            summary: str = Body("", embed=True)):
+    from ..core import reading_map
+
+    try:
+        saved = await asyncio.to_thread(
+            reading_map.save_bookmark, _active_user_id(), segment_id,
+            user_view=user_view, tuzhan_view=tuzhan_view, summary=summary)
+    except reading_map.ReadingMapError as exc:
+        return _error(exc, 422)
+    return {"ok": True, "bookmark": saved}
 
 
 @router.get("/{activity_id}/export")

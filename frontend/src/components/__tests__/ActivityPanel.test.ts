@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cancelReading,
   completeReading,
+  finishSegment,
+  getBookmarkDraft,
+  getReadingMap,
   exportReadingUrl,
   listReadingActivities,
   pauseReading,
@@ -31,6 +34,10 @@ vi.mock('../../api/activities', () => ({
   cancelReading: vi.fn(),
   completeReading: vi.fn(),
   exportReadingUrl: vi.fn((id: number) => `/api/activities/${id}/export?format=md`),
+  finishSegment: vi.fn(),
+  getBookmarkDraft: vi.fn(),
+  getReadingMap: vi.fn(),
+  saveBookmark: vi.fn(),
   listReadingActivities: vi.fn(),
   pauseReading: vi.fn(),
   proposeReadingQuestion: vi.fn(),
@@ -169,6 +176,26 @@ describe('ActivityPanel', () => {
       ts: '2026-09-04T12:00:00',
     }])
     mockedStart.mockResolvedValue(activity())
+    vi.mocked(getReadingMap).mockResolvedValue({
+      activity_id: 8,
+      total: 2,
+      read_count: 0,
+      confirmed_bookmarks: 0,
+      segments: [
+        { id: 71, segment_index: 0, title: '第 1 段', status: 'current', source_hash: 'h1', bookmark: null },
+        { id: 72, segment_index: 1, title: '第 2 段', status: 'locked', source_hash: 'h2', bookmark: null },
+      ],
+    })
+    vi.mocked(finishSegment).mockResolvedValue({
+      activity_id: 8,
+      total: 2,
+      read_count: 1,
+      confirmed_bookmarks: 0,
+      segments: [
+        { id: 71, segment_index: 0, title: '第 1 段', status: 'read', source_hash: 'h1', bookmark: null },
+        { id: 72, segment_index: 1, title: '第 2 段', status: 'current', source_hash: 'h2', bookmark: null },
+      ],
+    })
     mockedPause.mockResolvedValue(activity({ status: 'paused' }))
     mockedCancel.mockResolvedValue(activity({ status: 'cancelled', completed_at: '2026-09-04T12:30:00' }))
     mockedQuestion.mockResolvedValue('它主动寻找宿主时，你觉得这更像依赖还是生存策略？')
@@ -198,6 +225,22 @@ describe('ActivityPanel', () => {
       progress_entries: [],
       review: '',
     })
+  })
+
+  it('shows the reading map and finishes the current segment', async () => {
+    const wrapper = mount(ActivityPanel, { props: { show: false, personaName: '菟菚' } })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await wrapper.get('.document-grid button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('阅读地图')
+    expect(wrapper.text()).toContain('第 2 段')
+    await wrapper.get('.reading-map li.current button').trigger('click')
+    await flushPromises()
+
+    expect(finishSegment).toHaveBeenCalledWith(8, 0, 'h1')
+    expect(wrapper.text()).toContain('读完 1 / 2 段')
   })
 
   it('starts a reading activity from a bookshelf document', async () => {

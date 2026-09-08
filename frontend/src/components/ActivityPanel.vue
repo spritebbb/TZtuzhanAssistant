@@ -10,9 +10,14 @@ import {
   resumeReading,
   saveReadingNote,
   saveReadingViewpoint,
+  finishSegment,
+  getBookmarkDraft,
+  getReadingMap,
+  saveBookmark,
   setReadingPosition,
   startReading,
   type ReadingActivity,
+  type ReadingMap,
   type ViewpointRole,
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
@@ -108,6 +113,9 @@ const noteDraft = ref('')
 const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
 const busy = ref(false)
+// F05 阅读地图：只在打开共读详情时按需拉取
+const readingMap = ref<ReadingMap | null>(null)
+const bookmarkDraftText = ref('')
 const error = ref('')
 const notice = ref('')
 
@@ -282,7 +290,10 @@ async function run(action: () => Promise<ReadingActivity>, success = '') {
   error.value = ''
   notice.value = ''
   try {
-    applyCurrent(await action())
+    const next = await action()
+    applyCurrent(next)
+    // F05：共读详情变化后刷新阅读地图（失败静默，不阻塞主流程）
+    void loadReadingMap(next.id)
     notice.value = success
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
@@ -544,6 +555,56 @@ function cancelCurrentWriting() {
   if (item) void runWriting(() => cancelWriting(item.id), '这个故事先不写了')
 }
 
+async function loadReadingMap(activityId: number) {
+  try {
+    readingMap.value = await getReadingMap(activityId)
+  } catch {
+    readingMap.value = null
+  }
+}
+
+async function markSegmentRead(index: number, hash: string) {
+  if (!current.value) return
+  busy.value = true
+  try {
+    readingMap.value = await finishSegment(current.value.id, index, hash)
+    notice.value = '这一段读完了，下一段已经打开'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '完成这一段失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function draftBookmark(segmentId: number) {
+  if (!current.value) return
+  busy.value = true
+  try {
+    const draft = await getBookmarkDraft(current.value.id, segmentId)
+    bookmarkDraftText.value = draft.user_view || draft.excerpt
+    notice.value = '草稿已生成，改完再确认'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '草稿生成失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function confirmBookmark(segmentId: number) {
+  if (!current.value) return
+  busy.value = true
+  try {
+    await saveBookmark(current.value.id, segmentId, { user_view: bookmarkDraftText.value })
+    readingMap.value = await getReadingMap(current.value.id)
+    bookmarkDraftText.value = ''
+    notice.value = '书签已收好'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '书签保存失败'
+  } finally {
+    busy.value = false
+  }
+}
+
 function leaveCurrent() {
   current.value = null
   noteDraft.value = ''
@@ -725,6 +786,37 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             <strong>{{ current.progress }}%</strong>
           </div>
           <div class="progress"><span :style="{ width: current.progress + '%' }"></span></div>
+
+          <section v-if="readingMap && readingMap.total" class="reading-map">
+            <div class="map-head">
+              <span>阅读地图</span>
+              <small>读完 {{ readingMap.read_count }} / {{ readingMap.total }} 段 · 确认书签 {{ readingMap.confirmed_bookmarks }}</small>
+            </div>
+            <ul>
+              <li v-for="seg in readingMap.segments" :key="seg.id" :class="seg.status">
+                <span class="seg-title">{{ seg.title }}</span>
+                <span class="seg-state">
+                  {{ seg.status === 'read' ? '已读' : seg.status === 'current' ? '当前' : seg.status === 'legacy_position' ? '旧位置' : '未解锁' }}
+                </span>
+                <button
+                  v-if="seg.status === 'current' && current.status !== 'completed'"
+                  :disabled="busy" @click="markSegmentRead(seg.segment_index, seg.source_hash)"
+                >读完这段</button>
+                <template v-if="seg.status === 'current' || seg.status === 'read'">
+                  <button :disabled="busy" class="ghost" @click="draftBookmark(seg.id)">生成草稿</button>
+                  <input
+                    v-if="seg.status === 'current'" v-model="bookmarkDraftText"
+                    class="draft-input" maxlength="600" placeholder="这一段的看法，确认后收好"
+                  />
+                  <button
+                    v-if="seg.status === 'current' && bookmarkDraftText"
+                    :disabled="busy" @click="confirmBookmark(seg.id)"
+                  >确认书签</button>
+                  <em v-if="seg.bookmark && seg.bookmark.status === 'confirmed'">已确认</em>
+                </template>
+              </li>
+            </ul>
+          </section>
 
           <article class="excerpt">
             <span class="quote-mark">“</span>
@@ -966,6 +1058,15 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .eyebrow, .section-title > span { color: var(--accent); font-size: 10px; letter-spacing: .18em; }
 h2 { margin: 5px 0 3px; font-size: 26px; font-weight: 600; }
 header p, .reading-head p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.reading-map { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.map-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.map-head small { color: var(--text-muted); font-size: 12px; }
+.reading-map ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.reading-map li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.reading-map li.locked { opacity: .5; }
+.seg-title { min-width: 62px; }
+.seg-state { color: var(--text-muted); }
+.draft-input { flex: 1; min-width: 80px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 2px 6px; }
 .close { border: 0; color: var(--text-muted); background: transparent; font-size: 28px; cursor: pointer; }
 .body { margin-top: 20px; padding: 1px 3px 42px 0; overflow-y: auto; }
 .back { margin-bottom: 12px; border: 0; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }

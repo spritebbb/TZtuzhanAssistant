@@ -37,6 +37,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
+        "reading_segments", "reading_bookmarks",
     ),
     "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence"),
     "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources"),
@@ -98,6 +99,8 @@ def _rule_dynamic(table: str, column: str, type_column: str):
 
 _REFERENCE_RULES = (
     _rule_static("activity_notes", "activity_id", "activities"),
+    _rule_static("reading_segments", "activity_id", "activities"),
+    _rule_static("reading_bookmarks", "segment_id", "reading_segments"),
     _rule_static("activity_viewpoints", "activity_id", "activities"),
     _rule_static("activity_goals", "activity_id", "activities"),
     _rule_static("goal_progress", "activity_id", "activities"),
