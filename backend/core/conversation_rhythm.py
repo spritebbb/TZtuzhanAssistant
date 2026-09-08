@@ -154,9 +154,12 @@ def mark_sent(user_id: str, origin_turn_id: int) -> None:
 
 # ---- B 晚安 / 行程 ----
 
-def on_goodnight(user_id: str) -> dict:
-    """显式晚安：取消本会话未发追发；不建立任何跨天惩罚状态。"""
-    n = cancel_followups(user_id)
+def on_goodnight(user_id: str, *, now: datetime | None = None) -> dict:
+    """显式晚安：取消本会话未发追发；不建立任何跨天惩罚状态。
+
+    now 与 cancel_followups 同一时间基准（可注入，避免墙钟漂移漏取消）。
+    """
+    n = cancel_followups(user_id, now=now)
     return {"cancelled_followups": n, "penalty": None}
 
 
@@ -172,7 +175,7 @@ def handle_user_turn(
     if not text:
         return {"action": "none", "created": None, "cancelled": 0}
     if _GOODNIGHT_RE.search(text):
-        result = on_goodnight(user_id)
+        result = on_goodnight(user_id, now=now)
         return {"action": "goodnight", "created": None,
                 "cancelled": result["cancelled_followups"]}
     if _STOP_RE.search(text):
