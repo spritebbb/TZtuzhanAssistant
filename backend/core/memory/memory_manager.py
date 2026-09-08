@@ -24,7 +24,7 @@ _FALLBACK_IMPORTANCE_CUTOFF = 0.3  # 重要性低于此阈值的记忆优先遗�
 _DEGRADE_THRESHOLD = 3
 _DEGRADE_COOLDOWN_SEC = 300.0
 # 清除时统计条数用的 top_k：get_all 默认只回 20 条，会低估「已清除 N 条」
-_COUNT_TOP_K = 1000
+_COUNT_TOP_K = 5000
 
 # Mem0 及其依赖（sentence-transformers / chroma / huggingface_hub 等）在初始化时
 # 会通过 Python warnings 和 stdlib logging 打印一批无害噪音（方法改名 FutureWarning、
@@ -302,14 +302,21 @@ class Mem0Manager:
     def _count_mem0(self, user_id: str) -> int:
         """统计该用户在 Mem0 里的记忆条数（用于清除前后报数）。
 
-        get_all 默认只回 20 条，会低估条数；这里显式放大 top_k。
+        get_all 单次有 top_k 上限（默认 20，会低估），这里放大到 _COUNT_TOP_K；
+        仍触顶时记一条警告——报数可能低估，但删除本身不受影响。
         """
         try:
             result = self._mem0.get_all(filters={"user_id": user_id}, top_k=_COUNT_TOP_K)
         except Exception:
             return 0
         items = result.get("results") if isinstance(result, dict) else result
-        return len(items or [])
+        count = len(items or [])
+        if count >= _COUNT_TOP_K:
+            logger.warning(
+                "[记忆管理器] {} 的记忆条数达到统计上限 {}，清除报数可能低估",
+                user_id, _COUNT_TOP_K,
+            )
+        return count
 
     def stats(self, user_id: str | None = None) -> dict:
         """管理统计信息。"""
