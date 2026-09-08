@@ -39,6 +39,8 @@ import { useFocusMode } from '../utils/focusMode'
 import {
   addWritingTurn,
   cancelWriting,
+  confirmOutline,
+  getOutlineDraft,
   completeWriting,
   exportWritingUrl,
   listWritings,
@@ -47,7 +49,16 @@ import {
   resumeWriting,
   startWriting,
   type CoWriting,
+  type OutlineDraft,
 } from '../api/writings'
+import {
+  addObservationEntry,
+  cancelObservation,
+  completeObservation,
+  listObservations,
+  startObservation,
+  type Observation,
+} from '../api/observations'
 import {
   addListItem,
   cancelList,
@@ -101,6 +112,15 @@ const writingPremise = ref('')
 const writingTurnDraft = ref('')
 const keepCoStory = ref(true)
 const writingBusy = ref(false)
+const writingSubtype = ref<'story' | 'world' | 'character'>('story')
+// L02 结构化大纲（世界观/角色设定）
+const outlineDraft = ref<OutlineDraft | null>(null)
+const outlineText = ref<Record<string, string>>({})
+// L02 观察日志
+const observations = ref<Observation[]>([])
+const observationTitle = ref('')
+const observationEntry = ref('')
+const currentObservation = ref<Observation | null>(null)
 const lists = ref<SharedList[]>([])
 const currentList = ref<SharedList | null>(null)
 const showListForm = ref(false)
@@ -186,6 +206,7 @@ async function load() {
     documents.value = documentRows
     goals.value = goalRows
     writings.value = writingRows
+    observations.value = await listObservations()
     lists.value = listRows
     const active = activityRows.find(item => item.status === 'active') ?? null
     current.value = active
@@ -406,9 +427,100 @@ async function runWriting(action: () => Promise<CoWriting>, success = '') {
   }
 }
 
+async function loadOutlineDraft(activityId: number) {
+  try {
+    const draft = await getOutlineDraft(activityId)
+    outlineDraft.value = draft
+    const text: Record<string, string> = {}
+    for (const field of draft.fields) text[field] = (draft.draft[field] || []).join(String.fromCharCode(10))
+    outlineText.value = text
+  } catch {
+    outlineDraft.value = null
+  }
+}
+
+async function saveOutline() {
+  if (!currentWriting.value || !outlineDraft.value) return
+  const outline: Record<string, string[]> = {}
+  for (const field of outlineDraft.value.fields) {
+    outline[field] = (outlineText.value[field] || '').split(String.fromCharCode(10))
+  }
+  try {
+    outlineDraft.value = await confirmOutline(
+      currentWriting.value.id, outline, outlineDraft.value.version)
+    notice.value = '大纲已保存'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '大纲保存失败'
+  }
+}
+
+async function createObservation() {
+  const title = observationTitle.value.trim()
+  if (!title || busy.value) return
+  busy.value = true
+  try {
+    const created = await startObservation(title)
+    observations.value = [created, ...observations.value]
+    observationTitle.value = ''
+    currentObservation.value = created
+    notice.value = '这本日志开始了'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '开始记录失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function openObservation(item: Observation) {
+  currentObservation.value = item
+  observationEntry.value = ''
+}
+
+async function addObservation() {
+  if (!currentObservation.value || !observationEntry.value.trim()) return
+  busy.value = true
+  try {
+    currentObservation.value = await addObservationEntry(
+      currentObservation.value.id, observationEntry.value.trim())
+    observationEntry.value = ''
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '记录失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function finishObservation() {
+  if (!currentObservation.value) return
+  busy.value = true
+  try {
+    currentObservation.value = await completeObservation(currentObservation.value.id)
+    notice.value = '这本日志收好了'
+    observations.value = await listObservations()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '收尾失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function dropObservation() {
+  if (!currentObservation.value) return
+  busy.value = true
+  try {
+    await cancelObservation(currentObservation.value.id)
+    currentObservation.value = null
+    observations.value = await listObservations()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '放下失败'
+  } finally {
+    busy.value = false
+  }
+}
+
 async function createWriting() {
   await runWriting(
-    () => startWriting(writingTitle.value, writingPremise.value),
+    () => startWriting(writingTitle.value, writingPremise.value, writingSubtype.value),
     '开头留下了，先写第一段',
   )
   if (!error.value) {
@@ -692,6 +804,18 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
           </div>
 
+            <div v-if="currentWriting && currentWriting.subtype && currentWriting.subtype !== 'story'" class="outline-block">
+              <span class="vp-title">结构化大纲</span>
+              <button class="secondary" :disabled="busy" @click="loadOutlineDraft(currentWriting.id)">生成大纲草稿</button>
+              <template v-if="outlineDraft">
+                <label v-for="field in outlineDraft.fields" :key="field">
+                  <span>{{ field }}</span>
+                  <textarea v-model="outlineText[field]" rows="2" :placeholder="'一行一条'"></textarea>
+                </label>
+                <button class="talk" :disabled="busy" @click="saveOutline">保存大纲</button>
+              </template>
+            </div>
+
           <div class="story-turns">
             <article v-for="turn in currentWriting.turns" :key="turn.id" :class="turn.author">
               <span>{{ turn.author === 'user' ? '我' : props.personaName || '她' }}</span>
@@ -902,7 +1026,14 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             <p class="focus-hint">轮流各写一段，把一个虚构故事接着讲下去；故事只是故事，不会变成你们的记忆</p>
             <button v-if="!showWritingForm" class="open-bookshelf" @click="showWritingForm = true">开一个新故事</button>
             <div v-else class="goal-create">
-              <label><span>故事名</span><input v-model="writingTitle" maxlength="120" placeholder="例如：灯塔看守人的猫"></label>
+              <label><span>类型</span>
+                <select v-model="writingSubtype">
+                  <option value="story">故事</option>
+                  <option value="world">世界观</option>
+                  <option value="character">角色设定</option>
+                </select>
+              </label>
+              <label><span>{{ writingSubtype === 'story' ? '故事名' : writingSubtype === 'world' ? '世界名' : '角色名' }}</span><input v-model="writingTitle" maxlength="120" placeholder="例如：灯塔看守人的猫"></label>
               <label><span>开头设定（可选）</span><textarea v-model="writingPremise" rows="2" maxlength="500" placeholder="一句话设定题材或世界观"></textarea></label>
               <div class="goal-create-actions"><button class="plain-action" @click="showWritingForm = false">取消</button><button class="talk" :disabled="busy || !writingTitle.trim()" @click="createWriting">开始</button></div>
             </div>
@@ -913,6 +1044,44 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
             </div>
             <div v-if="completedWritings.length" class="activity-list goal-list completed-goals">
               <button v-for="item in completedWritings" :key="item.id" @click="openWriting(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.turns.length }} 段故事</small></span><em>回看</em></button>
+            </div>
+          </section>
+
+          <section class="shelf-section goal-section writing-section">
+            <div class="section-title"><span>OBSERVATION</span><h3>观察日志</h3></div>
+            <p class="focus-hint">只记真实看到的事，来源可追溯；没有来源的条目会如实标注</p>
+            <div class="goal-create">
+              <label><span>日志名</span><input v-model="observationTitle" maxlength="60" placeholder="例如：楼下那棵树"></label>
+              <div class="goal-create-actions">
+                <button class="talk" :disabled="busy || !observationTitle.trim()" @click="createObservation">开始记录</button>
+              </div>
+            </div>
+            <div v-if="observations.length" class="activity-list goal-list">
+              <button v-for="item in observations" :key="item.id" @click="openObservation(item)">
+                <span class="format">LOG</span>
+                <span><strong>{{ item.title }}</strong><small>{{ item.status === 'completed' ? '已收好' : item.status === 'cancelled' ? '已放下' : '在记' }}</small></span>
+                <em>查看</em>
+              </button>
+            </div>
+            <div v-if="currentObservation" class="observation-detail">
+              <h4>{{ currentObservation.title }}</h4>
+              <ul v-if="currentObservation.entries && currentObservation.entries.length">
+                <li v-for="entry in currentObservation.entries" :key="entry.id">
+                  <small>{{ entry.observed_at.slice(0, 10) }} · {{ entry.observer === 'user' ? '我' : '她' }}</small>
+                  <span>{{ entry.content }}</span>
+                  <em v-if="entry.source_type">来源 {{ entry.source_type }}#{{ entry.source_id }}</em>
+                </li>
+              </ul>
+              <p v-else class="focus-hint">还没记下任何观察</p>
+              <template v-if="currentObservation.status === 'active'">
+                <textarea v-model="observationEntry" rows="2" maxlength="400" placeholder="今天观察到什么"></textarea>
+                <div class="goal-create-actions">
+                  <button class="plain-action" :disabled="busy || !observationEntry.trim()" @click="addObservation">记一条</button>
+                  <button class="talk" :disabled="busy" @click="finishObservation">收好这本</button>
+                  <button class="plain-action" :disabled="busy" @click="dropObservation">放下</button>
+                </div>
+              </template>
+              <pre v-else-if="currentObservation.log" class="observation-log">{{ currentObservation.log }}</pre>
             </div>
           </section>
 
@@ -1011,6 +1180,12 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 .focus-actions button { padding: 7px 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-card); cursor: pointer; }
 .focus-actions button:disabled { opacity: .5; cursor: default; }
 .focus-actions .plain { border-color: transparent; color: var(--text-muted); background: transparent; }
+.outline-block { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.outline-block label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.observation-detail { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.observation-detail ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.observation-detail li { display: flex; gap: 8px; font-size: 12px; }
+.observation-log { white-space: pre-wrap; font-size: 12px; color: var(--text-muted); }
 .goal-section, .writing-section { padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 16px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .goal-create, .goal-progress-form { margin-top: 12px; display: grid; gap: 10px; }
 .goal-create label, .goal-progress-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }

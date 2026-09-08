@@ -28,6 +28,7 @@ import {
   type CoWriting,
 } from '../../api/writings'
 import { listLists, startList, addListItem, type SharedList } from '../../api/lists'
+import { addObservationEntry, listObservations, startObservation } from '../../api/observations'
 import ActivityPanel from '../ActivityPanel.vue'
 
 vi.mock('../../api/activities', () => ({
@@ -48,6 +49,14 @@ vi.mock('../../api/activities', () => ({
   startReading: vi.fn(),
 }))
 vi.mock('../../api/knowledge', () => ({ listKnowledgeDocuments: vi.fn() }))
+vi.mock('../../api/observations', () => ({
+  listObservations: vi.fn(async () => []),
+  startObservation: vi.fn(),
+  getObservation: vi.fn(),
+  addObservationEntry: vi.fn(),
+  completeObservation: vi.fn(),
+  cancelObservation: vi.fn(),
+}))
 vi.mock('../../api/goals', () => ({
   addGoalProgress: vi.fn(),
   cancelGoal: vi.fn(),
@@ -176,6 +185,19 @@ describe('ActivityPanel', () => {
       ts: '2026-09-04T12:00:00',
     }])
     mockedStart.mockResolvedValue(activity())
+    vi.mocked(listObservations).mockResolvedValue([])
+    vi.mocked(startObservation).mockResolvedValue({
+      id: 91, title: '楼下那棵树', status: 'active',
+      created_at: '2026-09-08T10:00:00', updated_at: '2026-09-08T10:00:00', entries: [],
+    })
+    vi.mocked(addObservationEntry).mockResolvedValue({
+      id: 91, title: '楼下那棵树', status: 'active',
+      created_at: '2026-09-08T10:00:00', updated_at: '2026-09-08T10:00:00',
+      entries: [{
+        id: 1, observed_at: '2026-09-08T10:00:00', observer: 'user',
+        content: '叶子开始黄了', source_type: 'event', source_id: 3, confidence: 1,
+      }],
+    })
     vi.mocked(getReadingMap).mockResolvedValue({
       activity_id: 8,
       total: 2,
@@ -241,6 +263,25 @@ describe('ActivityPanel', () => {
 
     expect(finishSegment).toHaveBeenCalledWith(8, 0, 'h1')
     expect(wrapper.text()).toContain('读完 1 / 2 段')
+  })
+
+  it('starts an observation log and records one entry', async () => {
+    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const inputs = wrapper.findAll('.observation-detail, .goal-create input')
+    const titleInput = inputs[inputs.length - 1]
+    await titleInput.setValue('楼下那棵树')
+    await wrapper.get('.goal-create-actions .talk').trigger('click')
+    await flushPromises()
+    expect(startObservation).toHaveBeenCalledWith('楼下那棵树')
+
+    await wrapper.get('.observation-detail textarea').setValue('叶子开始黄了')
+    await wrapper.get('.observation-detail .plain-action').trigger('click')
+    await flushPromises()
+    expect(addObservationEntry).toHaveBeenCalledWith(91, '叶子开始黄了')
+    expect(wrapper.text()).toContain('叶子开始黄了')
+    expect(wrapper.text()).toContain('来源 event#3')
   })
 
   it('starts a reading activity from a bookshelf document', async () => {
@@ -352,7 +393,7 @@ describe('ActivityPanel', () => {
     await wrapper.get('.writing-section .goal-create .talk').trigger('click')
     await flushPromises()
 
-    expect(mockedStartWriting).toHaveBeenCalledWith('灯塔看守人的猫', '')
+    expect(mockedStartWriting).toHaveBeenCalledWith('灯塔看守人的猫', '', 'story')
     expect(wrapper.text()).toContain('故事还没有正文')
 
     await wrapper.get('.writing-turn-form textarea').setValue('猫在第七天开始学着数浪。')

@@ -18,6 +18,9 @@ export interface CoWriting {
   completed_at: string | null
   turns: WritingTurn[]
   story: string
+  subtype?: 'story' | 'world' | 'character' | string
+  subtype_label?: string
+  outline?: Record<string, string[]>
 }
 
 async function writingRequest(path: string, init?: RequestInit): Promise<CoWriting> {
@@ -36,11 +39,12 @@ export async function listWritings(): Promise<CoWriting[]> {
   return Array.isArray(data.writings) ? data.writings : []
 }
 
-export function startWriting(title: string, premise: string): Promise<CoWriting> {
+export function startWriting(title: string, premise: string,
+                            subtype: 'story' | 'world' | 'character' = 'story'): Promise<CoWriting> {
   return writingRequest('/api/writings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, premise }),
+    body: JSON.stringify({ title, premise, subtype }),
   })
 }
 
@@ -78,4 +82,32 @@ export function completeWriting(activityId: number, createArtifact: boolean): Pr
 
 export function exportWritingUrl(activityId: number): string {
   return `/api/writings/${activityId}/export?format=md`
+}
+
+/** L02 结构化大纲（世界观/角色设定）。 */
+export interface OutlineDraft {
+  subtype: string
+  fields: string[]
+  draft: Record<string, string[]>
+  version: number
+}
+
+export async function getOutlineDraft(activityId: number): Promise<OutlineDraft> {
+  const response = await apiFetch(`/api/writings/${activityId}/outline-draft`, { method: 'POST' })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '大纲草稿生成失败')
+  return data as OutlineDraft
+}
+
+export async function confirmOutline(
+  activityId: number, outline: Record<string, string[]>, expectedVersion: number,
+): Promise<OutlineDraft> {
+  const response = await apiFetch(`/api/writings/${activityId}/outline`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ outline, expected_version: expectedVersion }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '大纲保存失败')
+  return data as OutlineDraft
 }
