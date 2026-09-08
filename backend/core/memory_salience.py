@@ -11,8 +11,10 @@
   clamp 100）；模型 confidence 不因 score 升高改变；
 - S≥60 → long；S≤30 且未 pinned → short；中间保持原 tier（滞回）；
   新条目默认 short；**pinned 不通过分数表示**，score=0 也不降级 pinned；
-- shadow 语义：policy 表只记录分层结果与理由，不改写 facts.expires_at，
-  不触发任何删除——评分先跑观察期，由 review 消费。
+- 分层只记不改：policy 表只记录分层结果与理由，评分落库时不改写
+  facts.expires_at、不改 confidence、不即时删除；short 事实的自动期限
+  （30/7/1 天）由 ``memory_lifecycle_enabled`` 开关 gate，开启后经
+  ``fact_decay`` 到期真删（关闭则只保留影子记录，见 G01-LIFECYCLE-ADR 第 15/17 条）。
 
 **分层生命周期**
 - short 默认 30 天、当前状态类 7 天、临时事件 1 天（建议值进 policy 注记，
