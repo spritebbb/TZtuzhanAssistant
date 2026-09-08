@@ -22,6 +22,9 @@ os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_laz
 from backend.core.config import config
 from backend.tools import mcp_server
 from backend.tools.base import ToolRegistry
+
+# 同上：持久化路径强制指向临时目录，避免 pytest 会话里落到真实 data/
+mcp_server._PERSIST_PATH = Path(tempfile.mkdtemp(prefix="tztuzhan_lazy_persist_")) / "mcp_servers.json"
 from backend.tools.tool_loop import _execute_calls
 
 
