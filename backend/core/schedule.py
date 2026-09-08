@@ -287,3 +287,59 @@ def current_presence(user_id: str) -> str:
         if block.id == block_id:
             return block.presence
     return "home"
+
+
+# 活动与场所的中文标签（稳定活动 id → 展示文案；场所来自世界正典 P-00/01/02）
+ACTIVITY_LABELS = {
+    "research_reading": "翻资料",
+    "rest_break": "休息",
+    "afternoon_stay": "待在研究所",
+    "evening_work": "忙她自己的研究",
+    "late_night": "熬夜打游戏",
+    "weekend_slow": "过慢悠悠的周末",
+    "weekend_stay": "度周末",
+    "weekend_evening": "晚间研究",
+}
+LOCATION_LABELS = {"P-00": "城里", "P-01": "研究所", "P-02": "小屋"}
+
+
+def current_activity(user_id: str, now: datetime | None = None) -> dict:
+    """她此刻在做什么（只读，不触发推进；供状态行/API 展示）。
+
+    睡眠时段（block_at 返回 None）→ activity="sleeping"。
+    无行程状态时按本地时刻从模板推导，保证新装用户也能看到状态行。
+    """
+    local = (now or datetime.now().astimezone())
+    block = block_at(local)
+    if block is None:
+        return {"block_id": "", "activity": "sleeping", "activity_label": "睡觉",
+                "location_id": "P-02", "location_label": "小屋"}
+    return {
+        "block_id": block.id,
+        "activity": block.activity,
+        "activity_label": ACTIVITY_LABELS.get(block.activity, block.activity),
+        "location_id": block.location_id,
+        "location_label": LOCATION_LABELS.get(block.location_id, block.location_id),
+    }
+
+
+def latest_life_event(user_id: str, *, limit: int = 3) -> list[dict]:
+    """她最近的虚构生活事件（新→旧，供状态行与「她今天经历了什么」展示）。"""
+    rows = db.conn.execute(
+        "SELECT block_id, occurrence, payload_json, occurred_at FROM character_life_events "
+        "WHERE user_id = ? AND kind = 'daily_life' ORDER BY occurred_at DESC LIMIT ?",
+        (user_id, max(1, min(10, int(limit)))),
+    ).fetchall()
+    events: list[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        events.append({
+            "date": payload.get("date") or row["occurrence"],
+            "description": payload.get("description", ""),
+            "location_id": payload.get("location_id", ""),
+            "occurred_at": row["occurred_at"],
+        })
+    return events

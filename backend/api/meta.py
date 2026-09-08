@@ -82,3 +82,23 @@ async def api_meta(session_id: str = ""):
         "affection": affection_display(uid),
         "persona": active_profile(),
     }
+
+
+@router.get("/presence")
+async def api_presence():
+    """她此刻在做什么（行程只读）+ 最近的生活事件（体验收口状态行）。"""
+    import asyncio
+
+    from ..core.schedule import current_activity, latest_life_event
+
+    uid = active_user_id()
+    try:
+        activity = current_activity(uid)
+    except Exception:
+        activity = {"block_id": "", "activity": "unknown", "activity_label": "",
+                    "location_id": "", "location_label": ""}
+    try:
+        events = await asyncio.to_thread(latest_life_event, uid)
+    except Exception:
+        events = []
+    return {"ok": True, "activity": activity, "recent_events": events}

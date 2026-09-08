@@ -60,6 +60,30 @@ async function refreshAffection() {
   } catch { /* 好感度拉取失败保留旧值 */ }
 }
 
+// === 她此刻在做什么：从 /api/presence 读取行程状态与最近生活事件 ===
+const presence = ref({ activity_label: '', location_label: '', activity: '' })
+const recentLifeEvents = ref<Array<{ date: string; description: string }>>([])
+const presenceLabel = computed(() => {
+  if (!presence.value.activity_label) return ''
+  if (presence.value.activity === 'sleeping') return '睡觉了'
+  const where = presence.value.location_label ? `在${presence.value.location_label}` : ''
+  return `${where}${presence.value.activity_label}`
+})
+async function refreshPresence() {
+  try {
+    const r = await apiFetch('/api/presence')
+    const d = await r.json()
+    if (d.ok && d.activity) {
+      presence.value = {
+        activity_label: d.activity.activity_label || '',
+        location_label: d.activity.location_label || '',
+        activity: d.activity.activity || '',
+      }
+    }
+    if (d.ok && Array.isArray(d.recent_events)) recentLifeEvents.value = d.recent_events
+  } catch { /* 行程拉取失败保留旧值 */ }
+}
+
 // === 主动归档当前对话 ===
 const archiving = ref(false)
 async function archiveNow() {
@@ -210,6 +234,7 @@ function onPersonaSwitched(profile: PersonaProfile) {
   sessionListKey.value += 1
   chatReloadKey.value += 1
   refreshAffection()
+  refreshPresence()
   window.dispatchEvent(new CustomEvent('tztuzhan:persona-switched', { detail: profile }))
 }
 
@@ -220,6 +245,7 @@ onMounted(async () => {
   applyTheme(theme.value, false)
   document.addEventListener('keydown', onKeydown)
   refreshAffection()  // 首屏载入好感度条
+  refreshPresence()   // 首屏载入「她此刻在做什么」状态行
   focusMode.start()   // 专注陪伴：恢复未结束的计时并对表
 })
 
@@ -261,9 +287,9 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="header-sprig" aria-hidden="true"><span></span><i></i><span></span></div>
-        <div class="presence" :title="activePersona.name + '正在陪伴你'">
+        <div class="presence" :title="presenceLabel || (activePersona.name + '正在陪伴你')">
           <span class="presence-dot"></span>
-          陪伴中
+          {{ presenceLabel || '陪伴中' }}
         </div>
         <button v-if="focusMode.current.value" class="presence focus-chip" title="专注陪伴中，点击查看" @click="activityOpen = true">
           ⏱ {{ focusClockText }}
@@ -350,6 +376,11 @@ onUnmounted(() => {
         <span class="aff-label">{{ affection.value }} · {{ affection.bond || affection.stage }}</span>
         <span v-if="affection.next" class="aff-next" :title="'距「' + affection.next + '」还需 ' + (affection.next_at - affection.value) + ' 点'">→ {{ affection.next }} {{ affection.next_at - affection.value }}</span>
         <span v-else class="aff-next max">♥ 已至圆满</span>
+      </div>
+      <!-- 她的生活：此刻在做什么 + 最近经历了什么（虚构日常，只读展示） -->
+      <div v-if="recentLifeEvents.length" class="life-strip" :title="'她的虚构日常，与你们的真实互动分开记录'">
+        <div class="life-now">{{ presenceLabel }}</div>
+        <div v-for="(ev, i) in recentLifeEvents.slice(0, 2)" :key="i" class="life-event">{{ ev.date.slice(5) }} · {{ ev.description }}</div>
       </div>
       <ChatView :session-id="currentId" :reload-key="chatReloadKey" :persona-name="activePersona.name" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
@@ -711,10 +742,23 @@ onUnmounted(() => {
 }
 .aff-next.max { color: var(--accent, #e07a9a); font-weight: 600; }
 
+/* 她的生活：此刻在做什么 + 最近生活事件（克制的一小条，不打扰对话） */
+.life-strip {
+  flex-shrink: 0;
+  padding: 4px 16px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.life-now { color: var(--accent, #e07a9a); font-weight: 500; }
+.life-event { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 @media (max-width: 768px) {
   .aff-bar { padding: 6px 14px; }
   .aff-next { display: none; }
   .presence { display: none; }
+  .life-event { display: none; }
 }
 
 /* 重置确认弹窗 */
