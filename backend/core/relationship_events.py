@@ -171,6 +171,7 @@ def active_events(
             "subject": row["subject"],
             "object": row["object"],
             "payload": payload,
+            "privacy": row["privacy"],
             "occurred_at": row["occurred_at"],
             "expires_at": row["expires_at"],
         })

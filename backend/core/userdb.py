@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 25  # v25: G01 scoring provenance and observation start
+_SCHEMA_VERSION = 26  # v26: F01 greeting variant cooldown (runtime)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -620,6 +620,15 @@ CREATE TABLE IF NOT EXISTS first_occurrences (
     source_event_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_id, event_type, topic_key)
+);
+-- F01 问候变体冷却（runtime，不导出）：同一变体 7 天冷却，记录上次使用的
+-- 素材来源 id 便于审计；变体资源本身在人格切片目录，不在库里。
+CREATE TABLE IF NOT EXISTS greeting_variant_usage (
+    user_id        TEXT NOT NULL,
+    variant_id     TEXT NOT NULL,
+    last_used_at   TEXT NOT NULL,
+    last_source_id TEXT,
+    PRIMARY KEY (user_id, variant_id)
 );
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
@@ -1724,6 +1733,7 @@ class UserDB:
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
+                "greeting_variant_usage",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

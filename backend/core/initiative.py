@@ -38,6 +38,10 @@ _CHECK_INTERVAL_SEC = 300  # 后台轮询间隔 5 分钟
 
 _STAGE_ORDER = {"初识": 0, "熟悉": 1, "亲密": 2, "恋人": 3}
 
+# F01：_build_proactive_prompt（线程内同步）选中的变体 id，供 generate_proactive_message
+# 在生成成功后登记 7 天冷却。进程内字典，键 user_id；重启即失效（冷却表在库里）。
+_PROACTIVE_VARIANT_KEY: dict[str, str] = {}
+
 
 class ProactiveMessage(TypedDict):
     text: str
@@ -182,6 +186,29 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
         + "\n不得引用、暗示或围绕它们开启话题；只有用户先提起时才能回应。"
         if avoid_facts else ""
     )
+    # F01：主动消息复用问候变体池的素材/方向逻辑（B 普通归来 / D 无素材），
+    # 投递仍走 _arbited_proactive 与共享额度；失败静默退回原提示。
+    material_hint = ""
+    variant = None
+    from .features import flag as _flag
+
+    if _flag("greeting_material_enabled"):
+        try:
+            from .greeting_material import (
+                build_material_hint,
+                build_variant_hint,
+                choose_greeting_variant,
+                collect_greeting_material,
+            )
+
+            material = collect_greeting_material(user_id, now)
+            variant = choose_greeting_variant(user_id, {"material": material}, now=now)
+            material_hint = build_material_hint(material) + build_variant_hint(variant)
+        except Exception as e:
+            logger.warning("[主动性] 问候素材准备失败: {}", e)
+            material_hint = ""
+            variant = None
+    _PROACTIVE_VARIANT_KEY[user_id] = variant.id if variant is not None else ""
     return [
         {"role": "system", "content": sys_prompt},
         {
@@ -195,6 +222,7 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
                 f"{narrative_hint}"
                 f"{avoid_hint}"
                 f"{image_hint}"
+                f"{material_hint}"
             ),
         },
     ]
@@ -209,10 +237,20 @@ async def generate_proactive_message(user_id: str) -> str | None:
         return None
     try:
         text = await chat(msgs, max_tokens=100, temperature=0.85)
-        return text.strip()[:200] or None
+        text = text.strip()[:200] or None
     except Exception as e:
         logger.warning("[主动性] LLM 生成失败: {}", e)
         return None
+    variant_id = _PROACTIVE_VARIANT_KEY.pop(user_id, "")
+    if text and variant_id:
+        # F01 冷却：生成成功才登记（失败静默不占冷却）
+        try:
+            from .greeting_material import mark_variant_used
+
+            mark_variant_used(user_id, variant_id)
+        except Exception as e:
+            logger.warning("[主动性] 变体冷却登记失败: {}", e)
+    return text
 
 
 async def _generate_proactive_image(user_id: str) -> str | None:

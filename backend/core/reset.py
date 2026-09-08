@@ -46,7 +46,7 @@ _TABLES = (
     "reunion_arcs",
     "knowledge_opinion_sources", "knowledge_opinions",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
-    "relationship_versions",
+    "relationship_versions", "greeting_variant_usage",
     "kb_documents", "kb_chunks", "unlocks",
 )
 

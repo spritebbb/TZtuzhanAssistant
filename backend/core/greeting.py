@@ -27,18 +27,8 @@ _GREET_PENDING_KEY = "web_greet_pending"  # 问候生成中占位（并发去重
 _greet_lock = threading.Lock()
 
 # 兜底问候池：LLM 失败时轮换抽取，避免总说同一句导致重复率高。
-# 语气对齐菟菚人设（干脆、带点腹黑毒舌），且刻意不重复。
-_FALLBACK_GREETINGS = [
-    "回来了？我还以为你迷路了呢。",
-    "哟，舍得上线了？",
-    "我还当你把我忘了呢。",
-    "可算来了，等得我都要睡着了。",
-    "刚才还在想你是不是掉网里了。",
-    "回来得正好，我正闲得发慌。",
-    "嗯？今天怎么想起找我了。",
-    "我还猜你今天会不会来。",
-]
-
+# F01 起默认人格改用问候变体池的「无素材」类例句（旧语气词池退役）；
+# 其他人格仍用中性池，避免把菟菚口吻套到别的角色上。
 _GENERIC_FALLBACK_GREETINGS = [
     "你回来了。",
     "好久不见，最近怎么样？",
@@ -51,13 +41,31 @@ _REUNION_FALLBACK = "回来啦。好久不见。"
 # 每个 user 上一次抽到的兜底索引，避免连续两次抽到同一句
 _last_fallback_idx: dict[str, int] = {}
 
+# 最近一次生成的来源（model / fallback）：模型失败时用兜底池顶替，
+# 变体冷却只在真正用模型生成时登记（兜底句不代表该变体被用过）。
+_generation_source: dict[str, str] = {}
+
+
+def _default_variant_fallbacks() -> list[str]:
+    """默认人格的兜底池：取变体资源里「无素材」类的例句（F01 内容定稿）。"""
+    try:
+        from .greeting_material import CATEGORY_NO_MATERIAL, load_variants
+
+        pool = [v.example for v in load_variants()
+                if v.category == CATEGORY_NO_MATERIAL and v.example.strip()]
+        if pool:
+            return pool
+    except Exception:
+        pass
+    return ["嗯？", "哟\n今天想聊点什么"]
+
 
 def _fallback_greeting(user_id: str) -> str:
     """从兜底池轮换抽一句，且尽量不与上一次相同。"""
     from .persona_profiles import DEFAULT_PERSONA_ID, profile_id_from_user_id
 
     pool = (
-        _FALLBACK_GREETINGS
+        _default_variant_fallbacks()
         if profile_id_from_user_id(user_id) == DEFAULT_PERSONA_ID
         else _GENERIC_FALLBACK_GREETINGS
     )
@@ -89,6 +97,8 @@ async def _greeting_text(
     *,
     gap_hours: float | None = None,
     reunion_hint: str = "",
+    material: list | None = None,
+    variant=None,
 ) -> str:
     """用 LLM 生成一句菟菚风格的问候。"""
     from . import affection
@@ -121,6 +131,8 @@ async def _greeting_text(
     )
     time_desc = f"{now.month}月{now.day}日 {period}"
     narrative_hint = ""
+    material_hint = ""
+    variant_hint = ""
     if reunion_hint:
         narrative_hint = "\n\n" + reunion_hint
     elif gap_hours is not None and gap_hours >= config.proactive_greeting_idle_hours:
@@ -143,6 +155,17 @@ async def _greeting_text(
             narrative_hint = "\n\n" + narrative.prompt_hint(affection.stage_of(affection_val))
         except Exception as e:
             logger.warning(f"[问候] 离线叙事素材整理失败: {e}")
+    if not reunion_hint:
+        # F01：真实素材 + 变体方向（久别重逢走 P2-06 三段式，不归本池）。
+        try:
+            from .greeting_material import build_material_hint, build_variant_hint
+
+            material_hint = build_material_hint(list(material or []))
+            variant_hint = build_variant_hint(
+                variant, address=address or "", period=period
+            )
+        except Exception as e:
+            logger.warning(f"[问候] 变体提示组装失败: {e}")
     messages = [
         {"role": "system", "content": sys_prompt},
         {
@@ -153,14 +176,18 @@ async def _greeting_text(
                 "一句话就够，别太长，别解释，别加括号动作。"
                 f"{'如果记得对方的名字（' + address + '）就用上。' if address else ''}"
                 f"{narrative_hint}"
+                f"{material_hint}"
+                f"{variant_hint}"
             ),
         },
     ]
     try:
         text = await chat(messages, max_tokens=100, temperature=0.85)
+        _generation_source[user_id] = "model"
         return text.strip()[:200]
     except Exception as e:
         logger.warning(f"[问候] LLM 生成失败: {e}")
+        _generation_source[user_id] = "fallback"
         return _REUNION_FALLBACK if gap_hours is not None else _fallback_greeting(user_id)
 
 
@@ -210,6 +237,8 @@ async def greeting_for(
 
     reunion_arc = None
     reunion_hint = ""
+    material: list = []
+    variant = None
     if gap_hours is not None and absent_since is not None:
         try:
             from .reunion import prepare_reunion, prompt_hint
@@ -227,10 +256,36 @@ async def greeting_for(
                 )
         except Exception as e:
             logger.warning(f"[问候] 重逢候选整理失败: {e}")
+    if not reunion_hint:
+        # F01：取授权真实素材并选一个未冷却的变体（失败静默退回旧逻辑）。
+        from .features import flag
+
+        if flag("greeting_material_enabled"):
+            try:
+                from .greeting_material import (
+                    choose_greeting_variant,
+                    collect_greeting_material,
+                    user_just_finished_focus,
+                )
+
+                moment = datetime.datetime.fromtimestamp(now)
+                material = await asyncio.to_thread(collect_greeting_material, user_id, moment)
+                busy_return = await asyncio.to_thread(
+                    user_just_finished_focus, user_id, moment
+                )
+                variant = await asyncio.to_thread(
+                    choose_greeting_variant, user_id,
+                    {"material": material, "busy_return": busy_return},
+                    now=moment,
+                )
+            except Exception as e:
+                logger.warning(f"[问候] 素材/变体准备失败: {e}")
+                material, variant = [], None
     try:
         # 生成问候并持久化到会话
         text = await _greeting_text(
-            user_id, gap_hours=gap_hours, reunion_hint=reunion_hint
+            user_id, gap_hours=gap_hours, reunion_hint=reunion_hint,
+            material=material, variant=variant,
         )
     except Exception as e:
         logger.warning(f"[问候] 生成异常: {e}")
@@ -329,5 +384,17 @@ async def greeting_for(
     from .proactive_policy import finish_active_claim
 
     finish_active_claim(user_id, claim_token, success=True, source="greeting")
+    if variant is not None and _generation_source.get(user_id) == "model":
+        # 只有真正落进会话、且确实由模型按该变体生成时才记冷却
+        try:
+            from .greeting_material import mark_variant_used
+
+            mark_variant_used(
+                user_id, variant.id,
+                source_id=(material[0].source_id if material else None),
+                now=datetime.datetime.fromtimestamp(now),
+            )
+        except Exception as e:
+            logger.warning(f"[问候] 变体冷却登记失败: {e}")
     logger.info(f"[问候] 隔 {config.proactive_greeting_idle_hours}h+ 生成问候: {text[:40]}...")
     return text
