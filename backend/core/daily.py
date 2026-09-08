@@ -269,12 +269,47 @@ async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
         fallback=fallback_mood,
     ).text
     diary_id = save_diary(user_id, day.isoformat(), content, mood)
+    # F02：日记只汇总当天实际记录——把当天的真实事件/完成活动登记为引用边，
+    # 供后续生成素材时校验与追溯（源消失即删边，下游不可再引用）。
+    if diary_id:
+        try:
+            _link_diary_sources(user_id, int(diary_id), day)
+        except Exception:
+            logger.exception("[日记] 素材引用登记失败（不影响日记）")
     return {
         "id": diary_id,
         "date": day.isoformat(),
         "content": content[:1200],
         "mood": mood[:24],
     }
+
+
+def _link_diary_sources(user_id: str, diary_id: int, day: date) -> int:
+    """把该日真实发生的事（关系事件/完成活动）登记为日记的来源。"""
+    from .narrative_sources import link_source
+
+    day_iso = day.isoformat()
+    with db._lock:
+        events = db.conn.execute(
+            "SELECT id, occurred_at FROM relationship_events WHERE user_id=? "
+            "AND status='active' AND occurred_at >= ? AND occurred_at < ?",
+            (user_id, f"{day_iso}T00:00:00", f"{day_iso}T23:59:59"),
+        ).fetchall()
+        activities = db.conn.execute(
+            "SELECT id, updated_at FROM activities WHERE user_id=? AND status='completed' "
+            "AND completed_at IS NOT NULL AND completed_at >= ? AND completed_at < ?",
+            (user_id, f"{day_iso}T00:00:00", f"{day_iso}T23:59:59"),
+        ).fetchall()
+    count = 0
+    for row in events:
+        if link_source(user_id, "diary", diary_id, "event", int(row["id"]),
+                       version=str(row["occurred_at"] or "")):
+            count += 1
+    for row in activities:
+        if link_source(user_id, "diary", diary_id, "activity", int(row["id"]),
+                       version=str(row["updated_at"] or "")):
+            count += 1
+    return count
 
 
 async def maybe_write_research_report(user_id: str) -> dict | None:
