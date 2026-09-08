@@ -100,7 +100,7 @@ async def api_chat(
 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
-    _state: dict = {"pending_img": None, "explanation": None}
+    _state: dict = {"pending_img": None, "explanation": None, "draft": None}
     # 累积流式已推送的文本片段（不含控制标记 \x00...\x00）：供 _cb 追加、_runner 在
     # 流式中途失败时落库「已生成的部分回复」，避免刷新/归档后这段内容丢失。
     _partial: list[str] = []
@@ -127,6 +127,11 @@ async def api_chat(
         _state["explanation"] = snapshot
         await q.put(("__explanation__", snapshot))
 
+    async def _draft_cb(draft: dict) -> None:
+        # F06：可确认的活动草稿，独立事件露出（不藏进回复正文）
+        _state["draft"] = draft
+        await q.put(("__draft__", draft))
+
     async def _runner() -> None:
         """后台生成任务：完成时自行持久化，不依赖 SSE 连接生命周期。"""
         # 设置当前会话的用户身份（工具/记忆/待办按此隔离）
@@ -152,6 +157,7 @@ async def api_chat(
                 process(
                     _user_id(session_id), text, mock=mock, ephemeral=ephemeral, stream_cb=_cb,
                     image_cb=_image_cb, progress_cb=_progress_cb, explain_cb=_explain_cb,
+                    draft_cb=_draft_cb,
                 ),
                 timeout=_PROCESS_TOTAL_TIMEOUT,
             )
@@ -165,6 +171,8 @@ async def api_chat(
                     bot_msg["image"] = _state["pending_img"]
                 if _state.get("explanation"):
                     bot_msg["explanation"] = _state["explanation"]
+                if _state.get("draft"):
+                    bot_msg["draft"] = _state["draft"]
                 async with user_write_guard(request_epoch):
                     await append_messages(session_id, [bot_msg])
             await q.put(("__done__", reply))
@@ -261,6 +269,8 @@ async def api_chat(
                     continue
                 if isinstance(item, tuple) and item[0] == "__explanation__":
                     yield _sse({"explanation": item[1]})
+                if isinstance(item, tuple) and item[0] == "__draft__":
+                    yield _sse({"draft": item[1]})
                     continue
                 if isinstance(item, tuple) and item[0] == "__done__":
                     yield _sse({"done": item[1]})

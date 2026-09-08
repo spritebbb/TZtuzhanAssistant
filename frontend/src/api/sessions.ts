@@ -1,11 +1,14 @@
 // 会话 API（单一会话模式 + 归档）
 import { apiFetch, getApiUrl } from './index'
 
+import type { ActivityDraft } from './activityDrafts'
+
 export interface Message {
   role: 'user' | 'bot'
   content: string
   image?: string | null
   explanation?: MessageExplanation | null
+  draft?: ActivityDraft | null
   ephemeral?: boolean
   ts: number
 }

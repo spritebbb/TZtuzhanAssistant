@@ -1,6 +1,7 @@
 // 对话 API（SSE 流式）
 import { apiFetch } from './index'
 import type { MessageExplanation } from './sessions'
+import type { ActivityDraft } from './activityDrafts'
 
 export interface ChatCallbacks {
   onPiece?: (piece: string) => void
@@ -12,6 +13,7 @@ export interface ChatCallbacks {
   onConfirmRequest?: (req: any) => void
   onTool?: (event: ToolProgressEvent) => void
   onExplanation?: (value: MessageExplanation) => void
+  onDraft?: (value: ActivityDraft) => void
 }
 
 // 工具循环进度事件（后端 run_tool_loop 通过 on_progress 推送）
@@ -63,6 +65,7 @@ export async function streamChat(
         else if (obj.confirm_request) cb.onConfirmRequest?.(obj.confirm_request)
         else if (obj.tool) cb.onTool?.(obj.tool)
         else if (obj.explanation) cb.onExplanation?.(obj.explanation)
+        else if (obj.draft) cb.onDraft?.(obj.draft)
         else if (obj.piece !== undefined) cb.onPiece?.(obj.piece)
         else if (obj.done !== undefined) cb.onDone?.(obj.done)
         else if (obj.reset) cb.onReset?.()
