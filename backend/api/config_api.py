@@ -15,6 +15,7 @@ _FLAG_LABELS = {
     "output_hygiene_enabled": "输出卫生：回复发送前统一安全检查（关闭时保持旧流式契约）",
     "context_registry_enabled": "语境注册表：统一管理注入对话的语境（含知识观点的召回）",
     "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
+    "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
 }
 
 

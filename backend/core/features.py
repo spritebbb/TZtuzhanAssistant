@@ -32,6 +32,10 @@ FLAG_DEFAULTS = {
     # 已稳定（test_context_registry.py），设置页有开关入口，默认开启；
     # 关闭时走 colists.list_context 旧路径；两条路径互斥，不会双注入。
     "context_registry_enabled": True,
+    # L06：低频生活模板池（她低频出门/换活动）。用户拍板（2026-09-08）：
+    # 接主动候选源、概率 0.25、用户意见可取消、出门可沉默但事件/状态行
+    # 必须可见。关闭后 choose_life_event 与外出主动候选全部停用。
+    "life_templates_enabled": True,
 }
 
 

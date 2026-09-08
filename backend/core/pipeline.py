@@ -63,6 +63,15 @@ def _spawn_memory_task(coro) -> None:
     task.add_done_callback(_memory_tasks.discard)
 
 
+async def _veto_life_templates(user_id: str) -> None:
+    """后台：用户意见取消当日生活模板（L06 拍板 #10，同步 kv 无网络调用）。"""
+    import asyncio as _aio
+
+    from .life_templates import mark_vetoed
+
+    await _aio.to_thread(mark_vetoed, user_id)
+
+
 async def _perceive_and_settle(user_id: str, text: str, *, mock: bool = False) -> None:
     """后台：LLM 语义感知 + 好感度/情绪演化 + 降级时的关键词兜底。
 
@@ -656,6 +665,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             _spawn_memory_task(_perceive_and_settle(user_id, text, mock=mock))
         except Exception:
             logger.exception("[pipeline] 拟人感知后台任务启动失败")
+        # L06 用户意见取消（拍板 #10）：「别出门」类关键词命中 → 当日候选作废
+        try:
+            from .life_templates import mark_vetoed, veto_keywords_hit
+
+            if veto_keywords_hit(text):
+                _spawn_memory_task(_veto_life_templates(user_id))
+        except Exception:
+            logger.exception("[pipeline] 生活模板取消检查失败")
 
     # 1.0) 用户消息先存档：即使后续 LLM 调用失败，对话历史也不丢、
     # 失败重发时不至于重复计好感（assistant 消息在生成成功后补存）。

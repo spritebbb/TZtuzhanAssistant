@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .userdb import db
+from .log import logger
 
 TEMPLATE_VERSION = 2  # 2026-09-08 素材池加量+工作日分化+晚间切块；bump 使新种子生效
 KV_SCHEDULE = "state:schedule"
@@ -256,6 +257,25 @@ def _record_event(user_id: str, block_id: str, occurrence: str, kind: str,
     return cur.rowcount == 1
 
 
+def record_life_event(user_id: str, block_id: str, occurrence: str, kind: str,
+                      payload: dict, occurred_at: datetime, computed_at: str) -> bool:
+    """L06 生活模板落事件的公开入口（life_templates 模块消费，幂等同 _record_event）。"""
+    return _record_event(user_id, block_id, occurrence, kind, payload,
+                         occurred_at.isoformat(timespec="seconds"), computed_at)
+
+
+def spend_energy_today(user_id: str, amount: float) -> bool:
+    """把一次性消耗记进当日行程能量记账（L06 扣能量唯一入口）。
+
+    CAS 写回：version 冲突（tick/其他进程正在写）时放弃本次记账并返回 False，
+    调用方按「不阻塞事件」处理——能量记账是软状态，下一 tick 的 delta 会自然回落。
+    """
+    state = _load_state(user_id)
+    state["energy_delta_today"] = round(
+        float(state.get("energy_delta_today", 0.0)) - abs(float(amount)), 2)
+    return _save_state(user_id, state)
+
+
 def advance_schedule(
     user_id: str, now: datetime, *,
     max_hours: int = 72, on_event=None,
@@ -333,11 +353,32 @@ def advance_schedule(
                         on_event(material)
                 recent = list(state.get("recent_material_ids", [])) + [material["id"]]
                 state["recent_material_ids"] = recent[-7:]
+            # L06 低频生活模板：每日素材之后独立抽一次（互不挤占；模板事件 kind='outing'）
+            _maybe_trigger_life_template(user_id, local, summary)
         summary["hours_processed"] += 1
 
     state["last_processed_utc"] = target.isoformat()
     summary["written"] = _save_state(user_id, state)
     return summary
+
+
+def _maybe_trigger_life_template(user_id: str, local: datetime, summary: dict) -> None:
+    """日切换时尝试触发 L06 生活模板（开关关闭/无候选/提交失败均静默）。"""
+    try:
+        from .features import flag
+
+        if not flag("life_templates_enabled"):
+            return
+        from .life_templates import choose_life_event, commit_life_event
+
+        tpl = choose_life_event(user_id, local)
+        if tpl is None:
+            return
+        payload = commit_life_event(user_id, tpl, local)
+        if payload is not None:
+            summary["events"] += 1
+    except Exception:
+        logger.warning("[行程] L06 生活模板触发失败（不影响行程推进）")
 
 
 def _block_hours(block: ScheduleBlock) -> float:

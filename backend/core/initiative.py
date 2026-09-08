@@ -663,11 +663,18 @@ async def _arbitrate_secondary(user_id: str) -> bool:
 
         return maybe_orchestrate_surprise(uid)
 
+    def _maybe_outing_note(uid: str) -> str | None:
+        """L06 外出归来候选（拍板 #9）：今日有外出事件且未汇报过 → 说一句。"""
+        from .life_templates import maybe_express_outing
+
+        return maybe_express_outing(uid)
+
     for proposer in (
         _maybe_rhythm_followup,
         maybe_follow_up_promise,
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
+        _maybe_outing_note,
         _maybe_surprise,
     ):
         text = await proposer(user_id)

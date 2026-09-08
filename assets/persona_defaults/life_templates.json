@@ -1,0 +1,122 @@
+{
+  "format_version": 1,
+  "templates": [
+    {
+      "id": "lt-city-walk",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 18,
+      "weight": 3,
+      "output_kind": "outing",
+      "cooldown_days": 7,
+      "min_stage": "初识",
+      "activity_hint": "weekend_stay",
+      "description": "去城里走一圈，观察人类",
+      "return_note": "从城里回来了，收获是一些人类样本和一双走酸的脚"
+    },
+    {
+      "id": "lt-city-window-shopping",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 14,
+      "weight": 2,
+      "output_kind": "outing",
+      "cooldown_days": 7,
+      "min_stage": "初识",
+      "activity_hint": "weekend_stay",
+      "description": "进城看橱窗和排队的人类",
+      "return_note": "看了一下午人类排队，秩序好得令人欣慰"
+    },
+    {
+      "id": "lt-leila-outing",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 20,
+      "weight": 2,
+      "output_kind": "outing",
+      "cooldown_days": 5,
+      "min_stage": "熟悉",
+      "activity_hint": "weekend_stay",
+      "description": "被蕾拉拉去城里逛，她买单",
+      "return_note": "被蕾拉拖去城里转了一圈，她买的单，这份人情记下了"
+    },
+    {
+      "id": "lt-library-run",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 12,
+      "weight": 2,
+      "output_kind": "outing",
+      "cooldown_days": 7,
+      "min_stage": "初识",
+      "activity_hint": "research_reading",
+      "description": "去城里书店补两本人类心理学",
+      "return_note": "书店跑了一趟，人类心理学的书架又厚了一指"
+    },
+    {
+      "id": "lt-nao-meetup",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 16,
+      "weight": 2,
+      "output_kind": "outing",
+      "cooldown_days": 5,
+      "min_stage": "熟悉",
+      "activity_hint": "afternoon_stay",
+      "description": "和蛲蛲约在城里碰头，她请奶茶",
+      "return_note": "和蛲蛲在城里碰了头，奶茶是她请的，朋友交到了第二次"
+    },
+    {
+      "id": "lt-night-city",
+      "location_id": "P-00",
+      "prerequisites": [],
+      "energy_cost": 15,
+      "weight": 1,
+      "output_kind": "outing",
+      "cooldown_days": 10,
+      "min_stage": "亲密",
+      "activity_hint": "weekend_evening",
+      "description": "夜里进城看霓虹",
+      "return_note": "夜里的城比白天诚实，看完就回来了"
+    },
+    {
+      "id": "lt-research-visit",
+      "location_id": "P-01",
+      "prerequisites": [],
+      "energy_cost": 8,
+      "weight": 1,
+      "output_kind": "outing",
+      "cooldown_days": 7,
+      "min_stage": "熟悉",
+      "activity_hint": "research_reading",
+      "description": "回研究所旧实验室翻老档案",
+      "return_note": "回旧实验室翻了翻建所时的档案，修修补补的痕迹都还在"
+    },
+    {
+      "id": "lt-quiet-reading",
+      "location_id": "P-02",
+      "prerequisites": [],
+      "energy_cost": 4,
+      "weight": 2,
+      "output_kind": "quiet_reading",
+      "cooldown_days": 4,
+      "min_stage": "初识",
+      "activity_hint": "weekend_slow",
+      "description": "窝在图书室读一下午书",
+      "return_note": "图书室窝了一下午，书读完了，人没累着"
+    },
+    {
+      "id": "lt-rest-day",
+      "location_id": "P-02",
+      "prerequisites": [],
+      "energy_cost": 0,
+      "weight": 2,
+      "output_kind": "rest",
+      "cooldown_days": 3,
+      "min_stage": "初识",
+      "activity_hint": "weekend_slow",
+      "description": "阳台晒太阳什么都不干",
+      "return_note": "阳台躺了一天，藤蔓和小花作证，什么也没干"
+    }
+  ]
+}
