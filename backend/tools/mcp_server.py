@@ -224,7 +224,7 @@ async def restore_persisted_servers() -> int:
         name, url = entry["name"], entry["url"]
         try:
             success = await register_external_server(
-                name, url, keywords=entry.get("keywords") or []
+                name, url, keywords=entry.get("keywords") or [], persist=False
             )
             if success:
                 ok_count += 1
@@ -233,11 +233,13 @@ async def restore_persisted_servers() -> int:
                 logger.warning("[MCP] 恢复外部服务器失败（保留登记待重试）: {}", name)
         except Exception:
             logger.warning("[MCP] 恢复外部服务器异常: {}", name)
+    # 恢复过程一律不写盘：条目仍以文件为准，连接失败的保留待下次重试。
     return ok_count
 
 
 async def register_external_server(name: str, url: str, *,
-                                   keywords: list[str] | None = None) -> bool:
+                                   keywords: list[str] | None = None,
+                                   persist: bool = True) -> bool:
     """连接外部 MCP 服务器并把其工具注册进全局注册表（标准协议）。
 
     传输自动探测：先试 Streamable HTTP，失败回退旧版 HTTP+SSE。
@@ -288,5 +290,6 @@ async def register_external_server(name: str, url: str, *,
         "name": name, "url": url, "tools": len(tools),
         "keywords": list(keywords or []),
     }
-    _persist_servers()
+    if persist:
+        _persist_servers()
     return True
