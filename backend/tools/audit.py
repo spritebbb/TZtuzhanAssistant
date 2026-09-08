@@ -85,11 +85,6 @@ def log_tool_call(
         pass  # 审计失败绝不干扰主流程
 
 
-def recent_log(n: int = 50) -> list[dict]:
-    """读取最近 n 条审计记录（供前端/调试查看）。"""
-    return query_log(limit=n, offset=0)
-
-
 def _log_files() -> list[Path]:
     """返回审计日志文件列表，按时间升序（旧 → 新）。
 

@@ -113,7 +113,7 @@ _EXTERNAL_SERVERS: dict[str, dict] = {}
 # 与 plugins/web_fetch.py 的 _NoRedirect 同一策略：注册时 check_url 只校验了
 # 首跳地址，若 urllib 自动跟随后续 302 到内网，会绕过 SSRF 防线。
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, _newurl):
         return None
 
 

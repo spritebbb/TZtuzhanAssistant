@@ -51,16 +51,6 @@ _BUSY_WINDOW_DAYS = 3
 _BUSY_MIN_MESSAGES = 3
 
 
-def _last_message_ts(user_id: str) -> str | None:
-    with db._lock:
-        row = db.conn.execute(
-            "SELECT ts FROM messages WHERE user_id = ? AND role = 'user' "
-            "ORDER BY id DESC LIMIT 1",
-            (user_id,),
-        ).fetchone()
-    return str(row["ts"]) if row else None
-
-
 def _user_message_count_since(user_id: str, since: str) -> int:
     with db._lock:
         row = db.conn.execute(

@@ -44,20 +44,6 @@ def enabled() -> bool:
     return bool(resolve_api_key(resolve_route("vision")))
 
 
-def _vision_conf() -> tuple[str, str, str]:
-    """返回 (base_url, api_key, model)。
-
-    优先级：
-    1. VISION_*（用户显式配置的视觉端点）
-    2. IMAGE_*（SiliconFlow 生图 key，配默认 VL 模型）——最常见的可用组合
-    3. LLM_*（最后兜底，仅当该端点支持视觉）
-    """
-    from .model_routes import resolve_api_key, resolve_route
-
-    route = resolve_route("vision")
-    return route.base_url, resolve_api_key(route), route.model
-
-
 async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str | None:
     """描述一张图片的内容。"""
     if not image_bytes:
@@ -111,14 +97,3 @@ async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str
     except Exception as e:
         logger.warning(f"[识图] 视觉模型调用失败: {type(e).__name__}: {e}")
         return None
-
-
-async def describe_file(path: str) -> str | None:
-    """描述本地图片文件。"""
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-    except OSError as e:
-        logger.warning(f"[识图] 读文件失败 {path}: {e}")
-        return None
-    return await describe_bytes(data, filename=path.split("/")[-1].split("\\")[-1])

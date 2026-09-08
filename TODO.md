@@ -10,7 +10,7 @@
 - [x] 创建独立仓库目录，复制 `core/`（llm/memory/persona/search/userdb/affection/intent/schedule/mood/config 等全部模块）、`persona-菟菚.md`、`.env.example`、`assets/`
 - [x] 验证：`pipeline.process()` 的对话链路完全不依赖 nonebot/QQ，可独立运行
 - [x] 建好 `.venv`（`--without-pip` + pip 引导成功）
-- [x] 安装依赖：openai/fastapi/uvicorn/ddgs/zhdate/Pillow/loguru/python-dotenv/python-multipart 全部装好
+- [x] 安装运行依赖：openai/fastapi/uvicorn/ddgs/Pillow/loguru/python-dotenv/python-multipart 全部装好
 - [x] `requirements.txt` 已写（精简，去 nonebot 系，含 loguru/python-multipart）
 - [x] `.env` 已建（配置从 TZtuzhan 原项目复制，LLM/搜索/识图/生图 key 就绪）
 - [x] 验证：core 11 模块脱离 QQ import 全部通过；真实 LLM 对话跑通（"嗯，你好。我叫菟菚。你呢，怎么称呼？"）

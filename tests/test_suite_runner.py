@@ -9,6 +9,7 @@
 - test_live_chat.py / test_recall_real.py：需要真实 LLM/网络，CI 不跑。
 - test_suite_runner.py 自身。
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,16 +31,21 @@ def _scripts() -> list[Path]:
 
 
 @pytest.mark.parametrize("script", _scripts(), ids=lambda p: p.name)
-def suite_script(script: Path) -> None:
+def suite_script(script: Path, tmp_path: Path) -> None:
     """运行单个测试脚本，任何非零退出码都视为失败。
 
     函数名不带 test_ 前缀：pytest.ini 里 python_functions=suite_*，
     让 pytest 只收集本运行器，避免与脚本内的 async test_* 函数重复收集
     （脚本内函数由各自的 main() 编排执行）。
     """
+    env = os.environ.copy()
+    # 每个脚本独占数据目录。多数脚本用 setdefault() 自建临时目录；调用方若设置了
+    # TZTUZHAN_DATA_DIR，则旧运行器会让全部子进程共享同一个 bot.db，产生顺序污染。
+    env["TZTUZHAN_DATA_DIR"] = str(tmp_path / "data")
     proc = subprocess.run(
         [sys.executable, "-X", "utf8", str(script)],
         cwd=str(ROOT),
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",

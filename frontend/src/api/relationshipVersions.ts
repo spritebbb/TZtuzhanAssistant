@@ -1,6 +1,6 @@
 import { apiFetch } from './index'
 
-export interface RelationshipVersionSnapshotState {
+interface RelationshipVersionSnapshotState {
   affection: number
   mood: number
   mood_label: string
@@ -10,12 +10,12 @@ export interface RelationshipVersionSnapshotState {
   resting: boolean
 }
 
-export interface RelationshipVersionSnapshotSeason {
+interface RelationshipVersionSnapshotSeason {
   code: string
   label: string
 }
 
-export interface RelationshipVersionSnapshotBehavior {
+interface RelationshipVersionSnapshotBehavior {
   mood_line: string
   stage_line: string
   texture_line: string
@@ -24,7 +24,7 @@ export interface RelationshipVersionSnapshotBehavior {
   season_line: string
 }
 
-export interface RelationshipVersionSnapshotCounts {
+interface RelationshipVersionSnapshotCounts {
   messages: number
   facts_active: number
   long_memory: number

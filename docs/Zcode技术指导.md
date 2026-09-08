@@ -1365,3 +1365,20 @@ E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，
 ### 22.3 文档维护与接手纪律
 
 每个任务回信必须引用本文件的具体编号，列出实际文件、schema 版本、迁移/reset/导出、flag、VERIFY 和未验证外部条件。若实现发现路线与真实代码冲突，先给最小 ADR：证据、影响、两个以内选项和推荐；不要悄悄改变用户决定。Codex 的后续职责是独立阅读 diff、跑受影响测试和必要全量检查、验证迁移/回滚与权限边界；发现 bug 时在取得写入权后做最小修复，并把修复和测试结果写回交接档案。
+
+## 23. 2026-09-08 全项目死代码审计与清理
+
+**审计方法**：以 `backend.app:create_app`、`backend.main`、Electron/Vite 入口、PWA 注册脚本和 `plugins/*.py` 动态发现为根建立模块引用图；再用 Vulture 2.14（80% 置信阈值）检查 Python 未使用符号、Knip 5.80 检查前端文件/导出/依赖，并以 `rg` 逐项复核动态路径、FastAPI 装饰器、Pydantic 字段、urllib 回调和资源文件。静态工具标记不直接作为删除依据：`electron/main.ts`、`electron/preload.ts` 由 Vite 配置进入构建，`public/sw.js` 由 `index.html` 字符串注册，五档 `persona_states/*.png` 由路由按状态名拼接，这些均保留。
+
+**已清理的运行时代码**：删除未调用的审计 `recent_log` 包装、`apply_impulse.energy_delta` 参数、initiative 旧去重包装、pipeline 未使用的任务计数入口/变量、旧 mood/topic/schedule 常量、seasons 旧查询、state 单值 energy 包装、vision 未调用配置/文件包装、旧备份函数、插件统计包装、封存文件包装，以及从未实例化的 `ToolCall`/`McpServerInfo`。保留 `redirect_request` 并只将协议要求但未读取的参数改名，因为它是 urllib 动态回调，不是死代码。删除一个只验证已废弃私有函数存在的镜像测试。
+
+**已清理的前端和依赖**：删除未调用的 `getBaseUrl`、轮询版 `getInitiative`、未使用 `SessionInfo` 和四个不需要跨模块暴露的 snapshot 子类型；移除没有源码引用的 `vue-router`、`unocss`，以及空 `renderer` 配置触发但项目未使用其 Node polyfill 的 `vite-plugin-electron-renderer`。Python 依赖移除已被 Chroma 替代的 `sqlite-vec` 和从未导入的 `zhdate`。删除未被 CSS、manifest 或代码引用的旧 `bg_dark.jpg/bg_light.jpg`；当前日间/夜间背景继续使用带版本名的新资源。
+
+**有意保留**：四个 `backend/core/{date_memory,topic_memory,triple_memory,vector_store}.py` 是 v2 重构后的兼容薄壳，仍有生产调用及测试 patch 路径；`scripts/cutout_*.py`、`dl_bg*.js` 等没有运行时入口，但属于人工素材生成工具，不作为运行死模块删除；公开维护/迁移 helper 即使目前仅被测试或手工命令调用也保留。所有 API 模块均由应用工厂注册，十二个插件均由 loader 动态发现，未发现可删除的孤立业务模块。
+
+**测试基础设施修复**：`tests/test_suite_runner.py` 现在复制父进程环境后，为每个测试脚本覆盖独立的 `TZTUZHAN_DATA_DIR`。此前调用方设置该变量时，各脚本的 `setdefault()` 会共同使用一个 bot.db，造成顺序污染，也存在误碰指定数据目录的风险。先复跑原失败的 10 个脚本验证隔离，再完成后端 93/93；前端 Vitest 69/69、vue-tsc、Web/Electron 主进程与 preload 构建、Playwright 7/7 均通过。
+
+```text
+VERIFY: .venv/Scripts/python.exe -m vulture backend plugins scripts --min-confidence 80 --sort-by-size ;; .venv/Scripts/python.exe -X utf8 -m pytest tests/test_suite_runner.py -q ;; npm --prefix frontend test ;; npm --prefix frontend run test:e2e
+VERIFY_TIMEOUT: 600
+```

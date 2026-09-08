@@ -107,7 +107,7 @@ def _expand_abuse_words() -> frozenset[str]:
     variants.update(_ABUSE_EN_WORDS)
     variants.update(_PINYIN_ALIASES)
     # 脏字根两两组合成常见双字辱骂（傻逼/煞笔/沙比…自动覆盖）
-    for root_key, root_alts in _ABUSE_ROOTS.items():
+    for _root_key, root_alts in _ABUSE_ROOTS.items():
         for suffix in _ABUSE_SUFFIXES:
             for alt in root_alts:
                 variants.add(alt + suffix)
