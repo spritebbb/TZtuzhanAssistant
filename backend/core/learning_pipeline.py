@@ -74,6 +74,48 @@ def _value_key(candidate_type: str, value: dict) -> str:
     return candidate_type + "|" + json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+# 明确教学句式（封闭正则）：只有这些写法才产候选，避免把普通句子当学习素材
+_GLOSSARY_PATTERNS = (
+    re.compile(r"(?:以后)?(?:我们)?(?:把|将)?[\u201c\"']?([^\u201d\"']{1,12})[\u201c\"']?(?:叫|叫做|称作)成?[\u201c\"']?([^\u201d\"'，。！？]{1,20})[\u201d\"']?"),
+    re.compile(r"([\u4e00-\u9fffA-Za-z0-9_]{1,12})是指([^，。！？]{1,20})"),
+)
+
+
+def propose_from_message(user_id: str, text: str, *,
+                         source_message_id: int | None = None) -> list[dict]:
+    """聊天侧生产者：从明确教学句式提取候选（无 LLM、封闭模式、幂等）。
+
+    - 低风险表达偏好（「回复风格要简短」）→ 直接自动确认；
+    - 术语（「我们把 X 叫做 Y」/「X 是指 Y」）→ 挂 candidate 等用户确认；
+    - 其余一律不产候选（沉默不是同意，宁缺毋滥）。
+    """
+    results: list[dict] = []
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean or len(clean) > 200:
+        return results
+    auto = propose_low_risk_expression(
+        user_id, clean, source_message_id=source_message_id
+    )
+    if auto is not None:
+        results.append(auto)
+    for pattern in _GLOSSARY_PATTERNS:
+        match = pattern.search(clean)
+        if not match:
+            continue
+        term, meaning = match.group(1).strip(), match.group(2).strip()
+        if not term or not meaning or term == meaning:
+            continue
+        try:
+            results.append(propose(
+                user_id, "glossary", {"term": term[:30], "meaning": meaning[:200]},
+                source_message_id=source_message_id, confidence=0.6,
+            ))
+        except LearningError:
+            continue
+        break  # 一条消息最多产一个术语候选
+    return results
+
+
 def propose(user_id: str, candidate_type: str, value: dict, *,
             source_message_id: int | None = None,
             confidence: float = 0.5) -> dict:

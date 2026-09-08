@@ -168,6 +168,30 @@ def test_expiry_and_silence() -> int:
     return 0
 
 
+def test_producer_from_message() -> int:
+    """聊天侧生产者：只从明确教学句式产候选，普通句子不产（宁缺毋滥）。"""
+    uid = "172-producer"
+    db.ensure_user(uid)
+    mid = _message(uid, "我们把那个项目叫做星海计划")
+    out = lp.propose_from_message(uid, "我们把那个项目叫做星海计划", source_message_id=mid)
+    kinds = {item.get("status") for item in out}
+    assert "candidate" in kinds, out
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT type FROM learning_candidates WHERE user_id=? AND type='glossary'",
+            (uid,),
+        ).fetchone()
+    assert row is not None
+    # 低风险表达偏好自动确认
+    auto = lp.propose_from_message(uid, "回复风格要简短")
+    assert any(item.get("status") == "active" for item in auto), auto
+    # 普通句子不产候选
+    assert lp.propose_from_message(uid, "今天天气不错啊") == []
+    assert lp.propose_from_message(uid, "我们去吃饭吧") == []
+    print("[OK] 生产者：明确句式产候选 / 普通句不产")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_validation_rejects()
@@ -175,6 +199,7 @@ def main() -> int:
         + test_low_risk_auto_confirm()
         + test_behavior_feedback_routes_to_evolution()
         + test_expiry_and_silence()
+        + test_producer_from_message()
     )
     if failed:
         print(f"\n=== §17.2：{failed} 项失败 ===")
