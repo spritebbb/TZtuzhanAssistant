@@ -978,7 +978,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             from .context_registry import collect_context
 
             context_selection = await asyncio.to_thread(
-                collect_context, user_id, text, turn_id=turn_id
+                collect_context, user_id, text, turn_id=turn_id,
+                state={"ephemeral": ephemeral},
             )
             list_ctx = context_selection.assemble()
         else:
