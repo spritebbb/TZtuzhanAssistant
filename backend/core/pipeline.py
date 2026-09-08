@@ -11,7 +11,6 @@ from .llm import chat, chat_stream, extract_address
 from .log import logger
 from .memory import recall, recall_facts, short_term_messages
 from .persona import build_system_prompt
-from .search import web_search
 from .userdb import db
 
 # 会话空闲判定：离上一条消息超过该分钟数，视为上一场聊完，补提尾部事实
@@ -305,7 +304,9 @@ _SEARCH_KEYS = ("搜索", "搜一下", "查一下", "帮我查", "查查", "新�
 
 def _needs_search(text: str) -> bool:
     """是否命中需要联网搜索的内容。"""
-    return any(k in text for k in _SEARCH_KEYS)
+    from .intent import requires_search
+
+    return requires_search(text) or any(k in text for k in _SEARCH_KEYS)
 
 
 # 工具循环触发词：命中表示消息有明确的工具诉求，应走工具循环而非纯流式
@@ -917,6 +918,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
     # 3.5) 联网搜索（命中需要搜索的关键词时）
     search_hits = []
+    search_report = None
     if not mock and _needs_search(text):
         import asyncio as _asyncio
 
@@ -929,12 +931,24 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 if city:
                     weather_line = await _asyncio.to_thread(_fetch_weather, city)
                     if weather_line:
-                        search_hits = [{"title": f"{city}今日天气", "snippet": weather_line}]
+                        url = f"https://wttr.in/{city}"
+                        search_hits = [{"id": "E1", "title": f"{city}今日天气",
+                                        "snippet": weather_line, "url": url,
+                                        "domain": "wttr.in", "provider": "wttr",
+                                        "cache_hit": False}]
+                        search_report = {
+                            "status": "insufficient", "agreement": "not_comparable",
+                            "reason": "single_specialized_weather_source",
+                            "evidence": search_hits,
+                        }
             except Exception:
                 pass
         if not search_hits:
-            # web_search 是同步 urllib 阻塞 → 放线程池，避免卡事件循环
-            search_hits = await _asyncio.to_thread(web_search, text)
+            # 多源求证是同步网络 I/O → 放线程池，避免卡事件循环
+            from .source_verification import verify_search
+
+            search_report = await _asyncio.to_thread(verify_search, text)
+            search_hits = list(search_report.get("evidence", []))
 
     # 4) 组装 prompt
     # 4.0) 意图路由：判断这条消息是闲聊还是需要工具/回忆/情感注入。
@@ -1412,17 +1426,13 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             messages.append({"role": "system", "content": presence})
     except Exception:
         logger.exception("[pipeline] 行程可及性提示失败（不影响回复）")
-    if search_hits:
-        snippets = "\n".join(f"- {h['title']}：{h['snippet']}" for h in search_hits[:5])
+    if search_report:
+        from .source_verification import format_verification_context
+
         messages.append(
             {
                 "role": "system",
-                "content": (
-                    "你刚刚随手查了一下，看到这些信息（可能有误）：\n"
-                    + snippets
-                    + "\n把它们揉进你自然、犀利的语气里回答，像你刚好知道、随口告诉对方；"
-                    "不要生搬硬套、不要列成清单、不要说「根据搜索」「据我所知」这类报告腔。"
-                ),
+                "content": format_verification_context(search_report),
             }
         )
     # ctx 已包含刚存档的当前 user 消息（_process_locked 开头 add_message），

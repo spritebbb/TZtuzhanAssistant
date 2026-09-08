@@ -8,6 +8,7 @@
 import json
 import re
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 
@@ -16,10 +17,10 @@ from .log import logger
 
 web_search_last_error = ""
 
-# TTL 缓存：{query: (expire_ts, [results])}，窗口 30 分钟，上限 200 条防内存膨胀
-_SEARCH_CACHE_TTL = 10 * 60  # 新闻/发布类时效话题 30 分钟缓存过长（曾导致「刚发布」被旧结果覆盖判断）
+# TTL 缓存：时效查询 2–5 分钟，普通查询最多 24 小时；上限 200 条防内存膨胀
+_SEARCH_CACHE_TTL = 10 * 60  # 兼容旧测试/调用方；实际 TTL 由 cache_ttl_for 决定
 _SEARCH_CACHE_MAX = 200
-_search_cache: dict[str, tuple[float, list[dict]]] = {}
+_search_cache: dict[str, tuple[float, list[dict], float]] = {}
 
 
 def last_error() -> str:
@@ -27,15 +28,28 @@ def last_error() -> str:
     return web_search_last_error
 
 
+def normalize_query(query: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", query).lower().split())
+
+
+def cache_ttl_for(query: str) -> int:
+    normalized = normalize_query(query)
+    if any(word in normalized for word in ("价格", "多少钱", "汇率", "天气", "温度", "当前版本", "现在版本")):
+        return 2 * 60
+    if any(word in normalized for word in ("最新", "今天", "刚刚", "新闻", "发布", "现在")):
+        return 5 * 60
+    return 24 * 60 * 60
+
+
 def _cache_get(query: str) -> list[dict] | None:
-    hit = _search_cache.get(query)
+    hit = _search_cache.get(normalize_query(query))
     if hit is None:
         return None
-    expire_ts, results = hit
+    expire_ts, results, fetched_at = hit
     if time.time() > expire_ts:
-        _search_cache.pop(query, None)
+        _search_cache.pop(normalize_query(query), None)
         return None
-    return results
+    return [{**item, "cache_hit": True, "fetched_at": fetched_at} for item in results]
 
 
 def _cache_put(query: str, results: list[dict]) -> None:
@@ -43,10 +57,15 @@ def _cache_put(query: str, results: list[dict]) -> None:
     if len(_search_cache) >= _SEARCH_CACHE_MAX:
         for old in list(_search_cache)[: _SEARCH_CACHE_MAX // 2]:
             _search_cache.pop(old, None)
-    _search_cache[query] = (time.time() + _SEARCH_CACHE_TTL, results)
+    now = time.time()
+    _search_cache[normalize_query(query)] = (
+        now + cache_ttl_for(query),
+        [{**item, "cache_hit": False, "fetched_at": now} for item in results],
+        now,
+    )
 
 
-def web_search(query: str, max_results: int = 5) -> list[dict]:
+def web_search(query: str, max_results: int = 5, *, force_refresh: bool = False) -> list[dict]:
     """搜索并返回 [{title, snippet, url}]。失败时返回 [] 并在 last_error 记录原因。"""
     global web_search_last_error
     web_search_last_error = ""
@@ -61,9 +80,10 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
     # 命中缓存直接返回
-    cached = _cache_get(query)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        cached = _cache_get(query)
+        if cached is not None:
+            return cached[:max_results]
 
     engine = getattr(config, "search_engine", "bing")
     order = ["bing", "ddg"] if engine != "ddg" else ["ddg", "bing"]
@@ -79,8 +99,13 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
         else:
             results, err = _ddg_search(query, max_results)
         if results:
+            fetched_at = time.time()
+            results = [
+                {**item, "provider": eng, "cache_hit": False, "fetched_at": fetched_at}
+                for item in results
+            ]
             _cache_put(query, results)
-            return results
+            return results[:max_results]
         if err:
             errors.append(f"{eng}: {err}")
     web_search_last_error = "；".join(errors)

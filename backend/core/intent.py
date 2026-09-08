@@ -39,6 +39,17 @@ _DRAW_WORDS = {
     "画图", "画画", "画出来",
 }
 
+_TIME_SENSITIVE_WORDS = {
+    "最新", "今天", "现在", "刚刚", "新闻", "价格", "多少钱", "汇率",
+    "天气", "温度", "版本", "发布", "现任", "目前", "实时", "比分",
+}
+
+
+def requires_search(text: str) -> bool:
+    """确定性时效门控：命中后没有真实搜索结果就不能声称已经核实。"""
+    lowered = text.lower().strip()
+    return any(word in lowered for word in (_SEARCH_WORDS | _TIME_SENSITIVE_WORDS))
+
 # 回忆/翻旧账
 _RECALL_WORDS = {
     "上次", "之前", "以前", "还记得", "记得吗", "那天", "昨天", "刚才",
@@ -83,7 +94,7 @@ def classify(text: str) -> dict:
         return result
 
     # 搜索
-    if any(w in lowered for w in _SEARCH_WORDS):
+    if requires_search(lowered):
         result["need_search"] = True
         return result
 

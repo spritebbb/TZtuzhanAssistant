@@ -60,7 +60,8 @@ async def test_failure_message_visible():
     import backend.core.search as s
 
     s.web_search_last_error = "bocha: HTTP 403"
-    with patch("plugins.web_search.web_search", new=lambda q, max_results=5: []):
+    failed = {"status": "failed", "reason": "bocha: HTTP 403", "evidence": []}
+    with patch("plugins.web_search.verify_search", new=lambda q: failed):
         from plugins.web_search import _web_search
 
         out = await _web_search("随便搜点什么")
