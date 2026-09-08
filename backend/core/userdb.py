@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 38  # v38: L07 aesthetic preferences and artifact placements
+_SCHEMA_VERSION = 39  # v39: L16 shared resources and grants
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -271,6 +271,31 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_opinions_user
     ON knowledge_opinions(user_id, document_id, status);
 CREATE INDEX IF NOT EXISTS idx_knowledge_opinion_sources
     ON knowledge_opinion_sources(user_id, opinion_id);
+-- L16 可选择共享：默认一切隔离，只有用户明确"分享给某角色"才建 grant（首期只读）。
+CREATE TABLE IF NOT EXISTS shared_resources (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,          -- owner 命名空间（persona scoped user id）
+    resource_type TEXT NOT NULL,          -- kb_document / artifact / writing / list
+    resource_id   INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    revoked_at    TEXT,
+    version       INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (user_id, resource_type, resource_id)
+);
+CREATE TABLE IF NOT EXISTS resource_grants (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,
+    resource_id   INTEGER NOT NULL,       -- 对应 shared_resources.id
+    grantee_scope TEXT NOT NULL,          -- 被授权人格命名空间（persona scoped user id）
+    permission    TEXT NOT NULL DEFAULT 'read',
+    created_at    TEXT NOT NULL,
+    revoked_at    TEXT,
+    UNIQUE (resource_id, grantee_scope, permission)
+);
+CREATE INDEX IF NOT EXISTS idx_shared_resources_user
+    ON shared_resources(user_id, resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_resource_grants_resource
+    ON resource_grants(resource_id, grantee_scope);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1972,6 +1997,7 @@ class UserDB:
                 "activity_viewpoints", "activity_goals", "goal_progress",
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
+                "shared_resources", "resource_grants",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",

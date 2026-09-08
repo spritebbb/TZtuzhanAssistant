@@ -52,6 +52,7 @@ _TABLES = (
     "activity_draft_receipts", "document_segments", "document_import_jobs", "observation_entries",
     "domain_trust_events", "domain_trust_snapshot",
     "aesthetic_preferences", "artifact_placements",
+    "shared_resources", "resource_grants",
     "kb_documents", "kb_chunks", "unlocks",
 )
 
