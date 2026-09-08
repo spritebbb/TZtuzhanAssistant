@@ -109,12 +109,48 @@ def test_kv_registry_covers_attention() -> int:
     return 0
 
 
+def test_necessity_for_source_and_repeat() -> int:
+    uid = "171-necessity"
+    db.ensure_user(uid)
+    db.set_affection_absolute(uid, 60)
+    first = ep.necessity_for_source(uid, "initiative:promise_followup", idle_minutes=120)
+    assert ep.gate_proactive_candidate(first) is True, first
+    # 24h 内同源重复 → 重复惩罚把分数压到线下
+    ep.note_source_delivered(uid, "initiative:promise_followup")
+    repeat = ep.necessity_for_source(uid, "initiative:promise_followup", idle_minutes=120)
+    assert ep.gate_proactive_candidate(repeat) is False, repeat
+    # 低关系新用户不拦高优先来源（不因关系浅就完全闭嘴）
+    uid2 = "171-necessity-low"
+    db.ensure_user(uid2)
+    low = ep.necessity_for_source(uid2, "initiative:promise_followup", idle_minutes=120)
+    assert ep.gate_proactive_candidate(low) is True, low
+    # P3-05 主动权重调低 → 同条件分数下降（调制而非硬开关）
+    from backend.core.persona_evolution import evolve
+
+    base = ep.necessity_for_source(uid2, "initiative:outing_note", idle_minutes=120)
+    evolve(uid2, "initiative_template_weight", -0.5, reason="test")
+    lowered = ep.necessity_for_source(uid2, "initiative:outing_note", idle_minutes=120)
+    assert lowered["necessity"] < base["necessity"], (base, lowered)
+    print("[OK] 来源默认评分 / 重复惩罚 / 低关系不误杀 / 主动权重调制")
+    return 0
+
+
+def test_topic_key_deterministic() -> int:
+    assert att.topic_key("今天想去爬山看日出") == att.topic_key("今天想去爬山看日出")
+    assert att.topic_key("") == "misc"
+    assert att.topic_key("hello world python") in ("hello", "world", "python")
+    print("[OK] topic_key 确定性")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_necessity_formula_and_gate()
         + test_attention_bump_decay_and_cap()
         + test_switch_observe_drop_and_ephemeral()
         + test_kv_registry_covers_attention()
+        + test_necessity_for_source_and_repeat()
+        + test_topic_key_deterministic()
     )
     if failed:
         print(f"\n=== §17.1：{failed} 项失败 ===")

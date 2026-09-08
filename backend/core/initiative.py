@@ -649,13 +649,24 @@ async def _arbited_proactive(
     produce() 只做文案生成（due 条件检查由调用方在闸门前完成，条件成立但
     生成失败/为空/投递失败都会留下失败冷却）。返回投递的文本或 None。
 
-    §17.1：调用方可附 necessity 评分（expression_policy.score_necessity），
-    未达 0.6 的候选在本闸门前静默淘汰（用户消息永不门控，只作用于主动源）。
+    §17.1：调用方可附 necessity 评分（expression_policy.score_necessity）；
+    未附时按来源与真实状态自动算分（necessity_for_source），未达 0.6 的
+    候选在本闸门前静默淘汰（用户消息永不门控，只作用于主动源）。
     """
     from .reset import reset_in_progress
 
     if reset_in_progress():
         return None
+    if necessity is None:
+        try:
+            from .expression_policy import necessity_for_source
+
+            necessity = necessity_for_source(
+                user_id, source, idle_minutes=idle_minutes
+            )
+        except Exception:
+            logger.exception("[主动仲裁] necessity 默认评分异常，按放行处理")
+            necessity = None
     if necessity is not None:
         try:
             from .expression_policy import gate_proactive_candidate
@@ -706,6 +717,12 @@ async def _arbited_proactive(
         _fail()
         return None
     finish_active_claim(user_id, token, success=True, source=source)
+    try:
+        from .expression_policy import note_source_delivered
+
+        note_source_delivered(user_id, source)
+    except Exception:
+        logger.exception("[主动仲裁] 来源投递登记失败（不影响投递）")
     if on_delivered:
         try:
             on_delivered()

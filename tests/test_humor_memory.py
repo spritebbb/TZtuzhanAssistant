@@ -131,12 +131,43 @@ def test_usage_detection_and_cascade() -> int:
     return 0
 
 
+def test_evolution_rate_gate() -> int:
+    """P3-05 消费接线：humor_usage_rate 作为频率门（确定性，可按 now 固定）。"""
+    from datetime import datetime
+
+    from backend.core import humor_memory as hm
+    from backend.core import persona_evolution as evo
+    from backend.core.userdb import db
+
+    uid = "l04-rate-gate"
+    db.ensure_user(uid)
+    # 调到全关：任何时段都不选梗
+    evo.evolve(uid, "humor_usage_rate", -0.1, reason="test")   # 0.4
+    evo.evolve(uid, "humor_usage_rate", -0.1, reason="test")   # 需冷却，跳过
+    now = datetime(2026, 9, 9, 10, 0, 0)
+    # 直接验证门函数语义：rate<=0 全关、rate>=1 全开
+    assert hm._rate_gate_allows(uid, now) in (True, False)
+    with db._lock:
+        db.conn.execute("UPDATE persona_evolution_log SET new=0.0 WHERE user_id=? "
+                        "AND parameter='humor_usage_rate'", (uid,))
+        db.conn.commit()
+    assert hm._rate_gate_allows(uid, now) is False
+    with db._lock:
+        db.conn.execute("UPDATE persona_evolution_log SET new=1.0 WHERE user_id=? "
+                        "AND parameter='humor_usage_rate'", (uid,))
+        db.conn.commit()
+    assert hm._rate_gate_allows(uid, now) is True
+    print("[OK] 演化频率门：0 全关 / 1 全开")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_feedback_classification()
         + test_approval_threshold_and_negative_priority()
         + test_cooldown_and_context_gate()
         + test_usage_detection_and_cascade()
+        + test_evolution_rate_gate()
     )
     if failed:
         print(f"\n=== L04 幽默记忆：{failed} 项失败 ===")
