@@ -33,24 +33,46 @@ from typing import Any
 _REQUEST_TIMEOUT = 60.0
 
 
+def resolve_command(command: list[str]) -> list[str]:
+    """把命令名解析成可执行文件绝对路径（Windows 下 npx → npx.cmd）。
+
+    Popen 不按 PATHEXT 解析扩展名，直接给 ``npx`` 会 WinError 2；
+    这里用 shutil.which 解析，解析不到就原样返回（由 Popen 报清晰错误）。
+    """
+    import shutil
+
+    if not command:
+        return command
+    resolved = shutil.which(command[0])
+    if resolved:
+        return [resolved, *command[1:]]
+    return command
+
+
 class StdioBridge:
     """把子进程的 stdio JSON-RPC 转成请求/响应。"""
 
     def __init__(self, command: list[str]) -> None:
-        self.command = command
+        self.command = resolve_command(command)
         self._lock = threading.Lock()
         self._next_id = 0
         self._pending: dict[int, dict] = {}
-        self._proc = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,           # 子进程日志直接进本进程 stderr
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
+        try:
+            self._proc = subprocess.Popen(
+                self.command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=None,           # 子进程日志直接进本进程 stderr
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            raise SystemExit(
+                f"[bridge] 启动失败：找不到命令 {command[0]!r}。"
+                "请确认它已安装并在 PATH 里（Windows 下 npx 实为 npx.cmd）。"
+            ) from exc
         self._reader = threading.Thread(target=self._read_loop, daemon=True,
                                         name="mcp-stdio-reader")
         self._reader.start()

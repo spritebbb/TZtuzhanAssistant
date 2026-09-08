@@ -74,9 +74,13 @@ python -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @modelcontextp
 - 注册 → 工具进全局注册表（`external` + 需确认）→ 调用 → 卸载 端到端；
 - stdio 桥：HTTP → 子进程 stdin/stdout 转发、通知 202、id 解耦、子进程退出返回结构化错误。
 
-**未验证**：真实 Playwright MCP（本次设置环境无外网，`npx` 取不到包）。
-请在你自己终端双击 `scripts\start-mcp-playwright.bat`，看到 `🌉 MCP stdio 桥已启动`
-后启动菟菚，确认设置页里出现 `playwright::*` 工具并能调用。
+**真实服务器已实测通过**（2026-09-09，Playwright MCP 1.63.0-alpha）：
+- 桥启动 → 菟菚后端自动恢复并连接（Streamable HTTP）→ 注册 24 个 `playwright::*` 工具；
+- `/api/mcp/servers` 返回 `{"name":"playwright","tools":24}`；
+- 真实调用 `browser_navigate` 打开 example.com、`browser_snapshot` 抓到 "Example Domain"。
+
+**注意**：Playwright MCP 默认找本机 Google Chrome；本机没装，所以脚本里带了
+`--browser chromium`（用 Playwright 自带浏览器）。若你装了 Chrome，可改成 `--browser chrome`。
 
 ## 排查
 
