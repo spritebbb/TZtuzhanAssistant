@@ -50,3 +50,6 @@ docs/HANDOFF-TO-CODEX.md
 
 # Playwright MCP 运行产物（会话/截图）
 .playwright-mcp/
+
+# 工具工作区与 Agent 报告产物（运行时生成）
+workspace/
