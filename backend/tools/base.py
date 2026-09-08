@@ -133,6 +133,7 @@ class FunctionTool:
             danger_level=self.danger_level,
             needs_confirm=self.needs_confirm,
             max_output_chars=self.max_output_chars,
+            owner=self.owner,
         )
 
     def to_openai_schema(self) -> dict:
@@ -237,9 +238,16 @@ class ToolRegistry:
         return list(cls._snapshot().keys())
 
     @classmethod
-    def openai_tools(cls) -> list[dict]:
-        """返回全部工具的 OpenAI Function Calling schema（用于原生工具调用）。"""
-        return [t.to_openai_schema() for t in cls._snapshot().values()]
+    def openai_tools(cls, predicate: Callable[["FunctionTool"], bool] | None = None) -> list[dict]:
+        """返回工具的 OpenAI Function Calling schema（用于原生工具调用）。
+
+        ``predicate`` 可选：只返回满足条件的工具（用于按需隐藏 MCP 工具，
+        避免每轮把几十个外部工具 schema 全塞进 prompt）。
+        """
+        tools = cls._snapshot().values()
+        if predicate is not None:
+            tools = [t for t in tools if predicate(t)]
+        return [t.to_openai_schema() for t in tools]
 
     @classmethod
     def set_confirm_hook(cls, hook: Callable[..., Awaitable[str]] | None) -> None:

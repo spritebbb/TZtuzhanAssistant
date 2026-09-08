@@ -18,6 +18,7 @@ class ToolSpec(BaseModel):
     danger_level: str = "normal"     # info/normal/high/critical
     needs_confirm: bool = False      # 是否需弹确认
     max_output_chars: int = 4000     # 结果截断上限
+    owner: str = "builtin"           # 注册来源：builtin / mcp:<服务器名>（按需注入判定用）
 
 
 class ToolResult(BaseModel):

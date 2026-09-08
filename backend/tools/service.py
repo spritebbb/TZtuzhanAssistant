@@ -20,6 +20,7 @@ async def run_tool_round(
     max_loops: int = 2,
     final_instruction: list[dict] | None = None,
     on_progress: Callable[[dict], Any] | None = None,
+    tool_filter: Callable[[Any], bool] | None = None,
 ) -> str:
     """执行工具循环，返回最终 LLM 回复文本。
 
@@ -57,4 +58,5 @@ async def run_tool_round(
         max_loops=max_loops,
         final_instruction=final_instruction,
         on_progress=on_progress,
+        tool_filter=tool_filter,
     )

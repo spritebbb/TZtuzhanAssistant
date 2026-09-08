@@ -320,7 +320,8 @@ def test_agent_full_flow_gate_to_done() -> None:
     orig_loop = tool_loop.run_tool_loop
 
     async def fake_loop(messages, call_llm, *, max_loops=2, mock=False,
-                        final_instruction=None, call_native=None, on_progress=None):
+                        final_instruction=None, call_native=None, on_progress=None,
+                        is_cancelled=None, tool_filter=None):
         return "任务完成：已查完。"
 
     tool_loop.run_tool_loop = fake_loop

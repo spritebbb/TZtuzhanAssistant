@@ -115,7 +115,7 @@ def _persist_servers() -> None:
         with _persist_lock:
             _PERSIST_PATH.parent.mkdir(parents=True, exist_ok=True)
             data = [
-                {"name": v["name"], "url": v["url"]}
+                {"name": v["name"], "url": v["url"], "keywords": v.get("keywords") or []}
                 for v in _EXTERNAL_SERVERS.values()
             ]
             tmp = _PERSIST_PATH.with_suffix(_PERSIST_PATH.suffix + ".tmp")
@@ -137,7 +137,8 @@ def _load_persisted() -> list[dict]:
         if not isinstance(data, list):
             return []
         return [{"name": str(d.get("name", "")).strip(),
-                 "url": str(d.get("url", "")).strip()}
+                 "url": str(d.get("url", "")).strip(),
+                 "keywords": [str(k).strip() for k in (d.get("keywords") or []) if str(k).strip()]}
                 for d in data
                 if isinstance(d, dict) and d.get("name") and d.get("url")]
     except Exception:
@@ -152,6 +153,48 @@ def list_external_servers() -> list[dict]:
         count = sum(1 for t in ToolRegistry.list() if t.name.startswith(prefix))
         result.append({**info, "tools_count": count})
     return result
+
+
+def mcp_tool_filter(user_text: str, skill_texts: list[str] | None = None):
+    """按需注入：返回工具可见性判定函数（MCP 工具默认隐藏，命中才暴露）。
+
+    命中条件（任一）：
+    - ``AGENT_MCP_ALWAYS_ON=1``（演示用，全部 MCP 工具常驻）；
+    - 本轮用户消息 / 命中的技能正文里出现了「服务器名 / 该服务器的关键词 /
+      该服务器的某个工具名」（工具名按 ASCII 词边界匹配，中文紧邻也命中）。
+
+    没注册任何 MCP 服务器、或 always-on 时返回 None（表示无需过滤，零开销）。
+    """
+    if not _EXTERNAL_SERVERS or getattr(config, "agent_mcp_always_on", False):
+        return None
+    import re as _re
+
+    haystack = " ".join([str(user_text or ""), *(skill_texts or [])])
+    visible: set[str] = set()
+    for name, info in _EXTERNAL_SERVERS.items():
+        prefix = f"{name}::"
+        needles = [name, *(info.get("keywords") or [])]
+        hit = any(n and n in haystack for n in needles)
+        if not hit:
+            for tool_name in ToolRegistry.tool_names():
+                if not tool_name.startswith(prefix):
+                    continue
+                short = tool_name[len(prefix):]
+                if _re.search(rf"(?<![A-Za-z0-9_]){_re.escape(short)}(?![A-Za-z0-9_])", haystack):
+                    hit = True
+                    break
+        if hit:
+            visible.update(t for t in ToolRegistry.tool_names() if t.startswith(prefix))
+    if visible:
+        logger.info("[MCP] 按需注入外部工具 {} 个：{}", len(visible), sorted(visible)[:5])
+
+    def _predicate(tool) -> bool:
+        owner = str(getattr(tool, "owner", "") or "")
+        if not owner.startswith("mcp:"):
+            return True                      # 本地工具永远可见
+        return tool.name in visible          # 外部工具命中才可见
+
+    return _predicate
 
 
 def unregister_external_server(name: str) -> bool:
@@ -180,7 +223,9 @@ async def restore_persisted_servers() -> int:
     for entry in saved:
         name, url = entry["name"], entry["url"]
         try:
-            success = await register_external_server(name, url)
+            success = await register_external_server(
+                name, url, keywords=entry.get("keywords") or []
+            )
             if success:
                 ok_count += 1
                 logger.info("[MCP] 已恢复外部服务器: {} ({})", name, url)
@@ -191,7 +236,8 @@ async def restore_persisted_servers() -> int:
     return ok_count
 
 
-async def register_external_server(name: str, url: str) -> bool:
+async def register_external_server(name: str, url: str, *,
+                                   keywords: list[str] | None = None) -> bool:
     """连接外部 MCP 服务器并把其工具注册进全局注册表（标准协议）。
 
     传输自动探测：先试 Streamable HTTP，失败回退旧版 HTTP+SSE。
@@ -235,8 +281,12 @@ async def register_external_server(name: str, url: str) -> bool:
             category="external",
             danger_level="normal",
             needs_confirm=True,
+            owner=f"mcp:{name}",
         )
 
-    _EXTERNAL_SERVERS[name] = {"name": name, "url": url, "tools": len(tools)}
+    _EXTERNAL_SERVERS[name] = {
+        "name": name, "url": url, "tools": len(tools),
+        "keywords": list(keywords or []),
+    }
     _persist_servers()
     return True

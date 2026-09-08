@@ -322,6 +322,7 @@ async def _execute_calls(
     seen: dict[str, str] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     remaining: int = MAX_TOOL_CALLS,
+    tool_filter: Callable[[Any], bool] | None = None,
 ) -> tuple[str, int]:
     """顺序执行文本协议调用；支持取消、总上限和同调用结果复用。"""
     specs = {t.name: t for t in ToolRegistry.list()}
@@ -339,6 +340,14 @@ async def _execute_calls(
             break
         args = _prepare(c)
         fingerprint = _call_fingerprint(c["name"], args)
+        spec = specs.get(c["name"])
+        if tool_filter is not None and spec is not None and not tool_filter(spec):
+            body = structured_tool_error(
+                kind="permission", name=c["name"],
+                detail="该工具本轮不可用（未命中触发条件）",
+            )
+            parts.append(f"[工具结果 {i + 1}/{len(calls)} - {c['name']}]\n{body}")
+            continue
         if fingerprint in seen:
             body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
         elif executed >= remaining:
@@ -352,9 +361,12 @@ async def _execute_calls(
     return "\n\n".join(parts), executed
 
 
-def _tool_hint_text() -> str:
-    """回退模式的文本工具提示。"""
+def _tool_hint_text(predicate: Callable[[Any], bool] | None = None) -> str:
+    """回退模式的文本工具提示（predicate 用于按需隐藏 MCP 工具）。"""
     tools = [t for t in ToolRegistry.list() if t.name not in ("run_python", "run_command")]
+    if predicate is not None:
+        specs = {t.name: t for t in ToolRegistry.list_tools()}
+        tools = [s for s in tools if s.name not in specs or predicate(specs[s.name])]
     lines = [f"- {t.name}：{t.description}" for t in tools]
     return "可用工具：\n" + "\n".join(lines) + (
         "\n\n如需工具，请用 ```tool``` 代码块：\n```tool\n{\"tool\": \"工具名\", \"args\": {...}}\n```"
@@ -371,6 +383,7 @@ async def run_tool_loop(
     call_native: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    tool_filter: Callable[[Any], bool] | None = None,
 ) -> str:
     """执行完整工具循环，返回最终 LLM 文本。
 
@@ -386,6 +399,9 @@ async def run_tool_loop(
                      {"type": "thinking"} / {"type": "tool", "name": "web_search"} /
                      {"type": "tool_done", "name": "web_search"}。用于把工具循环的
                      阶段性进展实时推给前端（否则工具期间气泡空窗到最终帧才整段弹出）。
+        tool_filter: 可选工具可见性判定（收 FunctionTool，返回是否暴露给模型）。
+                     MCP 外部工具默认按需注入，未命中的工具既不下发给模型、
+                    也不允许执行（防模型凭记忆猜名字调用）。
 
     Returns:
         最终文本（不含工具代码块）
@@ -393,7 +409,7 @@ async def run_tool_loop(
     if mock:
         return await call_llm(messages)
 
-    tools = ToolRegistry.openai_tools()
+    tools = ToolRegistry.openai_tools(tool_filter)
     work = list(messages)
 
     # 原生模式优先
@@ -402,6 +418,7 @@ async def run_tool_loop(
             work, call_native, tools,
             max_loops=max_loops, final_instruction=final_instruction,
             on_progress=on_progress, is_cancelled=is_cancelled,
+            tool_filter=tool_filter,
         )
 
     # 回退：文本协议模式
@@ -409,6 +426,7 @@ async def run_tool_loop(
         work, call_llm,
         max_loops=max_loops, final_instruction=final_instruction,
         on_progress=on_progress, is_cancelled=is_cancelled,
+        tool_filter=tool_filter,
     )
 
 
@@ -421,6 +439,7 @@ async def _run_native(
     final_instruction: list[dict] | None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    tool_filter: Callable[[Any], bool] | None = None,
 ) -> str:
     """原生 Function Calling 循环。"""
     fallback = _extract_last_user(work)
@@ -493,7 +512,14 @@ async def _run_native(
             # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
             await _progress({"type": "tool", "name": c["name"]})
             fingerprint = _call_fingerprint(c["name"], filled)
-            if fingerprint in seen:
+            tool_spec = specs.get(c["name"])
+            if tool_filter is not None and tool_spec is not None and not tool_filter(tool_spec):
+                # 按需隐藏的工具：模型凭记忆猜名字也不执行（避免绕过可见性）
+                body = structured_tool_error(
+                    kind="permission", name=c["name"],
+                    detail="该工具本轮不可用（未命中触发条件）",
+                )
+            elif fingerprint in seen:
                 body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
             elif call_count >= MAX_TOOL_CALLS:
                 body = "调用上限已用尽，本次未执行"
@@ -543,10 +569,11 @@ async def _run_text(
     final_instruction: list[dict] | None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    tool_filter: Callable[[Any], bool] | None = None,
 ) -> str:
     """文本协议回退循环。"""
     work = list(work)
-    work.append({"role": "system", "content": _tool_hint_text()})
+    work.append({"role": "system", "content": _tool_hint_text(tool_filter)})
     fallback = _extract_last_user(work)
 
     async def _progress(ev: dict) -> None:
@@ -581,6 +608,7 @@ async def _run_text(
         result_block, executed = await _execute_calls(
             calls, fallback, seen=seen, is_cancelled=is_cancelled,
             remaining=max(0, MAX_TOOL_CALLS - call_count),
+            tool_filter=tool_filter,
         )
         call_count += executed
         for c in calls:

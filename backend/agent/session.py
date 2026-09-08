@@ -32,6 +32,17 @@ MAX_TOOL_ROUNDS = 8
 TASK_TIMEOUT = 300
 
 
+def _mcp_filter_for(objective: str):
+    """Agent 任务同样按需注入 MCP 工具（任务目标命中触发词才暴露）。"""
+    try:
+        from ..tools.mcp_server import mcp_tool_filter
+
+        return mcp_tool_filter(str(objective or ""), [])
+    except Exception:
+        logger.exception("[Agent] MCP 工具可见性判定失败，按全部可见处理")
+        return None
+
+
 @dataclass
 class TaskStep:
     title: str
@@ -282,6 +293,7 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
                 chat=lambda ms: chat(ms),
                 chat_native=lambda ms, tools: chat_native(ms, tools),
                 max_loops=max_rounds,
+                tool_filter=_mcp_filter_for(task.objective),
             ),
             timeout=TASK_TIMEOUT,
         )
