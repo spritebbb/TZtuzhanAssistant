@@ -13,12 +13,57 @@ import {
   type KnowledgeOpinion,
 } from '../api/knowledge'
 
+import { listPersonas, type PersonaProfile } from '../api/personas'
+import { listShares, revokeShare, shareResource, type ShareItem } from '../api/shared'
+
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const documents = ref<KnowledgeDocument[]>([])
 const loading = ref(false)
 const uploading = ref(false)
+// L16 共享：只在用户明确点开某份文档的「分享」后才列出目标人格
+const sharingDocId = ref<number | null>(null)
+const shareTargets = ref<PersonaProfile[]>([])
+const shares = ref<ShareItem[]>([])
+const shareNote = ref('')
+
+function docGrants(docId: number) {
+  return shares.value
+    .filter((s) => s.resource_type === 'kb_document' && s.resource_id === docId)
+    .flatMap((s) => s.grants)
+    .filter((g) => !g.revoked)
+}
+
+function isSharedTo(docId: number, personaId: string): boolean {
+  return docGrants(docId).some((g) => g.grantee.endsWith(`::persona::${personaId}`))
+}
+
+async function toggleShare(doc: KnowledgeDocument) {
+  shareNote.value = ''
+  if (sharingDocId.value === doc.id) { sharingDocId.value = null; return }
+  sharingDocId.value = doc.id
+  if (!shareTargets.value.length) {
+    try {
+      const result = await listPersonas()
+      shareTargets.value = result.personas.filter((p) => p.id !== result.active.id)
+    } catch { /* 展示性内容，失败静默 */ }
+  }
+  try {
+    shares.value = await listShares()
+  } catch { /* 静默 */ }
+}
+
+async function shareTo(doc: KnowledgeDocument, persona: PersonaProfile) {
+  const ok = await shareResource('kb_document', doc.id, persona.id)
+  shareNote.value = ok ? `已分享给「${persona.name}」` : '分享失败，稍后再试'
+  if (ok) { try { shares.value = await listShares() } catch { /* 静默 */ } }
+}
+
+async function unshare(doc: KnowledgeDocument, personaId: string) {
+  const ok = await revokeShare('kb_document', doc.id, personaId)
+  if (ok) { try { shares.value = await listShares() } catch { /* 静默 */ } }
+}
 // L01 网页导入：提交 URL 后轮询任务状态
 const importUrl = ref('')
 const importing = ref(false)
@@ -226,7 +271,26 @@ watch(() => props.show, (show) => { if (show) void load() })
             <span class="sub">{{ doc.chunk_count }} 段 · {{ fmtSize(doc.size_bytes) }} · {{ doc.ts.slice(0, 10) }}</span>
           </div>
           <button class="delete" :disabled="extracting" title="让她读出观点" @click="extract(doc)">读出观点</button>
+          <button class="delete" title="分享给其他角色" @click="toggleShare(doc)">分享</button>
           <button class="delete" title="从书架上拿掉" @click="remove(doc)">拿掉</button>
+          <div v-if="sharingDocId === doc.id" class="share-row">
+            <p v-if="shareNote" class="notice">{{ shareNote }}</p>
+            <p v-if="!shareTargets.length" class="hint">还没有其他角色可以分享</p>
+            <template v-for="target in shareTargets" :key="target.id">
+              <button
+                v-if="isSharedTo(doc.id, target.id)"
+                class="delete"
+                :aria-label="`取消分享给${target.name}`"
+                @click="unshare(doc, target.id)"
+              >取消分享给 {{ target.name }}</button>
+              <button
+                v-else
+                class="delete"
+                :aria-label="`分享给${target.name}`"
+                @click="shareTo(doc, target)"
+              >分享给 {{ target.name }}</button>
+            </template>
+          </div>
         </div>
       </div>
 
@@ -269,7 +333,9 @@ h2 { margin: 5px 0 8px; font-size: 24px; font-weight: 600; }
 .notice { margin: 10px 0 0; color: var(--accent); font-size: 12px; }
 .error-text { margin: 10px 0 0; color: #e07070; font-size: 12px; }
 .entries { margin-top: 16px; overflow-y: auto; padding-bottom: 40px; }
-.doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--bg-card) 88%, transparent); }
+.doc-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 14px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--bg-card) 88%, transparent); }
+.share-row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; border-top: 1px dashed var(--border); }
+.share-row .hint, .share-row .notice { flex-basis: 100%; margin: 0; }
 .doc-format { flex-shrink: 0; width: 40px; text-align: center; padding: 4px 0; border-radius: 8px; background: var(--bg-hover); color: var(--accent); font-size: 11px; text-transform: uppercase; }
 .doc-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .doc-meta strong { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

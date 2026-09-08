@@ -19,10 +19,18 @@ router = APIRouter(prefix="/api/shared", tags=["shared-resources"])
 
 @router.post("")
 async def api_share(body: dict = Body(...)):
-    """分享一件资源给另一个人格（首期只读）。"""
+    """分享一件资源给另一个人格（首期只读）。
+
+    grantee 可传人格 id（推荐，服务端换算命名空间）或完整命名空间串。
+    """
     resource_type = str(body.get("resource_type") or "")
     resource_id = body.get("resource_id")
     grantee = str(body.get("grantee") or "").strip()
+    persona_id = str(body.get("grantee_persona") or "").strip()
+    if persona_id:
+        from ..core.persona_profiles import DEFAULT_USER_ID, scoped_user_id
+
+        grantee = scoped_user_id(DEFAULT_USER_ID, persona_id)
     if not resource_type or resource_id is None or not grantee:
         return JSONResponse({"ok": False, "error": "缺少 resource_type/resource_id/grantee"},
                             status_code=422)
