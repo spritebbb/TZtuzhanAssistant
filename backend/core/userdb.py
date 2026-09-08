@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 36  # v36: L02 creative subtypes and observation entries
+_SCHEMA_VERSION = 37  # v37: L05 domain trust ledger and snapshot
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -798,6 +798,26 @@ CREATE TABLE IF NOT EXISTS observation_entries (
     source_id   INTEGER,
     confidence  REAL NOT NULL DEFAULT 1.0,
     created_at  TEXT NOT NULL
+);
+-- L05 领域信任：五域事件账与派生快照（与 P2-01 共用唯一 reducer，禁止双算）
+CREATE TABLE IF NOT EXISTS domain_trust_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    event_id     INTEGER NOT NULL,
+    domain       TEXT NOT NULL,
+    delta        INTEGER NOT NULL DEFAULT 0,
+    rule_version INTEGER NOT NULL DEFAULT 1,
+    occurred_at  TEXT NOT NULL,
+    reverted_at  TEXT,
+    UNIQUE (user_id, event_id, domain)
+);
+CREATE TABLE IF NOT EXISTS domain_trust_snapshot (
+    user_id    TEXT NOT NULL,
+    domain     TEXT NOT NULL,
+    value      INTEGER NOT NULL DEFAULT 0,
+    version    INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, domain)
 );
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
@@ -1930,6 +1950,7 @@ class UserDB:
                 "greeting_variant_usage", "open_questions", "companion_requests",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
+                "domain_trust_events", "domain_trust_snapshot",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

@@ -340,6 +340,13 @@ def apply_relationship_event(user_id: str, event_id: int, rule_id: str) -> tuple
             (trust, intimacy, min(trust, intimacy), user_id),
         )
         db.conn.commit()
+        # L05：同一事件由唯一 reducer 同时算领域增量（禁止双入口叠加）
+        try:
+            from .domain_trust import apply_domain_event
+
+            apply_domain_event(user_id, int(event_id), rule_id)
+        except Exception:
+            logger.warning("[领域信任] 领域入账失败（不影响全局维度）：event={}", event_id)
         # 恋人达成检测（与旧 set_affection_absolute 同口径）
         u = db.get_user(user_id)
         if u and int(u["affection"] or 0) >= 75 and not u["lover_confirm"]:
