@@ -7,6 +7,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
+import TourPanel from './components/TourPanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
@@ -34,6 +35,7 @@ const activityOpen = ref(false)
 const sidebarOpen = ref(false)
 const personaOpen = ref(false)
 const moreOpen = ref(false)
+const tourOpen = ref(false)
 const moreQuery = ref('')
 const compactUi = ref(true)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
@@ -198,6 +200,7 @@ const moreTools = [
   { id: 'usage', label: '用量账本' }, { id: 'knowledge', label: '书架' },
   { id: 'agent', label: '任务代理' }, { id: 'archive', label: '归档当前对话' },
   { id: 'theme', label: '切换主题' }, { id: 'motion', label: '切换动效' },
+  { id: 'tour', label: '能力演示' },
   { id: 'settings', label: '设置' }, { id: 'reset', label: '重新开始' },
 ]
 const recentToolIds = ref<string[]>([])
@@ -229,6 +232,7 @@ function useMoreTool(id: string) {
   else if (id === 'archive') void archiveNow()
   else if (id === 'theme') toggleTheme()
   else if (id === 'motion') void toggleMotion().catch(() => window.alert?.('动效设置保存失败'))
+  else if (id === 'tour') tourOpen.value = true
   else if (id === 'settings') openSettings()
   else if (id === 'reset') openResetConfirm()
 }
@@ -412,6 +416,7 @@ onUnmounted(() => {
     <!-- 面板 -->
     <SettingsPanel :show="settingsOpen" :persona-name="activePersona.name" @close="closeSettings" />
     <AgentPanel :show="agentOpen" :persona-name="activePersona.name" @close="agentOpen = false" />
+    <TourPanel :show="tourOpen" :persona-name="activePersona.name" @close="tourOpen = false" @use="discussActivity" />
     <DiaryPanel :show="diaryOpen" :persona-name="activePersona.name" @close="diaryOpen = false" />
     <KnowledgePanel :show="knowledgeOpen" :persona-name="activePersona.name" @close="knowledgeOpen = false" />
     <MemoryPanel :show="memoryOpen" :persona-name="activePersona.name" @close="memoryOpen = false" />
