@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("TZTUZHAN_DATA_DIR", str(Path(__file__).parent / "_mcp_tmp"))
+os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_mcp_"))
 
 from backend.tools.mcp_client import McpClient, McpProtocolError
 
