@@ -185,6 +185,13 @@ class Config:
         self.agent_demo_mode: bool = os.getenv("AGENT_DEMO_MODE", "0").strip().lower() in {
             "1", "true", "on", "yes",
         }
+        # 允许注册本机/内网 MCP 服务器（AGENT_MCP_ALLOW_LOOPBACK=1）。
+        # 本地 MCP 服务器（npx xxx --port ...）几乎都跑在回环地址上，而默认
+        # SSRF 防护会拒绝内网/回环；这是显式的、仅作用于 MCP 注册的放行开关，
+        # 不影响 web_fetch 等其它出网路径。
+        self.agent_mcp_allow_loopback: bool = os.getenv(
+            "AGENT_MCP_ALLOW_LOOPBACK", "0"
+        ).strip().lower() in {"1", "true", "on", "yes"}
         # 允许读写操作的根目录白名单（分号分隔；文件/命令工具只允许在此范围内操作）
         self.agent_allowed_roots: list[str] = [
             p.strip() for p in os.getenv("AGENT_ALLOWED_ROOTS", "").split(";") if p.strip()

@@ -103,84 +103,10 @@ async def mcp_call_tool(request: Request):
             "isError": not result.ok,
         },
     }
-# ---- 简化 MCP 客户端：连接外部 MCP 服务器 ----
+# ---- 标准 MCP 客户端：连接外部 MCP 服务器（Streamable HTTP / HTTP+SSE）----
 
 # 已注册的外部服务器登记表（运行时内存态）
 _EXTERNAL_SERVERS: dict[str, dict] = {}
-
-
-# 不自动跟随重定向：每一跳都显式复检目标 URL（防 302 → 内网 SSRF）。
-# 与 plugins/web_fetch.py 的 _NoRedirect 同一策略：注册时 check_url 只校验了
-# 首跳地址，若 urllib 自动跟随后续 302 到内网，会绕过 SSRF 防线。
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, _newurl):
-        return None
-
-
-_MAX_REDIRECTS = 5
-
-
-def _request_json(url: str, *, method: str = "GET", body: bytes | None = None, timeout: int = 10) -> dict:
-    """向外部 MCP 服务器发 JSON-RPC 请求，逐跳复检重定向（防 SSRF）。
-
-    返回解析后的 JSON dict。重定向不自动跟随：每跳先 check_url 复检，
-    通过后手动拼接新 URL 继续；命中内网/超次数则抛异常。
-    """
-    import urllib.error
-    import urllib.parse
-
-    from .safety import build_pinned_opener, resolve_public_url
-
-    cur = url
-    for _ in range(_MAX_REDIRECTS + 1):
-        ok, err, resolved_ip = resolve_public_url(cur)
-        if not ok:
-            raise ValueError(f"拒绝访问不安全的服务器地址: {err}")
-        opener = build_pinned_opener(resolved_ip, _NoRedirect())
-        headers = {"Accept": "application/json"}
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(cur, data=body, headers=headers, method=method)
-        try:
-            with opener.open(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            # 不自动跟随的重定向会以 HTTPError(3xx) 抛出：取 Location 复检后手动跳转
-            if e.code in (301, 302, 303, 307, 308):
-                loc = e.headers.get("Location")
-                if not loc:
-                    raise RuntimeError("重定向缺少 Location") from e
-                cur = urllib.parse.urljoin(cur, loc)
-                continue
-            raise
-    raise RuntimeError("重定向次数过多")
-
-
-class McpClient:
-    """连接一个外部 MCP 服务器（HTTP + JSON-RPC），自动发现并注册远程工具。"""
-
-    def __init__(self, name: str, url: str) -> None:
-        self.name = name
-        self.url = url.rstrip("/")
-        self._tools: list[dict] = []
-
-    async def list_tools(self) -> list[dict]:
-        """请求远程服务器工具列表。"""
-        data = await asyncio.to_thread(
-            _request_json, self.url + "/tools", method="GET", timeout=10
-        )
-        self._tools = data.get("result", {}).get("tools", [])
-        return self._tools
-
-    async def call_tool(self, name: str, arguments: dict) -> str:
-        """调用远程工具，返回文本结果。"""
-        body = json.dumps({"name": name, "arguments": arguments}).encode("utf-8")
-        data = await asyncio.to_thread(
-            _request_json, self.url + "/call", method="POST", body=body, timeout=30
-        )
-        content = data.get("result", {}).get("content", [])
-        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
-        return "\n".join(parts)
 
 
 def _persist_servers() -> None:
@@ -266,27 +192,26 @@ async def restore_persisted_servers() -> int:
 
 
 async def register_external_server(name: str, url: str) -> bool:
-    """连接外部 MCP 服务器并把其工具注册进全局注册表。
+    """连接外部 MCP 服务器并把其工具注册进全局注册表（标准协议）。
 
+    传输自动探测：先试 Streamable HTTP，失败回退旧版 HTTP+SSE。
     注册名为 `{server_name}::{tool_name}`，避免与内置工具冲突。
+    安全：非回环地址沿用 SSRF 防护；回环/内网地址仅在
+    ``AGENT_MCP_ALLOW_LOOPBACK=1`` 时放行（本地 MCP 服务器需要）。
     """
-    # SSRF 防护：只允许公网 http(s) 地址（拒绝本机/内网/保留地址），
-    # 避免借后端探测内网服务（同 web_fetch 的校验策略）
-    from .safety import check_url
+    from .mcp_client import McpClient as _StandardMcpClient
 
-    url_ok, url_err = check_url(url)
-    if not url_ok:
-        logger.warning("[MCP] 拒绝注册不安全的服务器地址: {}（{}）", url, url_err)
-        return False
-    client = McpClient(name, url)
+    allow_private = bool(getattr(config, "agent_mcp_allow_loopback", False))
+    client = _StandardMcpClient(name, url, allow_private=allow_private)
     try:
-        tools = await client.list_tools()
-    except Exception:
+        tools = await asyncio.to_thread(client.list_tools)
+    except Exception as exc:
+        logger.warning("[MCP] 连接外部服务器失败: {}（{}）", name, exc)
         return False
 
     async def make_proxy(tool_name: str) -> Any:
         async def proxy(**kwargs: Any) -> str:
-            return await client.call_tool(tool_name, kwargs)
+            return await asyncio.to_thread(client.call_tool, tool_name, kwargs)
 
         return proxy
 
