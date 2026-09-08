@@ -129,7 +129,51 @@ class CoListsProvider(ContextProvider):
         )
 
 
-# ---- 注册表（首期仅共同清单一处；新增 provider 单独验收再登记）----
+class KnowledgeOpinionsProvider(ContextProvider):
+    """P3-02C 角色知识观点：只在相关话题下注入，并始终保留来源属性。"""
+
+    def __init__(self) -> None:
+        self.entry = ContextEntry(
+            id="knowledge_opinions", namespace="knowledge/opinion",
+            source_type="knowledge_opinion", priority=65.0,
+        )
+
+    def _to_candidate(self, opinion: dict) -> ContextCandidate:
+        text = f"《{opinion['filename']}》：{opinion['stance']}"
+        return ContextCandidate(
+            entry_id=self.entry.id,
+            source_id=str(opinion["id"]),
+            source_version=str(opinion["version"]),
+            text=text,
+            token_count=_estimate_tokens(text),
+            source_namespace=self.entry.namespace,
+            priority=self.entry.priority,
+            relevance=1.0,
+        )
+
+    def collect(self, user_id: str, query: str, state, turn_id: int) -> list[ContextCandidate]:
+        from .knowledge import relevant_opinions
+
+        return [self._to_candidate(item) for item in relevant_opinions(user_id, query)]
+
+    def refresh(self, user_id: str, source_id: str) -> ContextCandidate | None:
+        from .knowledge import get_opinion
+
+        opinion = get_opinion(user_id, int(source_id))
+        if opinion is None or opinion.get("status") != "active":
+            return None
+        return self._to_candidate(opinion)
+
+    def render(self, candidates: list[ContextCandidate]) -> str:
+        return (
+            "这些是你基于读过资料形成、且由来源片段支撑的角色观点：\n- "
+            + "\n- ".join(c.text for c in candidates)
+            + "\n它们是你的观点，不是对方的事实，也不能单独证明外部世界事实；"
+            "只在当前话题相关时自然表达，若资料与新证据冲突就承认可能需要更新。"
+        )
+
+
+# ---- 注册表 ----
 _PROVIDERS: dict[str, ContextProvider] = {}
 
 
@@ -140,6 +184,8 @@ def register_provider(provider: ContextProvider) -> None:
 def _ensure_default_providers() -> None:
     if "colists" not in _PROVIDERS:
         register_provider(CoListsProvider())
+    if "knowledge_opinions" not in _PROVIDERS:
+        register_provider(KnowledgeOpinionsProvider())
 
 
 # ---- 生命周期（context_lifecycle 表，读写都走 userdb 连接锁语义）----

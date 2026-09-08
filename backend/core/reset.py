@@ -33,6 +33,7 @@ _TABLES = (
     "relationship_events", "artifacts", "context_lifecycle",
     "character_life_events", "relationship_dimension_ledger", "user_preferences", "event_chains",
     "reunion_arcs",
+    "knowledge_opinion_sources", "knowledge_opinions",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions",
     "kb_documents", "kb_chunks", "unlocks",
