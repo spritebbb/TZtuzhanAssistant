@@ -44,6 +44,9 @@ FLAG_DEFAULTS = {
     # L03：长期关系气质（陪伙伴/玩闹/知心/成长/浪漫）。证据只来自明确事件，
     # derive_style 不回分数；关闭后 evidence 停止登记、derive 返回 forming。
     "relationship_style_enabled": True,
+    # F01：基于真实素材的问候与变体池。关闭后问候退回旧素材逻辑（离线叙事
+    # 与兜底池），不破坏原 gap 门控与并发去重；不选变体、不记冷却。
+    "greeting_material_enabled": True,
 }
 
 
