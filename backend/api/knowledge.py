@@ -50,6 +50,42 @@ async def api_knowledge_upload(file: UploadFile):
     return {"ok": True, "document": doc}
 
 
+class ImportUrlPayload(BaseModel):
+    url: str = Field(..., max_length=2048)
+
+
+@router.post("/import-url")
+async def api_import_url(payload: ImportUrlPayload):
+    """L01 网页导入：校验通过后返回 202 + job_id（worker 抓取解析，可取消）。"""
+    from ..core import document_import
+
+    uid = active_user_id()
+    try:
+        job = await asyncio.to_thread(document_import.start_url_import, uid, payload.url)
+    except document_import.DocumentImportError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    return JSONResponse({"ok": True, **job}, status_code=202)
+
+
+@router.get("/import-jobs/{job_id}")
+async def api_import_job(job_id: str):
+    from ..core import document_import
+
+    state = document_import.job_state(job_id)
+    if state is None:
+        return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
+    return {"ok": True, **state}
+
+
+@router.post("/import-jobs/{job_id}/cancel")
+async def api_cancel_import_job(job_id: str):
+    from ..core import document_import
+
+    if not document_import.cancel_job(job_id):
+        return JSONResponse({"ok": False, "error": "任务不存在或已结束"}, status_code=404)
+    return {"ok": True, "job_id": job_id, "status": "cancelled"}
+
+
 @router.get("/documents")
 async def api_knowledge_list():
     documents = await asyncio.to_thread(knowledge.list_documents, active_user_id())
@@ -58,8 +94,13 @@ async def api_knowledge_list():
 
 @router.delete("/documents/{doc_id}")
 async def api_knowledge_delete(doc_id: int):
-    if not await asyncio.to_thread(knowledge.delete_document, active_user_id(), doc_id):
+    from ..core import document_import
+
+    uid = active_user_id()
+    if not await asyncio.to_thread(knowledge.delete_document, uid, doc_id):
         return {"ok": False, "error": "文档不存在"}
+    # L01：源删清阅读段（F05 地图由活动删除路径处理）
+    await asyncio.to_thread(document_import.forget_for_document, uid, doc_id)
     return {"ok": True}
 
 

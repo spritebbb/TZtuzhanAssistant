@@ -49,7 +49,7 @@ _TABLES = (
     "relationship_versions", "greeting_variant_usage", "open_questions",
     "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
     "wrapup_outbox", "reading_segments", "reading_bookmarks",
-    "activity_draft_receipts",
+    "activity_draft_receipts", "document_segments", "document_import_jobs",
     "kb_documents", "kb_chunks", "unlocks",
 )
 
