@@ -33,7 +33,7 @@
 | v8 | 技能系统 | skills/*.md 技能目录 + 关键词自动匹配注入 + skill_search/skill_load 工具（LLM 并行搜索验证通过） |
 | v9 | 插件系统 | plugins/*.py 自动发现 + 启动加载注册工具（currency 示例插件验证通过） |
 | v10 | 插件系统 v2 | 快照恢复修复卸载残留（CODE-REVIEW #15）+ PLUGIN_META 元信息 + 管理 API/前端界面 + 定时任务/系统提示/HTTP 路由/消息钩子（docs/archive/PLUGIN-SYSTEM-V2.md） |
-| v11 | 工具全面插件化 | 11 个工具模块迁入 plugins/ 统一管理（memory 保留内置），register_all 收敛，见 docs/PLUGIN-SYSTEM-V2.md 第五节 |
+| v11 | 工具全面插件化 | 11 个工具模块迁入 plugins/ 统一管理（memory 保留内置），register_all 收敛，见 docs/archive/PLUGIN-SYSTEM-V2.md 第五节 |
 
 ## 插件开发规范
 
@@ -44,8 +44,8 @@ HTTP 路由（`ctx.route(method, path, handler)` → `/plugins/{插件名}/…`�
 用户消息钩子（`ctx.on_user_message(fn)`）、回复钩子（`ctx.on_reply(fn)`）。
 可选 `PLUGIN_META = {name, version, description, author}` 供管理界面展示。
 启动时自动加载，改文件热重载；设置面板「插件」区可启停/重载。
-编写规范见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)；
-完整示例见 `plugins/currency.py`，详细设计见 `docs/PLUGIN-SYSTEM-V2.md`。
+编写规范见 [PLUGIN-DEVELOPMENT.md](PLUGIN-DEVELOPMENT.md)；
+完整示例见 `plugins/currency.py`，详细设计见 `docs/archive/PLUGIN-SYSTEM-V2.md`。
 
 ## 架构原则
 
