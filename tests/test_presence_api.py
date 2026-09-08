@@ -48,7 +48,7 @@ async def test_presence_labels() -> None:
         weekday_15 = datetime(2026, 9, 9, 15, 0).astimezone()  # 2026-09-09 是周三
         act = schedule.current_activity(uid, now=weekday_15)
         assert act["activity"] == "afternoon_stay", str(act)
-        assert act["activity_label"] == "待在研究所"
+        assert act["activity_label"] == "过她自己的下午"
         assert act["location_label"] == "研究所"
 
         # 睡眠时段（周三 04:00）→ sleeping / 小屋

@@ -290,15 +290,17 @@ def current_presence(user_id: str) -> str:
 
 
 # 活动与场所的中文标签（稳定活动 id → 展示文案；场所来自世界正典 P-00/01/02）
+# 标签需与「在{场所}{活动}」的拼接形态通读（如「在研究所翻资料」），
+# 因此活动文案里不能再重复场所名。
 ACTIVITY_LABELS = {
     "research_reading": "翻资料",
     "rest_break": "休息",
-    "afternoon_stay": "待在研究所",
+    "afternoon_stay": "过她自己的下午",
     "evening_work": "忙她自己的研究",
     "late_night": "熬夜打游戏",
     "weekend_slow": "过慢悠悠的周末",
     "weekend_stay": "度周末",
-    "weekend_evening": "晚间研究",
+    "weekend_evening": "做晚间研究",
 }
 LOCATION_LABELS = {"P-00": "城里", "P-01": "研究所", "P-02": "小屋"}
 
