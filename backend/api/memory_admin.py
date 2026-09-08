@@ -344,6 +344,29 @@ async def api_learning_revoke(candidate_id: int):
     return {"ok": True, **result}
 
 
+@router.get("/experience-metrics")
+async def api_experience_metrics(days: int = Query(30, ge=1, le=90)):
+    """P3-05B 本地质量统计：只返回聚合计数（无正文），可关可清。"""
+    from ..core.experience_metrics import clear_user, enabled, summary
+
+    uid = active_user_id()
+    if not enabled():
+        return {"ok": True, "enabled": False, "items": []}
+    items = await asyncio.to_thread(summary, uid, days=days)
+    return {"ok": True, "enabled": True, "items": items}
+
+
+@router.delete("/experience-metrics")
+async def api_experience_metrics_clear():
+    """用户主动清理本人格统计（统计不属于关系包，删除即清空）。"""
+    from ..core.experience_metrics import clear_user
+
+    uid = active_user_id()
+    removed = await asyncio.to_thread(clear_user, uid)
+    logger.info("[统计] 用户清理本地统计 {} 条", removed)
+    return {"ok": True, "removed": removed}
+
+
 @router.get("/domain-trust")
 async def api_domain_trust_get():
     """L05 领域信任：高层可依赖程度 + 每域最多 2 条来源（不含内部权重）。"""

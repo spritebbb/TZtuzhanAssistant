@@ -1084,6 +1084,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 state={"ephemeral": ephemeral},
             )
             list_ctx = context_selection.assemble()
+            # P3-05B 统计：语境来源选择计数（只记 entry id，不记内容）
+            if not ephemeral:
+                try:
+                    from .experience_metrics import record as _metric
+
+                    for item in context_selection.explain()[:5]:
+                        _metric(user_id, "source_pick", str(item.get("id", ""))[:60])
+                except Exception:
+                    pass
         else:
             from .colists import list_context
 
@@ -1922,6 +1931,13 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             if recent and any(_too_similar(reply, r) for r in recent):
                 logger.info("[pipeline] 检测到重复回复，重写一次")
                 rewrite_used = True
+                # P3-05B 统计：重复率（只记命中窗口大小，不记正文）
+                try:
+                    from .experience_metrics import record as _metric
+
+                    _metric(user_id, "repetition", f"recent{len(recent)}")
+                except Exception:
+                    pass
                 messages.append(
                     {
                         "role": "system",
@@ -1966,6 +1982,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             persona_id=user_id,
         )
         checked = inspect_reply(reply, context=hygiene_ctx)
+        if checked.action == "rewrite":
+            # P3-05B 统计：规则失败计数（只记规则名，不记正文）
+            try:
+                from .experience_metrics import record as _metric
+
+                for rule in (checked.rule_ids or [])[:3]:
+                    _metric(user_id, "rule_failure", str(rule)[:60])
+            except Exception:
+                pass
         if checked.action == "accept":
             reply = checked.text
         elif checked.action == "rewrite" and not rewrite_used:
