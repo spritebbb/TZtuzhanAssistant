@@ -20,13 +20,6 @@ class ToolSpec(BaseModel):
     max_output_chars: int = 4000     # 结果截断上限
 
 
-class ToolCall(BaseModel):
-    """一次工具调用请求。"""
-
-    tool: str
-    args: dict = Field(default_factory=dict)
-
-
 class ToolResult(BaseModel):
     """工具执行结果。"""
 
@@ -38,15 +31,3 @@ class ToolResult(BaseModel):
     # ---- Agent 支持 ----
     confirmed: str = "auto"      # auto/allow/deny/blocked/timeout
     elapsed_ms: int = 0          # 执行耗时（毫秒）
-
-
-class McpServerInfo(BaseModel):
-    """已注册的外部 MCP 服务器信息。"""
-
-    name: str
-    transport: str  # stdio / sse / streamable-http
-    command: Optional[str] = None
-    args: list = Field(default_factory=list)
-    url: Optional[str] = None
-    tools_count: int = 0
-    status: str = "connected"  # connected / error / not_connected

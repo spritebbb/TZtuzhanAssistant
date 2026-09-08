@@ -100,7 +100,7 @@ class Config:
         # 尽早写入进程环境变量：sentence-transformers / huggingface_hub 在 import 时
         # 读取一次 HF_ENDPOINT，必须保证在它被导入前就位（config 是最早被导入的模块）。
         os.environ["HF_ENDPOINT"] = self.hf_endpoint
-        # 记忆引擎总开关：关闭时完全退回旧版（TF-IDF + sqlite-vec）行为
+        # 记忆引擎总开关：关闭时完全退回 SQLite + TF-IDF 行为
         self.memory_v2: bool = os.getenv("MEMORY_V2", "1") != "0"
         # Mem0 记忆管理器开关
         self.memory_mem0: bool = os.getenv("MEMORY_MEM0", "1") != "0"

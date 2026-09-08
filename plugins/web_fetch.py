@@ -24,7 +24,7 @@ _MAX_REDIRECTS = 5
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """不自动跟随重定向：每一跳都显式复检目标 URL（防 302 → 内网 SSRF）。"""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, _newurl):
         return None
 
 

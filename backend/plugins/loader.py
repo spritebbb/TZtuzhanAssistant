@@ -431,8 +431,3 @@ async def watch_plugins(plugins_dir: Path | None = None) -> None:
 async def start_watch(plugins_dir: Path | None = None):
     """启动热加载后台任务（供 app startup 调用），返回 task。"""
     return asyncio.create_task(watch_plugins(plugins_dir))
-
-
-def plugin_tool_names() -> list[str]:
-    """返回所有已注册工具的完整列表（用于校验插件是否生效）。"""
-    return [t.name for t in ToolRegistry.list()]

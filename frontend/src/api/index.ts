@@ -39,10 +39,6 @@ async function resolveBaseUrl(): Promise<string> {
   return baseUrl
 }
 
-export function getBaseUrl(): string {
-  return baseUrl
-}
-
 export async function ensureBaseUrl(): Promise<string> {
   return resolveBaseUrl()
 }

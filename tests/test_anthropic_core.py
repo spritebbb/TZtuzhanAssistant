@@ -110,7 +110,6 @@ def test_initiative_eligibility() -> int:
     passed = 0
     passed += _ok("初识不主动", initiative._STAGE_ORDER["初识"] < initiative._STAGE_ORDER[initiative._MIN_STAGE])
     passed += _ok("熟悉可主动", initiative._STAGE_ORDER["熟悉"] >= initiative._STAGE_ORDER[initiative._MIN_STAGE])
-    passed += _ok("每日去重键存在", isinstance(initiative._proactive_key("u", "2026-09-02"), str))
     return passed
 
 

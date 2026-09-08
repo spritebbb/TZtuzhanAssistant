@@ -164,13 +164,3 @@ def sealing_summary(bundle: dict) -> dict:
         "letter": sealing.get("letter") or "",
         "filename_suggestion": f"sealing-{(sealing.get('sealed_at') or '')[:10]}.json",
     }
-
-
-def load_sealing_bundle(path_text: str) -> dict:
-    """校验一个封存文件仍是合法的标准关系包（供恢复前预检）。"""
-    data = json.loads(path_text)
-    if data.get("kind") != "tuzhan-relationship-bundle":
-        raise BundleError("这不是一个有效的封存纪念包（kind 不匹配）")
-    if not isinstance(data.get("sealing"), dict):
-        raise BundleError("封存清单缺失（sealing 键）")
-    return data

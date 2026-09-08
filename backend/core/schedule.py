@@ -24,11 +24,6 @@ from .userdb import db
 TEMPLATE_VERSION = 1
 KV_SCHEDULE = "state:schedule"
 
-# 正典场所 id（docs/persona/世界正典.md）
-LOCATIONS = ("P-00", "P-01", "P-02")
-PRESENCE = ("home", "mobile", "announced_offline")
-
-
 @dataclass(frozen=True)
 class ScheduleBlock:
     """静态周模板时段块（14.5 ScheduleBlock 的代码形态）。"""

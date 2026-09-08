@@ -29,9 +29,6 @@ from .mood_rules import (
     weather_base as get_weather_base,
 )
 
-# ---- 心情映射（规则来自 mood_rules，可配置）----
-MOOD_LEVELS = tuple(tuple(x) for x in get_mood_levels())
-
 # ---- 天气 → 心情基线映射（可配置）----
 # 不再在 import 时固化：每次读取都走 mood_rules 的实时加载（带 mtime 缓存），
 # 改 data/mood_rules.json 的 weather_base 后无需重启即可生效

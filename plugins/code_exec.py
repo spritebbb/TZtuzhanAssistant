@@ -12,7 +12,6 @@ PLUGIN_META = {
 import asyncio
 import os
 import sys
-import traceback
 
 from backend.tools.base import ToolRegistry, tool_failure
 from backend.tools.safety import check_command, check_cwd

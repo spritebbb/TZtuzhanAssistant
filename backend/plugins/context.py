@@ -163,10 +163,6 @@ def dispatch_route(plugin: str, method: str, path: str) -> Callable[..., Any] | 
     return _ROUTES.get(plugin, {}).get((method.strip().upper(), path))
 
 
-def plugin_route_count() -> int:
-    return sum(len(v) for v in _ROUTES.values())
-
-
 # ---- 卸载清理 ----
 
 def cleanup_plugin(name: str) -> None:

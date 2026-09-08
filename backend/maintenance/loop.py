@@ -80,19 +80,6 @@ def backup() -> Path | None:
         return None
 
 
-def _backup_sqlite(src: Path, dst: Path) -> None:
-    """用 sqlite3 在线备份 API 拷贝单个库（一致快照）。"""
-    import sqlite3
-
-    src_conn = sqlite3.connect(str(src))
-    dst_conn = sqlite3.connect(str(dst))
-    try:
-        src_conn.backup(dst_conn)
-    finally:
-        dst_conn.close()
-        src_conn.close()
-
-
 def _referenced_image_names() -> set[str]:
     """所有会话里仍被 bot/user 消息引用的图片文件名集合。
 

@@ -10,8 +10,6 @@ from ..llm import chat
 from ..log import logger
 from ..userdb import db
 
-# 会话空闲判定：离上一条消息超过该分钟数，视为上一场聊完（可提炼话题）
-TOPIC_IDLE_MINUTES = 30
 # 提炼需要的最少消息条数
 TOPIC_MIN_MESSAGES = 4
 

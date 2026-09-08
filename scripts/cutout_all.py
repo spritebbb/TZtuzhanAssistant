@@ -16,7 +16,6 @@ from PIL import Image
 from rembg import remove, new_session
 
 ROOT = Path(__file__).resolve().parent.parent
-U2NET = "u2net"
 
 
 def _bbox_of_largest_figure(img: Image.Image, bg_thresh: int = 245) -> tuple[int, int, int, int]:
@@ -77,7 +76,7 @@ def main() -> int:
             l, t, r, b = crop
             pad_x = int((r - l) * 0.06)
             pad_y = int((b - t) * 0.06)
-            crop = (max(0, l - pad_x), max(0, t - pad_y), min(src_w := Image.open(src).width, r + pad_x),
+            crop = (max(0, l - pad_x), max(0, t - pad_y), min(Image.open(src).width, r + pad_x),
                     min(Image.open(src).height, b + pad_y))
         else:
             crop = None

@@ -65,20 +65,10 @@ def _encode_message(message: ProactiveMessage) -> str:
     return json.dumps(message, ensure_ascii=False, separators=(",", ":"))
 
 
-def _proactive_key(user_id: str, day: str) -> str:
-    return f"initiative:{day}:{user_id}"
-
-
 def _proactive_done_today(user_id: str) -> bool:
     from .proactive_policy import active_done_today
 
     return active_done_today(user_id)
-
-
-def _mark_proactive(user_id: str) -> None:
-    from .proactive_policy import mark_active_done
-
-    mark_active_done(user_id, "initiative")
 
 
 def _last_chat_ts(user_id: str) -> float | None:

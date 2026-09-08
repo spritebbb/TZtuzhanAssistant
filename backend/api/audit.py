@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ..tools.audit import recent_log, query_log, count_log, clear_log
+from ..tools.audit import query_log, count_log, clear_log
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 

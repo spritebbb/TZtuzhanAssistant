@@ -17,9 +17,6 @@ from .userdb import db
 _IDLE_SESSION_MINUTES = 30
 _IDLE_MIN_NEW = 4
 
-# 话题记忆：跨会话延续上次话题的兜底判定（与 _IDLE_SESSION_MINUTES 一致）
-_TOPIC_IDLE_MINUTES = 30
-
 # 重复回复检测：与最近几条菟菚回复高度相似时，重写一次（避免复读机）。
 # 流式模式下通过 stream_cb 推送该特殊标记，assistant.py 转发为 {"reset": true}，
 # 前端收到后清空当前气泡重新累积。
@@ -40,11 +37,6 @@ _memory_tasks: set = set()  # asyncio.Task
 # 单次记忆向量化/清理的超时（秒）：超时只停止等待，to_thread 线程无法强杀，
 # 但绝不阻塞回复返回
 _MEMORY_INDEX_TIMEOUT = 90
-
-
-def pending_memory_tasks() -> int:
-    """当前仍在运行的后台记忆任务数（供状态/调试展示）。"""
-    return len(_memory_tasks)
 
 
 # D5 强模型路由：写作/代码/长文类请求走强模型（LLM_MODEL_STRONG 已配置时）
@@ -1049,12 +1041,11 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.exception("[pipeline] 话题延续注入失败")
 
     # 4.0) 日常对话里的特殊日子识别：用户这句若在告知/约定某个日子，自动记住
-    newly_saved = []
     if not ephemeral:
         try:
             from .date_memory import extract_from_message
 
-            newly_saved = await extract_from_message(user_id, text, mock=mock)
+            await extract_from_message(user_id, text, mock=mock)
         except Exception:
             logger.exception("[pipeline] 特殊日子识别失败")
     from .userdb import get_today_important_dates

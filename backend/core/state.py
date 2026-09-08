@@ -415,10 +415,6 @@ def load_state(user_id: str, *, create_if_missing: bool = True) -> AgentState:
     )
 
 
-def _derive_energy(user_id: str, mood_updated: str | None) -> int:
-    return _derive_energy_details(user_id, mood_updated)[0]
-
-
 def _derive_energy_details(user_id: str, mood_updated: str | None) -> tuple[int, bool, str | None]:
     now = datetime.now()
     base = _derive_base_energy(user_id, mood_updated, now=now)
@@ -507,7 +503,6 @@ def apply_impulse(
     user_id: str,
     *,
     emotion_delta: int = 0,
-    energy_delta: int = 0,
     affection_delta: int = 0,
     affection_reason: str = "",
     emotional_hit: str | None = None,
