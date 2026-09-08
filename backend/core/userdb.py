@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 32  # v32: F04 focus wrapup outbox
+_SCHEMA_VERSION = 33  # v33: F05 reading map segments and bookmarks
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -723,6 +723,35 @@ CREATE TABLE IF NOT EXISTS wrapup_outbox (
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
     UNIQUE (user_id, activity_id)
+);
+-- F05 共读方案 C：阅读地图与书签解锁。segments 只建空框架（按文档文本稳定
+-- 切分），bookmarks 由用户确认后才算数；finish 是唯一解锁事件。
+CREATE TABLE IF NOT EXISTS reading_segments (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    activity_id    INTEGER NOT NULL,
+    segment_index  INTEGER NOT NULL,
+    source_start   INTEGER NOT NULL DEFAULT 0,
+    source_end     INTEGER NOT NULL DEFAULT 0,
+    source_hash    TEXT NOT NULL DEFAULT '',
+    title          TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'locked',  -- locked/current/read/legacy_position
+    completed_at   TEXT,
+    UNIQUE (user_id, activity_id, segment_index)
+);
+CREATE TABLE IF NOT EXISTS reading_bookmarks (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    segment_id     INTEGER NOT NULL,
+    origin         TEXT NOT NULL DEFAULT 'user',    -- user / tuzhan_draft
+    user_view      TEXT NOT NULL DEFAULT '',
+    tuzhan_view    TEXT NOT NULL DEFAULT '',
+    summary        TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'empty',   -- empty / draft / confirmed
+    source_version TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    UNIQUE (user_id, segment_id)
 );
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
@@ -1832,7 +1861,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
-                "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox",
+                "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

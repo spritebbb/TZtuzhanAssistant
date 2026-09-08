@@ -163,3 +163,79 @@ export async function generateActivityViewpointDraft(activityId: number): Promis
   if (!response.ok || !data.ok) throw new Error(data.error || '草稿没有生成，稍后再试或代她写下这一段')
   return String(data.draft ?? '')
 }
+
+// ---- F05 阅读地图与书签 ----
+
+export interface ReadingBookmark {
+  id: number
+  segment_id: number
+  origin: string
+  user_view: string
+  tuzhan_view: string
+  summary: string
+  status: 'empty' | 'draft' | 'confirmed'
+}
+
+export interface ReadingSegment {
+  id: number
+  segment_index: number
+  title: string
+  status: 'locked' | 'current' | 'read' | 'legacy_position'
+  source_hash: string
+  bookmark?: ReadingBookmark | null
+}
+
+export interface ReadingMap {
+  activity_id: number
+  segments: ReadingSegment[]
+  total: number
+  read_count: number
+  confirmed_bookmarks: number
+}
+
+export async function getReadingMap(activityId: number): Promise<ReadingMap> {
+  const response = await apiFetch(`/api/activities/${activityId}/reading-map`)
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '阅读地图读取失败')
+  return data as ReadingMap
+}
+
+export async function finishSegment(
+  activityId: number, index: number, expectedVersion?: string,
+): Promise<ReadingMap> {
+  const response = await apiFetch(`/api/activities/${activityId}/segments/${index}/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expected_version: expectedVersion ?? null }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '完成这一段失败')
+  return data as ReadingMap
+}
+
+export async function getBookmarkDraft(activityId: number, segmentId: number) {
+  const response = await apiFetch(
+    `/api/activities/${activityId}/segments/${segmentId}/bookmark-draft`, { method: 'POST' })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '草稿生成失败')
+  return data.draft as { segment_id: number; excerpt: string; user_view: string; tuzhan_view: string }
+}
+
+export async function saveBookmark(
+  activityId: number, segmentId: number,
+  payload: { user_view: string; tuzhan_view?: string; summary?: string },
+): Promise<ReadingBookmark> {
+  const response = await apiFetch(
+    `/api/activities/${activityId}/segments/${segmentId}/bookmark`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_view: payload.user_view,
+        tuzhan_view: payload.tuzhan_view ?? '',
+        summary: payload.summary ?? '',
+      }),
+    })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '书签保存失败')
+  return data.bookmark as ReadingBookmark
+}

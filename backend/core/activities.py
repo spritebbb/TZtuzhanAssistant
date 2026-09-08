@@ -183,6 +183,13 @@ def start_reading(user_id: str, document_id: int) -> dict:
         detail = _detail_locked(user_id, activity_id)
     if detail is None:
         raise ActivityError("共读创建失败")
+    # F05：开书事务一次建阅读地图（幂等；重开同书不重复建图）
+    try:
+        from .reading_map import ensure_map
+
+        ensure_map(user_id, activity_id)
+    except Exception as exc:
+        logger.warning("[共读] 阅读地图建图失败（不影响开书）：{}", exc)
     return detail
 
 
@@ -559,6 +566,15 @@ def _upsert_book_summary_locked(
 ) -> None:
     """写入/版本化共同书摘。detail 需含 filename。调用方持有锁与事务。"""
     summary = _compile_book_summary(user_id, activity_id, detail["filename"])
+    # F05：全书读完时把确认过的书签确定性汇总进来（未填段只报省略计数）
+    try:
+        from .reading_map import compile_summary
+
+        map_summary = compile_summary(user_id, activity_id)
+        if map_summary and "没有留下确认过的书签" not in map_summary:
+            summary = f"{summary}\n\n{map_summary}"
+    except Exception as exc:
+        logger.warning("[共读] 阅读地图汇总失败（保留原书摘）：{}", exc)
     title = f"《{detail['filename']}》共同书摘"
     db.conn.execute(
         "INSERT INTO artifacts "

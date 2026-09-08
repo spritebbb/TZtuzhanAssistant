@@ -48,7 +48,7 @@ _TABLES = (
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions", "greeting_variant_usage", "open_questions",
     "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
-    "wrapup_outbox",
+    "wrapup_outbox", "reading_segments", "reading_bookmarks",
     "kb_documents", "kb_chunks", "unlocks",
 )
 
