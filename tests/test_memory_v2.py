@@ -4,11 +4,14 @@
 运行：python -m tests.test_memory_v2
 """
 import asyncio
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_memory_v2_"))
 
 PASS = 0
 FAIL = 0
