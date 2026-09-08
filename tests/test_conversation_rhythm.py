@@ -104,7 +104,7 @@ def test_goodnight_cancels_without_penalty() -> int:
     db.ensure_user(uid)
     origin = db.add_message(uid, "assistant", "晚安前想说的话")
     add_followup(uid, origin_turn_id=origin, hint="晚安前想说的话", now=NOW)
-    result = on_goodnight(uid)
+    result = on_goodnight(uid, now=NOW)
     assert result["cancelled_followups"] == 1 and result["penalty"] is None
     # 取消后 ready 队列为空；下次 ready 扫描会把过期/取消实例清掉
     assert ready_followups(uid, now=NOW + timedelta(minutes=30)) == []
