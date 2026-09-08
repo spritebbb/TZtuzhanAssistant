@@ -62,6 +62,7 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("state:emotion_memory", "state", "情绪记忆（跨天连续的心情素材）", "runtime", export=True),
     KvKeySpec("state:emotion_archive", "state", "情绪记忆归档（可回看的历史情绪）", "runtime", export=True),
     KvKeySpec("state:event_memory", "state", "事件记忆（她记着的最近互动信号）", "runtime", export=True),
+    KvKeySpec("attention:topics", "attention_state", "§17.1 注意力主题（≤5 个 topic id + 权重，无正文）", "runtime"),
 )
 
 

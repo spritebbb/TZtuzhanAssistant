@@ -642,16 +642,30 @@ async def _arbited_proactive(
     produce: Callable[[], Awaitable[str | None]],
     on_delivered: Callable[[], None] | None = None,
     on_failed: Callable[[], None] | None = None,
+    necessity: dict | None = None,
 ) -> str | None:
     """统一闸门：所有主动源共用一次原子占位、一份每日额度、一处失败冷却。
 
     produce() 只做文案生成（due 条件检查由调用方在闸门前完成，条件成立但
     生成失败/为空/投递失败都会留下失败冷却）。返回投递的文本或 None。
+
+    §17.1：调用方可附 necessity 评分（expression_policy.score_necessity），
+    未达 0.6 的候选在本闸门前静默淘汰（用户消息永不门控，只作用于主动源）。
     """
     from .reset import reset_in_progress
 
     if reset_in_progress():
         return None
+    if necessity is not None:
+        try:
+            from .expression_policy import gate_proactive_candidate
+
+            if not gate_proactive_candidate(necessity):
+                logger.info("[主动仲裁] {} necessity {:.2f} 未达标，淘汰",
+                            source, float(necessity["necessity"]))
+                return None
+        except Exception:
+            logger.exception("[主动仲裁] necessity 评分异常，按放行处理")
     last = _last_chat_ts(user_id)
     if last is not None and time.time() - last < idle_minutes * 60:
         return None
