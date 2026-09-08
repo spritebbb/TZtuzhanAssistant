@@ -53,9 +53,9 @@ def test_steps_shape_and_order() -> int:
             assert step.get(key), (step.get("id"), key)
         assert isinstance(step["tools"], list) and step["tools"]
     ids = [s["id"] for s in steps]
-    # Agent 主秀（并行子代理 / 浏览器）必须在后半段
-    assert ids.index("fanout") >= len(ids) // 2, ids
-    assert ids.index("browser") > ids.index("fanout"), ids
+    # 前三步是日常（记忆/联网/动手），Agent 主秀必须排在其后
+    assert ids[:3] == ["memory", "web", "files"], ids
+    assert ids.index("fanout") >= 3 and ids.index("browser") > ids.index("fanout"), ids
     print("[OK] 脚本结构完整、主秀步骤靠后")
     return 0
 
