@@ -114,7 +114,7 @@ def test_chat_sse_frame_contract() -> None:
     async def fake_process(user_id, text, *, mock=False, merged_msg=False,
                            ephemeral=False,
                            stream_cb=None, image_cb=None, progress_cb=None,
-                           explain_cb=None):
+                           explain_cb=None, draft_cb=None):
         assert ephemeral is False
         from backend.tools.confirm import current_sse_push
 
