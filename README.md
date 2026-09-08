@@ -5,12 +5,12 @@
 <h1 align="center">菟菚桌面助手</h1>
 
 <p align="center">
-  <strong>有记忆、有性格、能调用工具的本地 AI 助手</strong><br />
-  桌面端 / 浏览器端 · 单用户本机运行 · 人格、记忆与工具链一体化
+  <strong>有记忆、有性格、有情绪、能与你共同成长的本地 AI 伙伴</strong><br />
+  桌面端 / 浏览器端 · 单用户本机运行 · 人格、记忆、关系与工具链一体化
 </p>
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0"><img src="https://img.shields.io/github/v/release/spritebbb/TZtuzhanAssistant?display_name=tag&style=for-the-badge&color=2f855a" alt="GitHub Release" /></a>
   <img src="https://img.shields.io/badge/Windows-10%2F11-0078D4?style=for-the-badge&logo=windows" alt="Windows 10/11" />
   <img src="https://img.shields.io/badge/Python-3.11--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11 to 3.13" />
   <img src="https://img.shields.io/badge/FastAPI-%2B%20Vue%203-009688?style=for-the-badge&logo=fastapi" alt="FastAPI and Vue 3" />
@@ -18,6 +18,7 @@
 
 <p align="center">
   <a href="#-快速开始">快速开始</a> ·
+  <a href="#-v300-更新亮点">v3.0 亮点</a> ·
   <a href="#-核心能力">核心能力</a> ·
   <a href="#-部署指南">部署指南</a> ·
   <a href="#-局域网访问与安全">局域网安全</a> ·
@@ -26,26 +27,40 @@
 
 ---
 
-## 📦 v2.5.0 已发布
+## 📦 v3.0.0 已发布
 
 | 推荐下载 | 适合谁 | 下载 |
 |---|---|---|
-| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-v2.5.0.zip) |
-| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-Full-v2.5.0-Large.zip) |
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-v3.0.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-Full-v3.0.0-Large.zip) |
 
 > 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0"><strong>查看完整 Release 说明 →</strong></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0"><strong>查看完整 Release 说明 →</strong></a>
 </p>
+
+## ✨ v3.0.0 更新亮点
+
+v3.0 相比 v2.5 完成了「关系连续性」大版本演进（M8 + M9 前三波次），菟菚从"有记忆的助手"升级为"有内在状态的伙伴"：
+
+- 💞 **关系双维模型**：好感度升级为 **信任 × 亲密** 双维度，8 个子阶段时刻自然展开；关系会随真实互动经历季节与版本演化。
+- 🎭 **七情绪状态机**：喜悦、信任、恐惧、惊讶、悲伤、厌恶、愤怒七情绪独立衰减；菟菚对你的态度由情绪 × 信任 × 亲密合成，同样的话在不同关系状态下有不同的语气。
+- 🌸 **真实事件驱动**：纪念日与自然季节调制心情；久别重逢以真实生活事件为叙事来源，无事件时诚实留白、不编造"你去哪了"。
+- 🤝 **双向约定与偏好**：对称约定（她也有承诺要守）+ 用户偏好教学（"别叫我全名"这类规矩说一遍就记住）。
+- 📖 **有出处的知识**：知识库观点带来源片段与相关性注入，失效自动撤销；联网结论经多源 2+1 求证后才说出口。
+- 🗡️ **工具安全合同**：工具执行具备取消、步数上限与副作用去重；关键操作逐步确认。
+- 🕰️ **时间感**：日程状态机 + 跨进程小时滴答，菟菚知道现在是什么时段、什么季节。
+- 🏛️ **M8 长期回望**：写给未来的信、30/100/365 天关系快照、双视角叙事、阶段封存与告别、"不同版本的我们"检查点、梦境与平行可能（虚构严格隔离）。
+- 🛡️ **可靠性底座**：输出卫生门禁（所有可见回复统一质检）、每日可验证备份（三个 SQLite 库 + 媒体 + 人格 + 知识源）、八任务键模型路由、人格行为签名评测。
 
 ## ✨ 核心能力
 
 | | |
 |---|---|
-| 🎭 **人格热切换**<br />直接加载 `.md` 人格卡；每套人格的会话、记忆、知识库和界面设置相互隔离。 | 🧠 **长期记忆**<br />SQLite + 本地向量检索，保存画像、事实、话题与重要日期。 |
+| 🎭 **人格热切换**<br />直接加载 `.md` 人格卡；每套人格的会话、记忆、知识库和界面设置相互隔离。 | 🧠 **可信长期记忆**<br />SQLite + 本地向量检索；每条记忆有来源与置信度，可纠正、可衰减、可固定保留。 |
 | 🧰 **工具与 Agent**<br />插件热加载、MCP 接入、工具循环与逐步确认，关键动作可控。 | 💬 **实时流式对话**<br />SSE 打字机输出、工具进度、图片生成与随时停止。 |
-| 💖 **关系与心情**<br />好感度、昵称、关怀回应与天气驱动心情，形成持续互动。 | 🛡️ **本机优先安全**<br />默认仅回环监听；LAN 请求受 token、Host 白名单与 SSRF 防护约束。 |
+| 💖 **关系与情绪**<br />信任×亲密双维关系、七情绪状态机、季节与纪念日调制，形成连续的关系历史。 | 🛡️ **本机优先安全**<br />默认仅回环监听；LAN 请求受 token、Host 白名单与 SSRF 防护约束。 |
 
 ## 🚀 快速开始
 
@@ -61,19 +76,28 @@
 ## 🧩 功能一览
 
 - 🎭 **人格热切换**：点击顶部人格名称打开人格替换助手，加载与原卡相同格式的 `.md` 文件；旧卡保存在 `data/personas/`
-- 🧠 **长期记忆**：SQLite 存储用户画像、关系事实（五元组）、话题延续、重要日子；本地 BGE 向量语义检索
-- 💖 **好感度系统**：昵称、关心、分享、道歉、夸奖等互动实时增减，语义感知 + 关键词兜底双通道
-- ⛅ **心情系统**：绑定城市天气，心情随当日天气波动
-- 🔎 **联网搜索**：博查 API 优先，bing/ddg 兜底；TTL 缓存
+- 🧠 **长期记忆**：SQLite 存储用户画像、关系事实（五元组）、话题延续、重要日子；本地 BGE 向量语义检索；每条事实带来源、置信度与验证时间，误记可纠正、琐碎记忆自然衰减、重要记忆可固定保留
+- 💞 **信任×亲密关系**：真实互动按事件记账，单维每日限额防刷；阶段与子阶段由双维派生，好感度兼容为 `min(trust, intimacy)`
+- 🎭 **七情绪状态机**：独立衰减的情绪状态 + 情绪×关系态度矩阵，深夜/低精力自动降低追问意愿
+- 🤝 **对称约定**：你们互相许下的承诺都有状态机（她失约也会被记账）；开放约定自动出现在成长总览
+- 📣 **用户偏好教学**：告诉菟菚一条规矩（如"别用表情包回我"），她记住并在后续表达中遵守
+- ⛅ **心情与时间感**：绑定城市天气，纪念日与自然季节调制情绪基线；日程状态机感知工作日/休息日节奏
+- 🔎 **联网搜索**：博查 API 优先，bing/ddg 兜底；TTL 缓存；动态结论经独立站点 2+1 求证
+- 📚 **知识库**：文档→分块→观点→来源四层结构，观点带来源片段，内容失效自动撤销，支持导出恢复
 - 🎨 **文生图**：SiliconFlow Qwen-Image，SSE 回传图片
-- 👁️ **识图**：拖拽或粘贴图片，视觉模型描述内容
+- 👁️ **识图**：拖拽或粘贴图片，视觉模型描述内容，推理过程不外泄到聊天
 - 🧰 **插件化工具链**：工具全部以 `plugins/*.py` 插件形式加载，支持热加载（无需重启）、每步确认机制、外部 MCP 服务器接入
 - 🤖 **外部 Agent 桥**：`codex_run` / `dsh_run` 可派发独立任务给本机 Codex CLI / DSH（非交互 exec 模式，每步确认）
 - 💬 **流式输出**：SSE 打字机效果 + 工具执行进度实时推送，Markdown 渲染，可随时停止
 - 📂 **独立会话 + 归档**：每套人格拥有独立的当前会话、归档、关系状态、长期记忆与知识库
-- 🕐 **主动性引擎**：久未聊且关系够近时主动开口，支持桌面通知
-- 👋 **久别问候**：长时间未见再次打开时主动问候
-- 🖼️ **静态立绘**：桌面窗口显示菟菚人设图
+- 🕐 **主动性引擎**：久未聊且关系够近时主动开口，统一仲裁器协调天气/约定/纪念日/未完成心事等来源，支持桌面通知
+- 📬 **写给未来的我们**：按日期/目标/事件解锁的信件
+- 📸 **关系快照与检查点**：30/100/365 天确定性快照；"不同版本的我们"命名检查点，升级前后行为可比较
+- 👥 **双视角叙事**：共同经历双方各留一段感想，观点不入事实召回
+- 🏛️ **阶段封存与重逢**：关系阶段封存只导出不删除，附告别信；久别重逢以真实生活事件为来源，无事件诚实留白
+- 💭 **梦境与平行可能**：共同世界观与"另一种可能"产物，`<fiction_story>` 虚构隔离，只有显式收藏的能留下
+- 🛡️ **输出卫生门禁**：所有用户可见生成出口（聊天/主动消息/日记/观点/重逢）共用同一套质检与脱敏
+- 💾 **每日可验证备份**：三个 SQLite 库、媒体、人格与知识源自动快照，schema 升级前额外备份并可校验完整性
 
 人格名称默认从 Markdown 的第一个标题读取。卡片也可选用以下 front matter，让主题与音色首次加载时自动建立；之后可在 UI 中修改并随人格保存：
 
@@ -97,9 +121,9 @@ voice: zh-CN-XiaoyiNeural
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v2.5.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-v2.5.0.zip) |
-| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v2.5.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v2.5.0/TZtuzhanAssistant-Deploy-Full-v2.5.0-Large.zip) |
-| **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe（约 80 MB）](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v3.0.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-v3.0.0.zip) |
+| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v3.0.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.0.0/TZtuzhanAssistant-Deploy-Full-v3.0.0-Large.zip) |
+| **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
 
 > 两种一键部署包唯一区别是记忆 embedding 模型默认值：轻量版 `BAAI/bge-small-zh-v1.5`（约 100MB）；大杯版（文件名带 `Large`）`BAAI/bge-m3`（约 1.2GB，首次启动自动下载，中文语义检索效果最好）。这只是 `.env` 默认配置，装好后随时可手动改。
@@ -121,7 +145,7 @@ voice: zh-CN-XiaoyiNeural
 
 ### 步骤
 
-1. **下载**：到 [v2.5.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v2.5.0) 下载部署包：
+1. **下载**：到 [v3.0.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.0.0) 下载部署包：
    - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
    - `TZtuzhanAssistant-Deploy-Full-vX.X.X-Large.zip` — 大杯版 / Large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。
@@ -134,11 +158,15 @@ voice: zh-CN-XiaoyiNeural
 4. **填写 API Key**：在弹出的记事本里把 `LLM_API_KEY=sk-你的真实Key` 填好，保存关闭，回到黑窗口按任意键继续。
 5. 浏览器自动打开菟菚界面，开始聊天 🎉
 
+### 从 v2.x 升级
+
+直接用 v3.0 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到 v22（信任/亲密双维、情绪状态、事件链等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
+
 ### 日常使用
 
 - **启动**：双击 `Start-Tuzhan.bat`（后端已在运行时会直接复用并打开页面）
 - **停止**：双击 `Stop-Tuzhan.bat`，或关闭任务栏上名为 `Tuzhan-backend` 的最小化窗口
-- **数据备份**：聊天记录、记忆、图片都存在包内 `data/` 目录；schema 升级前程序会把 3 个 SQLite 库快照到 `data/backups/schema-*` 并做完整性校验，日常仍建议在删除/更新包前备份整个目录
+- **数据备份**：聊天记录、记忆、图片都存在包内 `data/` 目录；schema 升级前程序会把 SQLite 库快照到 `data/backups/schema-*` 并做完整性校验，每日另有可验证备份，日常仍建议在删除/更新包前备份整个目录
 - 立绘、人格、技能、插件都已内置，无需额外配置
 
 > 脚本找不到 Python？重装 Python 并勾选 PATH 后**重开**启动脚本即可。
@@ -192,6 +220,13 @@ cd frontend; npm run dist:win
 
 - 后端入口支持 `python -m backend.main --host 127.0.0.1 --port 8801 --debug`
 - 后端检测到 `frontend/dist` 存在时会自动托管前端页面，浏览器访问 `http://127.0.0.1:8801` 即可使用，无需单独跑前端 dev server
+- 运行测试（后端聚合回归 + 前端单测）：
+
+```powershell
+.venv\Scripts\python -m pytest tests/
+cd frontend; npm test
+```
+
 - 打包部署包（生成 `deploy/` 一键包）：
 
 ```powershell
@@ -205,6 +240,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build_deploy.ps1
 - 默认只监听本机回环地址（`127.0.0.1`），**局域网设备无法访问**，这是安全默认。
 - 如需局域网访问：手动用 `--host 0.0.0.0` 启动后端，并阅读 `.env.example` 中 `AGENT_REMOTE_TOKEN` / `AGENT_ALLOWED_HOSTS` 的说明配置鉴权 token。未配置 token 时，受控端点（写操作、MCP、Agent 桥、插件管理）对非本机来源一律拒绝。
 - 跨设备私用、公网临时演示、固定域名和云服务器的选型与安全清单见 [远程访问与公网部署方案](docs/DEPLOYMENT-OPTIONS.md)。
+- 所有用户可见的生成内容在送达前经过统一卫生检查；工具执行有取消、步数上限与副作用去重；联网结论经多源求证后才呈现。
 
 ## 常见问题
 
@@ -230,6 +266,9 @@ netstat -ano | findstr 8801
 
 **Q5：LLM 请求报代理错误**
 `.env` 中设置 `LLM_PROXY=off` 强制直连（本机有失效代理时）。
+
+**Q6：从 v2.x 升级后好感度/记忆还在吗**
+在。首次启动会自动迁移 schema 到 v22：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
 
 ---
 
@@ -258,17 +297,25 @@ backend/                      # Python 后端
 │   └── health.py             # 健康检查 + 优雅关停
 ├── core/                     # 对话核心
 │   ├── pipeline.py           # 对话主流程
-│   ├── llm.py                # LLM 客户端（主模型 + 感知层小模型）
+│   ├── llm.py                # LLM 客户端（主模型 + 感知层小模型 + 任务路由）
 │   ├── perception.py         # 语义感知（情绪/辱骂/关心等分类）
-│   ├── persona.py            # 人格注入
-│   ├── affection.py          # 好感度
-│   ├── mood.py               # 心情
+│   ├── persona.py            # 人格注入 + 人格切片编译
+│   ├── emotion_state.py      # 七情绪状态机（衰减/修复/门控）
+│   ├── affection.py          # 信任×亲密双维关系 + 阶段派生
+│   ├── mood.py               # 心情（天气 + 日历调制）
+│   ├── calendar_modulation.py# 纪念日与自然季节调制
+│   ├── conversation_rhythm.py# 对话节奏生命周期
+│   ├── event_chains.py       # 最小事件链引擎
+│   ├── user_preferences.py   # 用户偏好教学与解析
+│   ├── fact_decay.py         # 琐碎记忆自然衰减
+│   ├── fact_lifecycle.py     # 事实生命周期（来源/置信度/级联清理）
 │   ├── memory/               # 记忆系统（事实/话题/五元组/日期记忆 + 压缩）
-│   ├── userdb.py             # SQLite 数据层
-│   ├── search.py             # 联网搜索
+│   ├── userdb.py             # SQLite 数据层（schema v22）
+│   ├── search.py             # 联网搜索 + 多源求证
+│   ├── knowledge.py          # 知识库（文档/分块/观点/来源）
 │   ├── imagegen.py           # 文生图
 │   ├── vision.py             # 识图
-│   ├── initiative.py         # 主动性引擎
+│   ├── initiative.py         # 主动性引擎（统一仲裁器）
 │   ├── greeting.py           # 久别问候逻辑
 │   └── ...                   # 更多模块
 ├── tools/                    # 工具层
@@ -285,9 +332,9 @@ backend/                      # Python 后端
 │   └── session.py            # Codex/DSH 任务会话
 ├── session/                  # 会话存储
 │   └── store.py              # SQLite 会话/消息/归档持久化
+├── maintenance/              # 后台维护（周期任务/时间滴答/备份/快照）
 ├── skills/                   # 技能目录
-├── maintenance/              # 后台维护（周期任务/截图清理/备份）
-├── data/                     # 运行时数据（bot.db/sessions.db/截图等，不入库）
+├── data/                     # 运行时数据（SQLite 库/截图/备份等，不入库）
 └── models/                   # 数据模型
 
 frontend/                     # Electron + Vue 3 + TS 前端
@@ -309,6 +356,7 @@ frontend/                     # Electron + Vue 3 + TS 前端
     │   ├── Portrait.vue      # 立绘显示
     │   ├── ToolBar.vue       # 工具状态条
     │   ├── SettingsPanel.vue # 设置面板
+    │   ├── MemoryPanel.vue   # 记忆管理（来源/置信度/纠偏）
     │   ├── AgentPanel.vue    # 外部 Agent 任务面板
     │   └── ConfirmPanel.vue  # 逐步确认面板
     ├── api/                  # API 客户端
@@ -317,49 +365,11 @@ frontend/                     # Electron + Vue 3 + TS 前端
 
 scripts/                      # 工具脚本
 ├── build_deploy.ps1          # 一键部署包打包脚本
-└── deploy_assets/            # 部署模板（.env.example / 使用说明）
+└── deploy_assets/            # 部署模板（Start/Stop 脚本 / init_database / 使用说明）
 
 deploy/                       # 一键部署包产物（见 Releases）
 persona-菟菚.md               # 人格源文件
 ```
-
-## API
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/health` | 健康检查 |
-| POST | `/api/health/shutdown` | 优雅关停后端 |
-| GET | `/api/meta` | 工具状态 + 心情 |
-| GET / POST | `/api/personas` / `/api/personas/import` | 人格列表 / 加载 Markdown 人格卡 |
-| POST | `/api/personas/{id}/activate` | 热切换人格与独立数据空间 |
-| PATCH | `/api/personas/{id}` | 保存人格名称、主题和 TTS 音色 |
-| GET | `/api/sessions/{session_id}` | 会话消息 |
-| POST | `/api/sessions/archive` | 归档会话 |
-| GET | `/api/sessions/archives` | 归档列表 |
-| GET | `/api/sessions/archives/search?q=` | 归档关键词搜索 |
-| GET | `/api/sessions/archives/{archive_id}` | 归档详情 |
-| GET | `/api/sessions/{session_id}/export` | 导出会话 |
-| POST | `/api/chat` | SSE 流式对话（含工具进度事件） |
-| POST | `/api/vision` | 识图 |
-| GET | `/api/images/{name}` | 图片服务 |
-| GET | `/api/persona` / `/persona/cutout` / `/persona/full` | 立绘资源 |
-| GET/POST | `/api/config` | 配置读写 |
-| GET | `/api/tts` | 语音朗读 |
-| GET | `/api/greeting` | 久别问候 |
-| GET | `/api/initiative` | 主动消息投递（取走即清） |
-| GET | `/api/initiative/stream` | 主动消息 SSE 长连接 |
-| POST | `/api/confirm` | 逐步确认回复 |
-| GET | `/api/confirm/pending` | 待确认步骤 |
-| GET/POST | `/api/agent/tasks` | 外部 Agent 任务列表/创建 |
-| POST | `/api/agent/tasks/{id}/run` | 运行 Agent 任务 |
-| POST | `/api/agent/tasks/{id}/confirm-step` | 确认单步 |
-| POST | `/api/remote/task` | 受控远程任务 |
-| GET | `/api/audit/log` | 操作日志 |
-| GET/POST | `/api/mcp/servers` | 外部 MCP 服务器管理 |
-| GET | `/mcp/tools` | 列出内置 MCP 工具 |
-| POST | `/mcp/call` | 调用内置 MCP 工具 |
-| GET | `/api/plugins` | 插件列表 |
-| POST | `/api/plugins/{name}/enable` / `disable` / `reload` | 插件启停/热加载 |
 
 ## 配置项（.env）
 
@@ -372,6 +382,7 @@ persona-菟菚.md               # 人格源文件
 | `LLM_MODEL` | ✅ | 模型名（默认 `deepseek-chat`，任意 OpenAI 兼容模型均可） |
 | `LLM_PROXY` | | 设 `off` 强制直连（本机有失效代理时） |
 | `LLM_PERCEPTION_*` | | 感知层独立小模型（情绪/辱骂分类，留空复用主 LLM） |
+| `LLM_TASK_ROUTES` | | 按任务键路由不同模型（八任务键，旧配置兼容） |
 | `PERSONA_FILE` | | 人格文件路径（默认 `persona-菟菚.md`） |
 | `SEARCH_API_KEY` | | 搜索密钥（博查优先，留空自动回退 bing/ddg） |
 | `IMAGE_API_KEY` | | 文生图密钥（SiliconFlow，留空关闭生图） |
@@ -384,3 +395,14 @@ persona-菟菚.md               # 人格源文件
 | `AGENT_REMOTE_TOKEN` | | 受控端点鉴权 token（非回环来源必填） |
 | `AGENT_ALLOWED_HOSTS` | | 受控端点允许的 Host 白名单 |
 | `AGENT_CODEX_*` / `AGENT_DSH_*` | | 外部 Agent 桥配置（Codex CLI / DSH） |
+
+## 开发状态
+
+- 当前版本：**v3.0.0**（schema v22）
+- 后端聚合回归 93/93、前端 Vitest 69/69、vue-tsc 与生产构建通过（2026-09-08 全量实跑）
+- 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
+- 欢迎提 Issue 与 PR；提交请保持小切片、一个主题一个提交
+
+## 许可
+
+个人项目，仅供学习交流使用。
