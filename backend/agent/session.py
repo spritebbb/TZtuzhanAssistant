@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -24,7 +25,9 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..tools.service import run_tool_round
 
 _DB: Path = config.data_dir / "agent_tasks.db"
-_SCHEMA_VERSION = 1
+# 任务产物落地目录（用户可见的工作区；write_file 的允许根之内）
+_REPORT_DIR: Path = Path(__file__).resolve().parents[2] / "workspace" / "agent-reports"
+_SCHEMA_VERSION = 2
 
 # 单次执行的最大工具轮数（一个任务内 LLM 可自主调用工具的上限）
 MAX_TOOL_ROUNDS = 8
@@ -65,6 +68,7 @@ class AgentTask:
     created_at: float = 0.0
     updated_at: float = 0.0
     result: str = ""
+    artifact_path: str = ""     # 任务报告落盘路径（空=未落盘）
 
 
 def _connect() -> sqlite3.Connection:
@@ -97,6 +101,10 @@ def _init() -> None:
             conn.execute("ALTER TABLE agent_tasks ADD COLUMN step_confirmations TEXT NOT NULL DEFAULT '{}'")
             conn.commit()
             logger.info("[Agent] 已迁移 agent_tasks 表：补充 step_confirmations 列")
+        if "artifact_path" not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN artifact_path TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+            logger.info("[Agent] 已迁移 agent_tasks 表：补充 artifact_path 列")
         mark_schema_current(conn, _SCHEMA_VERSION)
         conn.commit()
     finally:
@@ -119,6 +127,7 @@ def _load(id: str) -> AgentTask | None:
             step_confirmations=step_cfg,
             status=row["status"], log=json.loads(row["log"]),
             result=row["result"], created_at=row["created_at"], updated_at=row["updated_at"],
+            artifact_path=(row["artifact_path"] if "artifact_path" in row.keys() else "") or "",
         )
         return task
     finally:
@@ -130,14 +139,14 @@ def _save(task: AgentTask) -> None:
     try:
         conn.execute(
             "INSERT OR REPLACE INTO agent_tasks (id, user_id, objective, plan, status,"
-            " step_confirmations, log, result, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " step_confirmations, log, result, created_at, updated_at, artifact_path)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (task.id, task.user_id, task.objective,
              json.dumps([s.__dict__ for s in task.plan], ensure_ascii=False),
              task.status,
              json.dumps(task.step_confirmations, ensure_ascii=False),
              json.dumps(task.log, ensure_ascii=False), task.result,
-             task.created_at, task.updated_at),
+             task.created_at, task.updated_at, task.artifact_path),
         )
         conn.commit()
     finally:
@@ -224,6 +233,67 @@ def _claim_running(task_id: str) -> bool:
         conn.close()
 
 
+
+# ---- 产物落地：任务报告写进工作区（用户可自行查看/带走）----
+
+def _write_report(task: AgentTask) -> str:
+    """把任务目标/计划/结果写成 markdown 落到 workspace/agent-reports/。
+
+    失败静默返回空串（落盘是加分项，不能影响任务本身的状态）。
+    """
+    try:
+        _REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(task.created_at or time.time()))
+        safe = "".join(ch for ch in task.objective[:20] if ch not in '\/:*?"<>|').strip()
+        path = _REPORT_DIR / f"{stamp}-{task.id}-{safe or 'task'}.md"
+        lines = [
+            f"# {task.objective}", "",
+            f"- 任务 ID：{task.id}",
+            f"- 状态：{task.status}",
+            f"- 创建时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(task.created_at or time.time()))}",
+            "", "## 计划", "",
+        ]
+        for i, step in enumerate(task.plan):
+            mark = {"allowed": "[已批准]", "denied": "[已拒绝]"}.get(
+                task.step_confirmations.get(str(i), "pending"), "[未确认]"
+            )
+            lines.append(f"{i + 1}. {mark} {step.title}" + (f"：{step.detail}" if step.detail else ""))
+        lines += ["", "## 结果", "", task.result or "（无结果）", ""]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return str(path)
+    except Exception:
+        logger.exception("[Agent] 任务报告落盘失败（不影响任务结果）")
+        return ""
+
+
+# ---- 聊天派活：从对话里识别「多步任务」意图 ----
+
+_DISPATCH_PATTERNS = (
+    re.compile(r"(?:帮我)?(?:分|按)(?:几步|步骤|多步)(?:来)?(?:做|完成|处理|搞|整理|查|写|安排)(?:一下)?[:：]?(.{2,60})"),
+    re.compile(r"(?:把|将)(.{2,40}?)(?:拆成|拆分为|分成)(?:几步|步骤)"),
+    re.compile(r"(?:用|走)(?:任务代理|agent)(?:来)?(?:做|处理|完成|整理|查|写|安排|跟进)[:：]?(.{2,60})"),
+    re.compile(r"(?:派|建|开)(?:一个|个)?(?:多步)?任务(?:给你|给菟菚)?[:：]?(.{2,60})"),
+)
+
+
+def detect_dispatch_request(text: str) -> str | None:
+    """识别「把这个当多步任务来做」的明确说法，返回任务目标（无则 None）。
+
+    只认封闭句式，避免把普通聊天误判成派活（宁缺毋滥）。
+    """
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean or len(clean) > 200:
+        return None
+    for pattern in _DISPATCH_PATTERNS:
+        match = pattern.search(clean)
+        if not match:
+            continue
+        objective = match.group(1).strip(" 　，,。.：:；;")
+        if len(objective) >= 2:
+            return objective
+    return None
+
+
 async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentTask:
     """执行任务：在计划上下文里让 LLM 自主调用工具逐步完成。
 
@@ -304,6 +374,9 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
             return fresh
         task.result = final
         task.status = "done"
+        task.artifact_path = _write_report(task) or task.artifact_path
+        if task.artifact_path:
+            task.result = f"{final}\n\n（完整报告已存到工作区：{task.artifact_path}）"
         task.log.append({"ts": time.time(), "type": "result", "content": final[:500]})
         task.updated_at = time.time()
         _save(task)
@@ -392,6 +465,7 @@ def to_dict(task: AgentTask) -> dict:
         "objective": task.objective,
         "plan": [s.__dict__ for s in task.plan],
         "status": task.status,
+        "artifact_path": task.artifact_path,
         "step_confirmations": task.step_confirmations,
         "pending_steps": pending_steps(task),
         "log": task.log[-20:],
