@@ -47,7 +47,7 @@ _TABLES = (
     "knowledge_opinion_sources", "knowledge_opinions",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions", "greeting_variant_usage", "open_questions",
-    "companion_requests", "thought_context_receipts", "humor_usage",
+    "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
     "kb_documents", "kb_chunks", "unlocks",
 )
 

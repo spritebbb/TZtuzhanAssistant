@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 30  # v30: L04 humor memory usage ledger
+_SCHEMA_VERSION = 31  # v31: F02 source links (narrative material interop)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -692,6 +692,23 @@ CREATE TABLE IF NOT EXISTS humor_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_humor_usage_user
     ON humor_usage(user_id, term_id);
+-- F02 素材互通（LC-1）：产物 → 真实来源的引用边。方向明确、无限递归禁止；
+-- 源消失即删边，下游不可再引用。owner_type/source_type 均为封闭白名单。
+CREATE TABLE IF NOT EXISTS source_links (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    owner_type     TEXT NOT NULL,   -- diary / research / promise / artifact
+    owner_id       INTEGER NOT NULL,
+    source_type    TEXT NOT NULL,   -- event / activity / fact / knowledge / character_life
+    source_id      INTEGER NOT NULL,
+    source_version TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    UNIQUE (user_id, owner_type, owner_id, source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_source_links_owner
+    ON source_links(user_id, owner_type, owner_id);
+CREATE INDEX IF NOT EXISTS idx_source_links_source
+    ON source_links(user_id, source_type, source_id);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1800,7 +1817,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
-                "thought_context_receipts", "humor_usage",
+                "thought_context_receipts", "humor_usage", "source_links",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

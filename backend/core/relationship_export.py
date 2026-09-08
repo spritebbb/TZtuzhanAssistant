@@ -32,7 +32,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests"),
+    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links"),
     "tasks": ("tasks", "promises", "open_questions"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -121,6 +121,7 @@ _REFERENCE_RULES = (
     # open_questions.source_message_id 指向 messages（不属于关系包）：按
     # memory_policy.source_message_ids 先例不建引用规则，恢复时统一清空。
     _rule_dynamic("artifacts", "source_id", "source_type"),
+    _rule_dynamic("source_links", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
     _rule_dynamic("pending_thoughts", "source_id", "source_type"),
 )
