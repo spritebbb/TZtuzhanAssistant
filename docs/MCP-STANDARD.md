@@ -13,27 +13,50 @@
 握手/调用全程走标准方法名：`initialize` → `notifications/initialized` → `tools/list` → `tools/call`；
 会话头 `Mcp-Session-Id` 自动回带，`MCP-Protocol-Version` 按协商版本发送。
 
-## 接一个服务器（三步）
+## 接一个服务器（推荐路径：stdio 桥，已为你配好）
 
-**1. 起服务器**（以 Playwright MCP 为例，本机 HTTP 模式）：
+生态里大多数 MCP 服务器（含 **Playwright MCP 的默认模式**）只讲 **stdio**，
+而菟菚讲 Streamable HTTP。所以配了一个 **stdio→HTTP 桥**，不用去猜服务器的
+HTTP 参数：
+
+```bat
+:: 双击运行（或命令行）
+scripts\start-mcp-playwright.bat
+```
+
+它等价于：
 
 ```bash
-npx @playwright/mcp@latest --port 8931
-# 具体 flag 以 `npx @playwright/mcp@latest --help` 为准：
-# 不同版本可能是 --port / --transport http / --host 组合
+.venv/Scripts/python.exe -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @playwright/mcp@latest
 ```
 
-**2. 允许回环地址**（本地服务器跑在 127.0.0.1，默认被 SSRF 防护拒绝）：
+然后：
 
-```ini
-# .env
-AGENT_MCP_ALLOW_LOOPBACK=1
+1. `.env` 里 `AGENT_MCP_ALLOW_LOOPBACK=1`（**已配**）；
+2. `data/mcp_servers.json` 已预登记 `playwright → http://127.0.0.1:8932/mcp`（**已配**）；
+3. **先跑桥脚本，再启动菟菚**（`start.bat`）——后端启动时自动连接并注册工具；
+   若顺序反了，在设置页重新点一次「添加」或重启后端即可。
+
+工具会以 `playwright::browser_navigate` 这类名字出现。
+
+### 换成别的 stdio 服务器
+
+```bash
+python -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @modelcontextprotocol/server-github
 ```
 
-> 这是**仅作用于 MCP 注册**的显式开关；`web_fetch` 等其它出网路径的 SSRF 防护不变。
+再把 `data/mcp_servers.json` 里的 url 保持不变（桥的地址不变），名称改成新的即可。
 
-**3. 注册**：设置页 → MCP 服务器 → 填名称 + URL（如 `http://127.0.0.1:8931/mcp`）。
-注册成功后远程工具以 `服务器名::工具名` 出现在工具表里，类别 `external`、**默认需要确认**。
+## 直接用服务器自带的 HTTP 模式（可选）
+
+若服务器自己支持 HTTP（如 `--port` 之类参数），也可以跳过桥，直接注册它的地址：
+
+| 传输 | 常见端点 |
+|---|---|
+| Streamable HTTP | `http://127.0.0.1:PORT/mcp` |
+| 旧版 HTTP+SSE | `http://127.0.0.1:PORT/sse` |
+
+菟菚会自动探测是哪一种。
 
 ## 演示时的注意点
 
@@ -44,14 +67,16 @@ AGENT_MCP_ALLOW_LOOPBACK=1
 
 ## 已验证 / 未验证
 
-**已验证**（`tests/test_mcp_client.py`，4 项）：
+**已验证**（`tests/test_mcp_client.py` 4 项 + `tests/test_mcp_stdio_bridge.py` 2 项）：
 - Streamable HTTP 的 JSON 与事件流两种响应；
 - 旧版 HTTP+SSE 自动回退；
 - 回环默认拒绝、`AGENT_MCP_ALLOW_LOOPBACK=1` 后放行；
-- 注册 → 工具进全局注册表（`external` + 需确认）→ 调用 → 卸载 端到端。
+- 注册 → 工具进全局注册表（`external` + 需确认）→ 调用 → 卸载 端到端；
+- stdio 桥：HTTP → 子进程 stdin/stdout 转发、通知 202、id 解耦、子进程退出返回结构化错误。
 
-**未验证**：真实第三方服务器（本机沙箱的 npm 代理不通，`npx` 取不到包）。
-请在你自己的终端按上面三步跑一次，确认：注册成功、工具列表出现、调用有结果。
+**未验证**：真实 Playwright MCP（本次设置环境无外网，`npx` 取不到包）。
+请在你自己终端双击 `scripts\start-mcp-playwright.bat`，看到 `🌉 MCP stdio 桥已启动`
+后启动菟菚，确认设置页里出现 `playwright::*` 工具并能调用。
 
 ## 排查
 
