@@ -95,11 +95,53 @@ def test_report_failure_does_not_break_task() -> int:
     return 0
 
 
+def test_schedule_and_retry() -> int:
+    """定时：到点才进 due；重试：失败后可重跑、受上限约束。"""
+    import time as _time
+
+    uid = "agent-sched-user"
+    task = asyncio.run(ag.create_task(uid, "分几步整理周报"))
+    # 未定时 → 不在 due 里
+    assert task.id not in ag.due_tasks()
+    # 排到 10 分钟后 → 不在 due；排到过去 → 在 due
+    ag.schedule_task(task.id, _time.time() + 600)
+    assert task.id not in ag.due_tasks()
+    ag.schedule_task(task.id, _time.time() - 1)
+    assert task.id in ag.due_tasks()
+    # 定时 = 明确授权 → 步骤自动放行
+    reloaded = ag._load(task.id)
+    assert all(v == "allowed" for v in reloaded.step_confirmations.values())
+
+    # 重试：造一个 failed 任务
+    async def boom(messages, **kwargs):
+        raise RuntimeError("模拟失败")
+
+    async def ok(messages, **kwargs):
+        return "第二次成功了。"
+
+    old_round = ag.run_tool_round
+    try:
+        ag.run_tool_round = boom
+        ag.confirm_all(task.id, True)
+        failed = asyncio.run(ag.run_task(task.id))
+        assert failed.status == "failed"
+        # 上限内的重试
+        ag.run_tool_round = ok
+        retried = asyncio.run(ag.retry_task(task.id))
+        assert retried.status == "done" and retried.attempt == 1, retried.status
+        assert any(item.get("type") == "retry" for item in retried.log)
+    finally:
+        ag.run_tool_round = old_round
+    print("[OK] 定时到点判定 + 重试（含 attempt 记录）")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_detect_dispatch_request()
         + test_report_written_on_success()
         + test_report_failure_does_not_break_task()
+        + test_schedule_and_retry()
     )
     if failed:
         print(f"\n=== Agent 派活与产物：{failed} 项失败 ===")

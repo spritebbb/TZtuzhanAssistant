@@ -27,7 +27,7 @@ from ..tools.service import run_tool_round
 _DB: Path = config.data_dir / "agent_tasks.db"
 # 任务产物落地目录（用户可见的工作区；write_file 的允许根之内）
 _REPORT_DIR: Path = Path(__file__).resolve().parents[2] / "workspace" / "agent-reports"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 # 单次执行的最大工具轮数（一个任务内 LLM 可自主调用工具的上限）
 MAX_TOOL_ROUNDS = 8
@@ -69,6 +69,9 @@ class AgentTask:
     updated_at: float = 0.0
     result: str = ""
     artifact_path: str = ""     # 任务报告落盘路径（空=未落盘）
+    scheduled_at: float = 0.0   # 定时执行时间戳（0=不定时）
+    attempt: int = 0            # 已尝试次数
+    max_attempts: int = 2       # 最多尝试次数（失败可重试）
 
 
 def _connect() -> sqlite3.Connection:
@@ -93,7 +96,10 @@ def _init() -> None:
             "plan TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'planned',"
             "step_confirmations TEXT NOT NULL DEFAULT '{}',"
             "log TEXT NOT NULL DEFAULT '[]', result TEXT NOT NULL DEFAULT '',"
-            "created_at REAL NOT NULL, updated_at REAL NOT NULL)"
+            "created_at REAL NOT NULL, updated_at REAL NOT NULL,"
+            "scheduled_at REAL NOT NULL DEFAULT 0,"
+            "attempt INTEGER NOT NULL DEFAULT 0,"
+            "max_attempts INTEGER NOT NULL DEFAULT 2)"
         )
         # 迁移：旧表无 step_confirmations 列时补列
         cols = {r[1] for r in conn.execute("PRAGMA table_info(agent_tasks)").fetchall()}
@@ -105,6 +111,12 @@ def _init() -> None:
             conn.execute("ALTER TABLE agent_tasks ADD COLUMN artifact_path TEXT NOT NULL DEFAULT ''")
             conn.commit()
             logger.info("[Agent] 已迁移 agent_tasks 表：补充 artifact_path 列")
+        if "scheduled_at" not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN scheduled_at REAL NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 2")
+            conn.commit()
+            logger.info("[Agent] 已迁移 agent_tasks 表：补充定时/重试列")
         mark_schema_current(conn, _SCHEMA_VERSION)
         conn.commit()
     finally:
@@ -128,6 +140,9 @@ def _load(id: str) -> AgentTask | None:
             status=row["status"], log=json.loads(row["log"]),
             result=row["result"], created_at=row["created_at"], updated_at=row["updated_at"],
             artifact_path=(row["artifact_path"] if "artifact_path" in row.keys() else "") or "",
+            scheduled_at=float(row["scheduled_at"] or 0) if "scheduled_at" in row.keys() else 0.0,
+            attempt=int(row["attempt"] or 0) if "attempt" in row.keys() else 0,
+            max_attempts=int(row["max_attempts"] or 2) if "max_attempts" in row.keys() else 2,
         )
         return task
     finally:
@@ -139,14 +154,16 @@ def _save(task: AgentTask) -> None:
     try:
         conn.execute(
             "INSERT OR REPLACE INTO agent_tasks (id, user_id, objective, plan, status,"
-            " step_confirmations, log, result, created_at, updated_at, artifact_path)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " step_confirmations, log, result, created_at, updated_at, artifact_path,"
+            " scheduled_at, attempt, max_attempts)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (task.id, task.user_id, task.objective,
              json.dumps([s.__dict__ for s in task.plan], ensure_ascii=False),
              task.status,
              json.dumps(task.step_confirmations, ensure_ascii=False),
              json.dumps(task.log, ensure_ascii=False), task.result,
-             task.created_at, task.updated_at, task.artifact_path),
+             task.created_at, task.updated_at, task.artifact_path,
+             task.scheduled_at, task.attempt, task.max_attempts),
         )
         conn.commit()
     finally:
@@ -209,6 +226,66 @@ async def create_task(user_id: str, objective: str) -> AgentTask:
         task.step_confirmations[str(i)] = "pending"
     _save(task)
     return task
+
+
+
+# ---- 定时调度与重试 ----
+
+def schedule_task(task_id: str, when_ts: float) -> AgentTask | None:
+    """把任务排到指定时间执行（用户显式定时 = 计划步骤视为已批准）。
+
+    步骤确认是防「她自己乱动」的闸门；用户主动定时属于明确授权，故自动放行，
+    但工具级确认钩子仍独立把关每一次调用。
+    """
+    task = _load(task_id)
+    if task is None:
+        return None
+    if task.status in ("running", "done", "cancelled"):
+        return task
+    task.scheduled_at = float(when_ts)
+    for i in range(len(task.plan)):
+        if task.step_confirmations.get(str(i), "pending") == "pending":
+            task.step_confirmations[str(i)] = "allowed"
+    task.updated_at = time.time()
+    _save(task)
+    logger.info("[Agent] 任务 {} 已排到 {}", task_id,
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when_ts)))
+    return task
+
+
+def due_tasks(now: float | None = None) -> list[str]:
+    """到点该跑的定时任务 id（status=planned 且 scheduled_at 已到）。"""
+    moment = time.time() if now is None else float(now)
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM agent_tasks WHERE status='planned'"
+            " AND scheduled_at > 0 AND scheduled_at <= ? ORDER BY scheduled_at",
+            (moment,),
+        ).fetchall()
+        return [str(r["id"]) for r in rows]
+    finally:
+        conn.close()
+
+
+async def retry_task(task_id: str) -> AgentTask | None:
+    """失败重试：重置为 planned 并立即重跑（保留历史日志，记一次尝试）。"""
+    task = _load(task_id)
+    if task is None:
+        return None
+    if task.status not in ("failed",):
+        return task
+    if task.attempt >= task.max_attempts:
+        logger.info("[Agent] 任务 {} 已达重试上限 {}，不再重试", task_id, task.max_attempts)
+        return task
+    task.attempt += 1
+    task.status = "planned"
+    task.scheduled_at = 0.0
+    task.log.append({"ts": time.time(), "type": "retry",
+                     "content": f"第 {task.attempt} 次重试"})
+    task.updated_at = time.time()
+    _save(task)
+    return await run_task(task_id)
 
 
 # ---- 执行 ----
@@ -399,6 +476,34 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
         return task
 
 
+
+# 调度循环持有的后台任务强引用（防 GC 静默取消）
+_scheduled_running: set = set()
+
+
+async def agent_scheduler_loop(interval: int = 60) -> None:
+    """定时任务调度：每 interval 秒检查一次到点的 planned 任务并开跑。
+
+    与主动性引擎同属后台 loop；失败只记日志，绝不影响主服务。
+    """
+    from ..core.reset import reset_in_progress
+
+    while True:
+        try:
+            if not reset_in_progress():
+                for task_id in due_tasks():
+                    task = _load(task_id)
+                    if task is None or task.status != "planned":
+                        continue
+                    logger.info("[Agent] 定时任务到点，开始执行：{}", task_id)
+                    job = asyncio.create_task(run_task(task_id))
+                    _scheduled_running.add(job)
+                    job.add_done_callback(_scheduled_running.discard)
+        except Exception:
+            logger.exception("[Agent] 定时任务调度检查失败")
+        await asyncio.sleep(max(10, int(interval)))
+
+
 def cancel_task(task_id: str) -> AgentTask | None:
     task = _load(task_id)
     if task is None:
@@ -466,6 +571,9 @@ def to_dict(task: AgentTask) -> dict:
         "plan": [s.__dict__ for s in task.plan],
         "status": task.status,
         "artifact_path": task.artifact_path,
+        "scheduled_at": task.scheduled_at,
+        "attempt": task.attempt,
+        "max_attempts": task.max_attempts,
         "step_confirmations": task.step_confirmations,
         "pending_steps": pending_steps(task),
         "log": task.log[-20:],
