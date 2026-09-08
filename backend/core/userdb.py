@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 35  # v35: L01 document segments and import jobs
+_SCHEMA_VERSION = 36  # v36: L02 creative subtypes and observation entries
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -786,6 +786,19 @@ CREATE TABLE IF NOT EXISTS document_import_jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+-- L02 观察日志：她/用户对真实生活的观察条目（来源可追溯，禁止无源补成纪实）
+CREATE TABLE IF NOT EXISTS observation_entries (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    observed_at TEXT NOT NULL,
+    observer    TEXT NOT NULL DEFAULT 'user',   -- user / assistant
+    content     TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',       -- event/activity/fact/character_life
+    source_id   INTEGER,
+    confidence  REAL NOT NULL DEFAULT 1.0,
+    created_at  TEXT NOT NULL
+);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -893,6 +906,18 @@ class UserDB:
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
         # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
+        # L02：共创壳增加 subtype 与结构化大纲列（旧库 ALTER 补齐）
+        writing_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(activity_writings)")
+        }
+        for column, definition in (
+            ("subtype", "TEXT NOT NULL DEFAULT 'story'"),
+            ("structured_outline_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("outline_version", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in writing_columns:
+                self.conn.execute(
+                    f"ALTER TABLE activity_writings ADD COLUMN {column} {definition}")
         kb_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(kb_documents)")}
         for column, definition in (
             ("source_url", "TEXT"),
@@ -1904,7 +1929,7 @@ class UserDB:
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
-                "document_segments", "document_import_jobs",
+                "document_segments", "document_import_jobs", "observation_entries",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

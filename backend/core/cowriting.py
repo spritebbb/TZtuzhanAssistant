@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 
@@ -56,10 +57,12 @@ def _turns_locked(user_id: str, activity_id: int) -> list[dict]:
     ]
 
 
-def _story_locked(user_id: str, activity_id: int) -> str:
+def _story_locked(user_id: str, activity_id: int, subtype: str = "story") -> str:
     row = db.conn.execute(
-        "SELECT content FROM artifacts WHERE user_id = ? AND artifact_type = 'co_story' "
-        "AND source_type = 'activity' AND source_id = ? AND status = 'active'",
+        "SELECT content FROM artifacts WHERE user_id = ? AND artifact_type IN "
+        "('co_story','co_world','co_character') "
+        "AND source_type = 'activity' AND source_id = ? AND status = 'active' "
+        "ORDER BY id DESC LIMIT 1",
         (user_id, activity_id),
     ).fetchone()
     return str(row["content"]) if row else ""
@@ -68,7 +71,8 @@ def _story_locked(user_id: str, activity_id: int) -> str:
 def _detail_locked(user_id: str, activity_id: int) -> dict | None:
     row = db.conn.execute(
         "SELECT a.id, a.kind, a.title, a.status, a.created_at, a.updated_at, a.completed_at, "
-        "w.premise FROM activities a JOIN activity_writings w "
+        "w.premise, w.subtype, w.structured_outline_json, w.outline_version "
+        "FROM activities a JOIN activity_writings w "
         "ON w.activity_id = a.id AND w.user_id = a.user_id "
         "WHERE a.user_id = ? AND a.id = ? AND a.kind = 'writing'",
         (user_id, activity_id),
@@ -77,8 +81,74 @@ def _detail_locked(user_id: str, activity_id: int) -> dict | None:
         return None
     result = dict(row)
     result["turns"] = _turns_locked(user_id, activity_id)
-    result["story"] = _story_locked(user_id, activity_id)
+    result["story"] = _story_locked(
+        user_id, activity_id, str(result.get("subtype") or "story"))
+    result["subtype_label"] = _SUBTYPE_LABEL.get(str(result.get("subtype") or "story"), "故事")
+    try:
+        result["outline"] = json.loads(str(result.pop("structured_outline_json") or "{}"))
+    except json.JSONDecodeError:
+        result["outline"] = {}
     return result
+
+
+# ---- L02 结构化大纲（世界观/角色设定） ----
+
+_OUTLINE_FIELDS: dict[str, tuple[str, ...]] = {
+    "world": ("locations", "rules", "timeline"),
+    "character": ("name", "traits", "relationships"),
+}
+
+
+def propose_outline(user_id: str, activity_id: int) -> dict:
+    """确定性大纲草稿：按 subtype 给空骨架，只带入用户已写的设定，不编内容。"""
+    with db._lock:
+        detail = _detail_locked(user_id, activity_id)
+    if detail is None:
+        raise ActivityError("这个共创不存在")
+    subtype = str(detail.get("subtype") or "story")
+    if subtype not in _OUTLINE_FIELDS:
+        raise ActivityError("只有世界观/角色设定才有结构化大纲")
+    current = detail.get("outline") or {}
+    draft = {}
+    for field in _OUTLINE_FIELDS[subtype]:
+        value = current.get(field)
+        if isinstance(value, list):
+            draft[field] = list(value)
+        else:
+            draft[field] = [] if field != "name" else [str(detail.get("title") or "")]
+    return {"subtype": subtype, "fields": list(_OUTLINE_FIELDS[subtype]),
+            "draft": draft, "version": int(detail.get("outline_version") or 0)}
+
+
+def confirm_outline(user_id: str, activity_id: int, outline: dict, *,
+                    expected_version: int | None = None) -> dict:
+    """用户确认大纲（版本化；版本不符拒绝，避免覆盖并发修改）。"""
+    now = _now()
+    with db._lock:
+        detail = _detail_locked(user_id, activity_id)
+        if detail is None:
+            raise ActivityError("这个共创不存在")
+        subtype = str(detail.get("subtype") or "story")
+        if subtype not in _OUTLINE_FIELDS:
+            raise ActivityError("只有世界观/角色设定才有结构化大纲")
+        current_version = int(detail.get("outline_version") or 0)
+        if expected_version is not None and int(expected_version) != current_version:
+            raise ActivityError("大纲已变化，请刷新后再确认")
+        clean = {}
+        for field in _OUTLINE_FIELDS[subtype]:
+            raw = (outline or {}).get(field)
+            if raw is None:
+                continue
+            items = raw if isinstance(raw, list) else [raw]
+            clean[field] = [str(item).strip()[:120] for item in items if str(item).strip()][:20]
+        db.conn.execute(
+            "UPDATE activity_writings SET structured_outline_json=?, outline_version=?, "
+            "updated_at=? WHERE user_id=? AND activity_id=?",
+            (json.dumps(clean, ensure_ascii=False), current_version + 1, now,
+             user_id, activity_id),
+        )
+        db.conn.commit()
+    return propose_outline(user_id, activity_id)
 
 
 def get_writing(user_id: str, activity_id: int) -> dict | None:
@@ -100,9 +170,17 @@ def list_writings(user_id: str, limit: int = 30) -> list[dict]:
         return [item for wid in ids if (item := _detail_locked(user_id, wid))]
 
 
-def start_writing(user_id: str, title: str, premise: str = "") -> dict:
-    """开一个新故事；同时只活跃一场（与共读/专注/目标互斥）。"""
-    title = _clean(title, _MAX_TITLE, "故事名", required=True)
+SUBTYPES: tuple[str, ...] = ("story", "world", "character")
+_SUBTYPE_LABEL = {"story": "故事", "world": "世界观", "character": "角色设定"}
+
+
+def start_writing(user_id: str, title: str, premise: str = "",
+                  subtype: str = "story") -> dict:
+    """开一个共创（故事/世界观/角色设定）；同时只活跃一场（与共读/专注/目标互斥）。"""
+    if subtype not in SUBTYPES:
+        raise ActivityError(f"未知共创类型：{subtype}")
+    label = _SUBTYPE_LABEL[subtype]
+    title = _clean(title, _MAX_TITLE, f"{label}名", required=True)
     premise = _clean(premise, _MAX_PREMISE, "开头设定")
     now = _now()
     with db._lock:
@@ -115,9 +193,10 @@ def start_writing(user_id: str, title: str, premise: str = "") -> dict:
         )
         activity_id = int(cur.lastrowid)
         db.conn.execute(
-            "INSERT INTO activity_writings (activity_id, user_id, premise, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (activity_id, user_id, premise, now, now),
+            "INSERT INTO activity_writings "
+            "(activity_id, user_id, premise, subtype, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (activity_id, user_id, premise, subtype, now, now),
         )
         db.conn.commit()
         return _detail_locked(user_id, activity_id)  # type: ignore[return-value]
@@ -260,16 +339,21 @@ def complete_writing(user_id: str, activity_id: int, *, create_artifact: bool = 
             "WHERE id = ? AND user_id = ?",
             (now, now, activity_id, user_id),
         )
+        artifact_type = {"story": "co_story", "world": "co_world",
+                         "character": "co_character"}.get(
+            str(detail.get("subtype") or "story"), "co_story")
         if create_artifact:
             # 版本化：后续改标题/重写时 version+1，旧内容不静默消失。
             db.conn.execute(
                 "INSERT INTO artifacts "
                 "(user_id, artifact_type, source_type, source_id, title, content, version, created_at, updated_at) "
-                "VALUES (?, 'co_story', 'activity', ?, ?, ?, 1, ?, ?) "
+                "VALUES (?, ?, 'activity', ?, ?, ?, 1, ?, ?) "
                 "ON CONFLICT(user_id, artifact_type, source_id) DO UPDATE SET "
                 "content = excluded.content, title = excluded.title, "
                 "version = artifacts.version + 1, updated_at = excluded.updated_at",
-                (user_id, activity_id, f"《{detail['title']}》共同故事", _compile_story(detail), now, now),
+                (user_id, artifact_type, activity_id,
+                 f"《{detail['title']}》共同{_SUBTYPE_LABEL.get(str(detail.get('subtype') or 'story'), '故事')}",
+                 _compile_story(detail), now, now),
             )
         from .relationship_events import record
 

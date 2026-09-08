@@ -17,6 +17,12 @@ router = APIRouter(prefix="/api/writings", tags=["writings"])
 class StartWritingBody(BaseModel):
     title: str
     premise: str = ""
+    subtype: str = "story"   # L02：story / world / character
+
+
+class OutlineBody(BaseModel):
+    outline: dict
+    expected_version: int | None = None
 
 
 class TurnBody(BaseModel):
@@ -49,11 +55,35 @@ async def api_get_writing(activity_id: int):
 async def api_start_writing(body: StartWritingBody):
     try:
         row = await asyncio.to_thread(
-            cowriting.start_writing, active_user_id(), body.title, body.premise
+            cowriting.start_writing, active_user_id(), body.title, body.premise,
+            subtype=body.subtype
         )
     except ActivityError as exc:
         return _error(exc)
     return {"ok": True, "writing": row}
+
+
+@router.post("/{activity_id}/outline-draft")
+async def api_outline_draft(activity_id: int):
+    """L02 结构化大纲草稿（世界观/角色设定）。"""
+    try:
+        draft = await asyncio.to_thread(
+            cowriting.propose_outline, active_user_id(), activity_id)
+    except ActivityError as exc:
+        return _error(exc)
+    return {"ok": True, **draft}
+
+
+@router.put("/{activity_id}/outline")
+async def api_confirm_outline(activity_id: int, body: OutlineBody):
+    """用户确认大纲（版本化）。"""
+    try:
+        saved = await asyncio.to_thread(
+            cowriting.confirm_outline, active_user_id(), activity_id, body.outline,
+            expected_version=body.expected_version)
+    except ActivityError as exc:
+        return _error(exc)
+    return {"ok": True, **saved}
 
 
 @router.post("/{activity_id}/turn")
