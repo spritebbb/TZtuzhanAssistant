@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, computed, ref, watch } from 'vue'
 import { apiFetch } from '../api'
 import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
 
@@ -227,6 +227,58 @@ function onTtsAutoPlayChange() {
   if (!ttsAutoPlay.value) stopTts()
 }
 
+// ---- 功能开关 ----
+interface FlagInfo { key: string; label: string }
+const flags = ref<Record<string, boolean>>({})
+const flagLabels = ref<Record<string, string>>({})
+const flagBusy = ref('')
+const flagMsg = ref('')
+
+const flagOrder: string[] = ['output_hygiene_enabled', 'context_registry_enabled', 'profile_enabled']
+const flagList = computed<FlagInfo[]>(() =>
+  Object.keys(flags.value)
+    .sort((a, b) => {
+      const ia = flagOrder.indexOf(a); const ib = flagOrder.indexOf(b)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+    .map(key => ({ key, label: flagLabels.value[key] || key }))
+)
+
+async function loadFlags() {
+  try {
+    const r = await apiFetch('/api/flags')
+    const d = await r.json()
+    if (d.ok) {
+      flags.value = d.flags || {}
+      flagLabels.value = d.labels || {}
+    }
+  } catch { /* ignore */ }
+}
+
+async function toggleFlag(key: string) {
+  const previous = flags.value[key]
+  flags.value[key] = !previous
+  flagBusy.value = key
+  flagMsg.value = ''
+  try {
+    const r = await apiFetch('/api/flags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: key, value: flags.value[key] }),
+    })
+    const d = await r.json()
+    if (!r.ok || !d.ok) throw new Error(d.error || '操作失败')
+    flags.value[key] = d.value
+    flagMsg.value = '✓ 已保存并立即生效'
+    setTimeout(() => flagMsg.value = '', 2000)
+  } catch (e: unknown) {
+    flags.value[key] = previous
+    flagMsg.value = '✗ ' + ((e as Error).message || e)
+  } finally {
+    flagBusy.value = ''
+  }
+}
+
 async function open() {
   ttsAutoPlay.value = getTtsAutoPlay()
   try {
@@ -258,6 +310,7 @@ async function open() {
   await loadMcpServers()
   await loadAuditLog()
   await loadPlugins()
+  await loadFlags()
   saveOk.value = false
   saveNote.value = ''
 }
@@ -395,6 +448,17 @@ function confirmLabel(c: string): string {
           </div>
           <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" :placeholder="config.mood_city || '留空不查天气'" /></div>
           <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" /></div>
+
+          <div class="sgroup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
+            功能开关
+          </div>
+          <div class="setting-hint" style="margin-left: 0;">改动立即生效并落盘，无需点「保存」</div>
+          <div v-for="f in flagList" :key="f.key" class="srow flag-row">
+            <label :title="f.key">{{ f.label }}</label>
+            <input type="checkbox" :checked="flags[f.key]" :disabled="flagBusy === f.key" @change="toggleFlag(f.key)" />
+          </div>
+          <div v-if="flagMsg" class="mcp-msg" :class="{ err: flagMsg.startsWith('✗') }">{{ flagMsg }}</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/></svg>
@@ -668,6 +732,9 @@ function confirmLabel(c: string): string {
 .mcp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mcp-msg { font-size: 0.78rem; color: var(--primary-text); margin: 4px 0; padding: 6px 10px; background: var(--primary-soft); border-radius: var(--radius-sm); }
 .mcp-msg.err { color: var(--danger); background: var(--danger-soft); }
+/* 功能开关：说明文案较长，label 放宽并允许换行 */
+.flag-row label { width: auto; flex: 1; line-height: 1.45; }
+.flag-row input[type=checkbox] { flex: 0 0 auto; }
 
 .plug-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; transition: border-color 0.15s; }
 .plug-item:hover { border-color: var(--border-light); }
