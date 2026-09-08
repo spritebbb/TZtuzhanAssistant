@@ -259,12 +259,63 @@ async def _test_api() -> None:
     print("[OK] API：上传/列表/格式拒绝/大小门控/删除闭环")
 
 
+async def _test_extract_opinions_api() -> None:
+    """书架面板「读出观点」：LLM 提炼 → save_opinion 落库 → 列表/撤销闭环。"""
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from backend.app import create_app
+    from backend.core.memory import vector_store
+
+    original_add, original_search = vector_store.add, vector_store.search
+    vector_store.add = _fake_vector_add
+    vector_store.search = _fake_vector_search
+
+    async def fake_chat(messages, **kw):
+        return ('{"opinions": [{"stance": "菟丝子靠吸器缠住宿主过活，实在聪明", '
+                '"spans": [0]}, {"stance": "无来源的编造观点", "spans": [99]}]}')
+
+    try:
+        with TestClient(create_app()) as client:
+            resp = client.post(
+                "/api/knowledge/upload",
+                files={"file": ("藤蔓研究.txt", "缠绕、吸器与宿主的关系。".encode("utf-8"), "text/plain")},
+            )
+            doc_id = resp.json()["document"]["id"]
+
+            with patch("backend.core.llm.chat", side_effect=fake_chat):
+                ex = client.post(f"/api/knowledge/documents/{doc_id}/extract-opinions")
+            assert ex.status_code == 200 and ex.json()["ok"], ex.text
+            opinions = ex.json()["opinions"]
+            # 有效观点落库；span 越界的编造观点被 save_opinion 来源校验拒绝
+            assert len(opinions) == 1, f"只有 1 条有效观点应落库: {opinions}"
+            assert "吸器" in opinions[0]["stance"]
+            assert opinions[0]["origin"] == "assistant"
+
+            # 列表端点能看到刚生成的观点
+            listed = client.get("/api/knowledge/opinions").json()["opinions"]
+            assert any(o["id"] == opinions[0]["id"] for o in listed)
+
+            # 撤销
+            assert client.delete(f"/api/knowledge/opinions/{opinions[0]['id']}").json()["ok"] is True
+            assert client.get("/api/knowledge/opinions").json()["opinions"] == []
+
+            # 不存在的文档 → 400
+            bad = client.post("/api/knowledge/documents/99999/extract-opinions")
+            assert bad.status_code == 400
+    finally:
+        vector_store.add, vector_store.search = original_add, original_search
+    print("[OK] 观点提炼 API：LLM 提炼落库/来源校验/列表/撤销闭环")
+
+
 async def _run() -> None:
     _test_chunking()
     _test_parse()
     _test_ingest_and_recall()
     _test_reset_coverage()
     await _test_api()
+    await _test_extract_opinions_api()
 
 
 if __name__ == "__main__":

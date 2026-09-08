@@ -84,6 +84,22 @@ async def api_opinion_create(doc_id: int, payload: OpinionCreate):
     return {"ok": True, "opinion": opinion}
 
 
+@router.post("/documents/{doc_id}/extract-opinions")
+async def api_opinion_extract(doc_id: int):
+    """书架面板「读出观点」：LLM 通读该文档，提炼带来源的观点（0-2 条）。"""
+    try:
+        opinions = await knowledge.extract_opinions(active_user_id(), doc_id)
+    except knowledge.KnowledgeError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+    except Exception:
+        logger.exception("[知识库] 观点提炼端点异常：doc {}", doc_id)
+        return {"ok": False, "error": "她还没读出什么观点，过会儿再试"}
+    if not opinions:
+        return {"ok": True, "opinions": [],
+                "note": "她还没读出什么想说的，过会儿再试试"}
+    return {"ok": True, "opinions": opinions}
+
+
 @router.delete("/opinions/{opinion_id}")
 async def api_opinion_revoke(opinion_id: int):
     ok = await asyncio.to_thread(knowledge.revoke_opinion, active_user_id(), opinion_id)

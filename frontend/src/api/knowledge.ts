@@ -36,3 +36,38 @@ export async function deleteKnowledgeDocument(id: number): Promise<boolean> {
   const data = await response.json()
   return Boolean(data.ok)
 }
+
+export interface KnowledgeOpinion {
+  id: number
+  document_id: number
+  filename: string
+  stance: string
+  origin: string
+  confidence: number
+  version: number
+  created_at: string
+  source_spans: Array<{ chunk_id: number; start_offset: number; end_offset: number }>
+}
+
+export async function listKnowledgeOpinions(): Promise<KnowledgeOpinion[]> {
+  const response = await apiFetch('/api/knowledge/opinions')
+  if (!response.ok) throw new Error('观点读取失败')
+  const data = await response.json()
+  return (data.opinions ?? []) as KnowledgeOpinion[]
+}
+
+export async function extractKnowledgeOpinions(docId: number): Promise<{ ok: boolean; opinions?: KnowledgeOpinion[]; note?: string; error?: string }> {
+  const response = await apiFetch(`/api/knowledge/documents/${docId}/extract-opinions`, { method: 'POST' })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    return { ok: false, error: data.error || '她还没读出什么观点，过会儿再试' }
+  }
+  return (await response.json()) as { ok: boolean; opinions?: KnowledgeOpinion[]; note?: string }
+}
+
+export async function revokeKnowledgeOpinion(id: number): Promise<boolean> {
+  const response = await apiFetch(`/api/knowledge/opinions/${id}`, { method: 'DELETE' })
+  if (!response.ok) return false
+  const data = await response.json()
+  return Boolean(data.ok)
+}
