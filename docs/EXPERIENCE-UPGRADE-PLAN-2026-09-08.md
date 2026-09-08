@@ -151,10 +151,10 @@
 
 ## 3. 执行纪律
 
-1. 每批次独立提交、独立 VERIFY；全量聚合（`pytest tests/` + vue-tsc + vitest + build）按用户拍板分**两个节点**向用户汇报：**节点一=批次 7 完成后**（覆盖批次 1–7：数据底座+表达层+消费层），**节点二=批次 13 完成后**（覆盖批次 8–13：接线层+摄入+治理+收尾加量）。节点处跑全量聚合+信箱汇报，批次内跑针对性测试。
+1. 每批次独立提交、独立 VERIFY；全量聚合（`pytest tests/` + vue-tsc + vitest + build）按用户拍板分**两个节点**向用户汇报：**节点一=批次 7 完成后**（覆盖批次 1–7：数据底座+表达层+消费层），**节点二=批次 15 完成后**（覆盖批次 8–15：接线层+摄入+治理+收尾加量+Q 轨道+D 类离线件）。节点处跑全量聚合+信箱汇报，批次内跑针对性测试。
 2. 新表必同步：`_SCHEMA`+`_SCHEMA_VERSION` bump、reset 清单、`relationship_export` 类别、`kv_registry` 登记、`schema_backup` 版本守卫测试。
 3. 遇设计冲突/参数疑义：先查 §14/§18/§21 契约；确无先例的在提交信息与信箱标注「自行补充的决策」及理由。
-4. 向用户汇报：两个节点（批次 7 后、批次 13 后）各一次，含提交号与测试结果；信箱同步节点汇报，最终节点后总汇报。
+4. 向用户汇报：两个节点（批次 7 后、批次 15 后）各一次，含提交号与测试结果；信箱同步节点汇报，最终节点后总汇报。
 5. 外部条件缺口（批次 D 类）：交付代码+测试+运行记录空位说明，不宣称真机/训练完成。
 
 ## 4. 状态回写表
@@ -173,6 +173,25 @@
 | 10 L02 | 待开工 | — | — |
 | 11 L05+L07+L08 | 待开工 | — | — |
 | 12 L16+P3-05+§17 | 待开工 | — | — |
-| 13 阈值与内容加量 | 待用户拍板 | — | — |
+| 13 阈值与内容加量 | 待开工（数值已拍板） | — | — |
+| 14 Q1–Q5 质量轨道 | 待开工（2026-09-08 用户拍板纳入） | — | — |
+| 15 D 类离线件（P3-03/04、L09/L10/L12/L13/L14/L15） | 待开工（2026-09-08 用户拍板：全部离线件照做，真机/训练/账号环节留运行记录空位） | — | — |
+
+### 批次14：Q1–Q5 横向质量轨道（2026-09-08 用户拍板纳入；五片独立提交）
+
+- **Q1 评测扩建**：`evals/schema.py`（EvalCase/fixture hash/scorer_version）+ `runner.py`（固定种子、配置快照）+ `replay.py`（脱敏回放）+ `blind_review.py`（A/B 盲评）；九组 fixture（签名/边界/双门槛/情绪/防御/拒绝/久别/知识不确定/工具失败）每组正常+边界+反例；发布门槛（硬 invariant 不回退、软指标降 >5% 阻断）。
+- **Q2 注入矩阵**：`tests/security/` 三件（prompt_injection_matrix / resource_authorization / secret_redaction）；覆盖用户文本/OCR/网页/EPUB/RSS/工具结果八类入口。
+- **Q3 可观测性**：`core/telemetry.py`（allowlist 字段、无 raw prompt/reply、request_id 串联、日聚合 30 天、可关可清）。
+- **Q4 性能/迁移/故障**：`test_latency_budgets`（p95≤100ms/80ms 预算）+ `test_old_database_upgrade`（去敏旧库逐版本升级）+ `test_job_recovery`（双进程竞争/租约/时钟跳变）。
+- **Q5 无障碍/e2e**：新增交互全继承键盘/焦点/语义名称/reduced-motion；Playwright 扩聊天、设置、设备撤销、恢复错误主路径；200% 缩放/窄屏/对比度检查。
+
+### 批次15：D 类离线件（2026-09-08 用户拍板：全部照做，真机环节留空位）
+
+- **P3-04 A/B 片**：数据面清单 ADR + storage/connect.py central connector + SQLCipher PoC（临时目录，不真迁移）。
+- **P3-03 adapter**：provider 协商（GET /capabilities 或版本自检）+ 缓存键（provider/model/voice/version/text/prosody）+ 显式回退 + voice_profiles/voice_manifests 表；不训练。
+- **L09 worker 骨架**：stdin/stdout framed 协议 + 超限/取消/无模型测试 + PWA 禁用态；不装模型。
+- **L10 骨架**：petWindow（contextIsolation/IPC 白名单/点击穿透）+ displayAvoidance helper 协议 + mock 测试；不真机验收。
+- **L12/L13/L14**：gateway 鉴权模块 + channel bus（inbox/outbox 状态机/binding 一次性码）+ wechat sidecar 协议 + 全套 fake 测试；不接真服务。
+- 每个 D 类件交付时在状态表标注「离线件完成，真机/训练/账号环节待外部条件」。
 
 > 前置已完成：日程素材加量（07498a2）、体验收口四片（028034d/2b34e90/76f320b/a4a38e9）、presence 标签修复（e4e2e9f）。
