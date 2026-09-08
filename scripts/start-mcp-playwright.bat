@@ -29,13 +29,14 @@ if not exist "%PY%" (
 
 echo.
 echo  [TZT] 启动 Playwright MCP 桥
-echo        子进程：npx --yes @playwright/mcp@latest
+echo        子进程：npx --yes @playwright/mcp@latest --browser chromium
 echo        端点  ：http://127.0.0.1:8932/mcp
 echo        提示  ：首次运行会下载 Playwright MCP 包，请耐心等待；
-echo                需要无头模式可把下面的 --headless 加上。
+echo                --browser chromium 用 Playwright 自带浏览器（本机没装 Chrome）；
+echo                装了 Chrome 可改成 --browser chrome，需要无头可加 --headless。
 echo.
 
-"%PY%" -X utf8 -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @playwright/mcp@latest
+"%PY%" -X utf8 -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @playwright/mcp@latest --browser chromium
 
 echo.
 echo  [TZT] 桥已退出。若这里出现错误，请把上面的输出发给管理员排查。
