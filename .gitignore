@@ -40,3 +40,10 @@ frontend/ui_*.png
 
 # 内部工作日志（上线前全检/修复轮等临时过程记录）
 deliverables/
+
+# 本地多代理协作文件（内部工作流，不入公开仓库）
+.zcode/
+AGENTS.md
+TODO.md
+docs/AGENT-COORDINATION.md
+docs/HANDOFF-TO-CODEX.md
