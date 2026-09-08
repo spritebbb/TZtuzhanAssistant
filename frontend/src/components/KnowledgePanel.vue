@@ -3,6 +3,8 @@ import { ref, watch } from 'vue'
 import {
   deleteKnowledgeDocument,
   extractKnowledgeOpinions,
+  getImportJob,
+  importKnowledgeUrl,
   listKnowledgeDocuments,
   listKnowledgeOpinions,
   revokeKnowledgeOpinion,
@@ -17,6 +19,9 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const documents = ref<KnowledgeDocument[]>([])
 const loading = ref(false)
 const uploading = ref(false)
+// L01 网页导入：提交 URL 后轮询任务状态
+const importUrl = ref('')
+const importing = ref(false)
 const error = ref('')
 const notice = ref('')
 const dragOver = ref(false)
@@ -97,6 +102,47 @@ async function upload(file: File) {
   }
 }
 
+async function submitImportUrl() {
+  const url = importUrl.value.trim()
+  if (!url || importing.value) return
+  importing.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const job = await importKnowledgeUrl(url)
+    notice.value = '她正在读这个网页，稍等一下'
+    importUrl.value = ''
+    void pollImportJob(job.job_id, 0)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '网页导入失败'
+  } finally {
+    importing.value = false
+  }
+}
+
+async function pollImportJob(jobId: string, tries: number) {
+  if (tries > 60) {
+    notice.value = ''
+    error.value = '这个网页读得有点久，稍后再看看书架'
+    return
+  }
+  try {
+    const state = await getImportJob(jobId)
+    if (state.status === 'succeeded') {
+      notice.value = '这个网页已经收进书架了'
+      await load()
+      return
+    }
+    if (state.status === 'failed' || state.status === 'cancelled') {
+      error.value = state.error || '这个网页没能读进来'
+      return
+    }
+  } catch {
+    /* 轮询失败按一次未就绪处理 */
+  }
+  setTimeout(() => void pollImportJob(jobId, tries + 1), 2000)
+}
+
 function onPick(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -133,7 +179,7 @@ watch(() => props.show, (show) => { if (show) void load() })
         </div>
         <button class="close" title="关闭" @click="emit('close')">×</button>
       </header>
-      <p class="hint">投喂 pdf / txt / md，她真的会读，聊到相关话题会自然提起</p>
+      <p class="hint">投喂 pdf / txt / md / epub，或粘一个网页链接，她真的会读，聊到相关话题会自然提起</p>
 
       <div
         class="dropzone"
@@ -152,6 +198,19 @@ watch(() => props.show, (show) => { if (show) void load() })
         />
         <span v-if="uploading">她正在读，稍等…</span>
         <span v-else>点这里选文件，或直接把文件拖进来</span>
+      </div>
+
+      <div class="url-import">
+        <input
+          v-model="importUrl"
+          type="url"
+          placeholder="粘贴网页链接（https://…）"
+          :disabled="importing"
+          @keyup.enter="submitImportUrl"
+        />
+        <button :disabled="importing || !importUrl.trim()" @click="submitImportUrl">
+          {{ importing ? '提交中…' : '读这个网页' }}
+        </button>
       </div>
 
       <p v-if="notice" class="notice">{{ notice }}</p>
@@ -200,6 +259,10 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 h2 { margin: 5px 0 8px; font-size: 24px; font-weight: 600; }
 .close { border: 0; color: var(--text-muted); background: transparent; font-size: 28px; cursor: pointer; }
 .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12px; }
+.url-import { display: flex; gap: 8px; margin: 8px 0; }
+.url-import input { flex: 1; min-width: 0; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); padding: 6px 10px; }
+.url-import button { padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--text); cursor: pointer; }
+.url-import button:disabled { opacity: .5; cursor: default; }
 .dropzone { display: flex; align-items: center; justify-content: center; min-height: 84px; border: 1.5px dashed var(--border); border-radius: 14px; color: var(--text-muted); font-size: 13px; cursor: pointer; transition: border-color .2s, background .2s; }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .dropzone.busy { pointer-events: none; opacity: .7; }

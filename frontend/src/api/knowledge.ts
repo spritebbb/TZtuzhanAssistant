@@ -71,3 +71,27 @@ export async function revokeKnowledgeOpinion(id: number): Promise<boolean> {
   const data = await response.json()
   return Boolean(data.ok)
 }
+
+/** L01 网页导入：返回 job_id（worker 抓取解析，可查询与取消）。 */
+export async function importKnowledgeUrl(url: string): Promise<{ job_id: string; status: string }> {
+  const response = await apiFetch('/api/knowledge/import-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '网页导入失败')
+  return { job_id: data.job_id, status: data.status }
+}
+
+export async function getImportJob(jobId: string): Promise<{ status: string; error?: string; document_id?: number }> {
+  const response = await apiFetch(`/api/knowledge/import-jobs/${jobId}`)
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '任务查询失败')
+  return data
+}
+
+export async function cancelImportJob(jobId: string): Promise<void> {
+  const response = await apiFetch(`/api/knowledge/import-jobs/${jobId}/cancel`, { method: 'POST' })
+  if (!response.ok) throw new Error('取消失败')
+}
