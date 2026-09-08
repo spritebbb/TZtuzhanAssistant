@@ -39,7 +39,8 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
         "reading_segments", "reading_bookmarks", "observation_entries",
     ),
-    "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence"),
+    "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
+               "domain_trust_events", "domain_trust_snapshot"),
     "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources"),
     "conversations": ("messages",),
 }
@@ -121,6 +122,7 @@ _REFERENCE_RULES = (
     _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
     _rule_static("relationship_style_evidence", "event_id", "relationship_events", frozenset()),
+    _rule_static("domain_trust_events", "event_id", "relationship_events", frozenset()),
     _rule_static("companion_requests", "life_event_id", "character_life_events", frozenset()),
     # open_questions.source_message_id 指向 messages（不属于关系包）：按
     # memory_policy.source_message_ids 先例不建引用规则，恢复时统一清空。

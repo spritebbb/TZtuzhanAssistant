@@ -259,6 +259,27 @@ async def api_revoke_preference(pref_id: int):
     return {"ok": True, "item": row}
 
 
+@router.get("/domain-trust")
+async def api_domain_trust_get():
+    """L05 领域信任：高层可依赖程度 + 每域最多 2 条来源（不含内部权重）。"""
+    from ..core.domain_trust import get_snapshot
+
+    uid = active_user_id()
+    return {"ok": True, **await asyncio.to_thread(get_snapshot, uid)}
+
+
+@router.delete("/domain-trust/{domain}")
+async def api_domain_trust_reset(domain: str):
+    from ..core.domain_trust import DOMAINS, reset_domain
+
+    if domain not in DOMAINS:
+        return JSONResponse({"ok": False, "error": "未知领域"}, status_code=422)
+    uid = active_user_id()
+    await asyncio.to_thread(reset_domain, uid, domain)
+    logger.info("[领域信任] 用户重置 {} 域", domain)
+    return {"ok": True}
+
+
 @router.get("/relationship-style")
 async def api_relationship_style_get():
     """L03 长期关系气质：高层描述 + 最多 2 条形成原因（不返回分数）。"""
