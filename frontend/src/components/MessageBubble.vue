@@ -24,6 +24,24 @@ const props = defineProps<{
 const copied = ref(false)
 const ttsStatus = ref<TtsStatus>('idle')
 const whyOpen = ref(false)
+// F06 活动草稿：确认后调用权威创建接口
+const draftBusy = ref(false)
+const draftNotice = ref('')
+
+async function confirmDraft() {
+  const draft = props.message.draft
+  if (!draft || draftBusy.value) return
+  draftBusy.value = true
+  try {
+    const { confirmActivityDraft } = await import('../api/activityDrafts')
+    const result = await confirmActivityDraft(draft.draft_id)
+    draftNotice.value = result.idempotent ? '已经建好了' : '好，这就开始'
+  } catch (e) {
+    draftNotice.value = e instanceof Error ? e.message : '这次没建成，稍后再试'
+  } finally {
+    draftBusy.value = false
+  }
+}
 
 function onTtsState(event: Event) {
   const state = (event as CustomEvent<TtsState>).detail
@@ -169,6 +187,12 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
         </button>
+      </div>
+      <div v-if="message.draft" class="draft-card">
+        <span class="draft-tag">要一起做吗</span>
+        <strong>{{ message.draft.title }}</strong>
+        <span v-if="draftNotice" class="draft-note">{{ draftNotice }}</span>
+        <button v-else :disabled="draftBusy" @click="confirmDraft">就这样开始</button>
       </div>
       <div v-if="whyOpen && message.explanation" class="why-panel">
         <div class="why-title">她为什么这样说</div>
@@ -427,6 +451,9 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 .why-row b { color: var(--text); font-weight: 600; }
 .why-row span { min-width: 0; overflow-wrap: anywhere; }
 .why-lifecycle { grid-column: 2; color: var(--text-dim); font-size: 11px; }
+.draft-card { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 13px; }
+.draft-tag { color: var(--text-muted); font-size: 11px; }
+.draft-note { color: var(--text-dim); font-size: 12px; }
 .why-tools { margin-top: 10px; }
 .why-tools span { background: var(--bg-hover); color: var(--text-dim); }
 .mdimg {

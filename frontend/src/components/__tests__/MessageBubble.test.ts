@@ -1,8 +1,12 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Message } from '../../api/sessions'
 import MessageBubble from '../MessageBubble.vue'
+
+vi.mock('../../api/activityDrafts', () => ({
+  confirmActivityDraft: vi.fn(async () => ({ ok: true, activity_id: 5, kind: 'goal' })),
+}))
 
 function botMessage(explanation: Message['explanation']): Message {
   return { role: 'bot', content: '我记得你喜欢猫', ts: 1757300000, explanation }
@@ -86,5 +90,29 @@ describe('MessageBubble 记忆生命周期露出（G01/F07）', () => {
     })
     await dated.get('.whybtn').trigger('click')
     expect(dated.get('.why-lifecycle').text()).toContain('保留到 2026-10-08')
+  })
+})
+
+describe('MessageBubble 活动草稿卡（F06）', () => {
+  it('确认草稿调用权威接口并给出回执', async () => {
+    const message: Message = {
+      role: 'bot',
+      content: '好，那就一起做',
+      ts: 1757300000,
+      draft: {
+        draft_id: 'tok.abc', kind: 'goal', title: '一起坚持晨跑',
+        payload: { next_step: '先定闹钟' }, expires_at: '2026-09-08T15:20:00',
+      },
+    }
+    const wrapper = mount(MessageBubble, {
+      props: { message, isStreamingLast: false, ttsKey: 'k9' },
+    })
+    expect(wrapper.text()).toContain('一起坚持晨跑')
+    await wrapper.get('.draft-card button').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+    const { confirmActivityDraft } = await import('../../api/activityDrafts')
+    expect(confirmActivityDraft).toHaveBeenCalledWith('tok.abc')
+    expect(wrapper.text()).toContain('好，这就开始')
   })
 })

@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 33  # v33: F05 reading map segments and bookmarks
+_SCHEMA_VERSION = 34  # v34: F06 activity draft receipts
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -752,6 +752,15 @@ CREATE TABLE IF NOT EXISTS reading_bookmarks (
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
     UNIQUE (user_id, segment_id)
+);
+-- F06 活动草稿确认回执（runtime，不导出）：幂等键 user/draft_id → activity_id；
+-- 同一草稿二次确认返回同一活动，不重复创建。
+CREATE TABLE IF NOT EXISTS activity_draft_receipts (
+    user_id     TEXT NOT NULL,
+    draft_id    TEXT NOT NULL,
+    activity_id INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, draft_id)
 );
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
@@ -1861,7 +1870,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
-                "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks",
+                "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

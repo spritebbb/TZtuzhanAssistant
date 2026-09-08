@@ -56,6 +56,8 @@ FLAG_DEFAULTS = {
     # F04：专注收尾人格化与可重试投递。关闭后完成专注不再入箱，原计时与
     # 完成流程不变（退回原文案语义）。
     "focus_wrapup_enabled": True,
+    # F06：聊天意图自动预填草稿。关闭后不再产草稿，原手动创建入口保留。
+    "activity_drafts_enabled": True,
 }
 
 

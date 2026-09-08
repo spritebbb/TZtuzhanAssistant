@@ -254,6 +254,10 @@ async function send() {
         const b = bubble()
         if (b) b.explanation = value
       },
+      onDraft: (value) => {
+        const b = bubble()
+        if (b) b.draft = value
+      },
       onConfirmRequest: (req) => {
         pendingConfirm.value.push(req)
       },
@@ -383,6 +387,10 @@ async function handleImageFile(f: File | null) {
       onExplanation: (value) => {
         const b = bubble()
         if (b) b.explanation = value
+      },
+      onDraft: (value) => {
+        const b = bubble()
+        if (b) b.draft = value
       },
     }, imageUrl, requestId)
   } catch (e: unknown) {

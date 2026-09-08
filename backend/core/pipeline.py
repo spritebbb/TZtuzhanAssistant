@@ -627,7 +627,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -665,10 +665,11 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
             user_id, text, mock=mock, merged_msg=merged_msg, ephemeral=ephemeral,
             stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
             explain_cb=explain_cb,
+            draft_cb=draft_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
     from .persona_profiles import persona_name_for_user_id
     from .privacy import ephemeral_prompt, is_ephemeral_request
 
@@ -771,6 +772,20 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             record_feedback_from_reply(user_id, text, turn_id=turn_id or None)
         except Exception:
             logger.exception("[pipeline] 幽默记忆反馈登记失败（不影响回复）")
+
+    # F06：用户明确说「想一起做 X」时产一张签名短期草稿（不落库、不藏进回复）。
+    if not ephemeral and draft_cb is not None:
+        try:
+            from .activity_drafts import create_draft, detect_draft_intent
+
+            intent = detect_draft_intent(text)
+            if intent is not None:
+                draft = create_draft(user_id, intent[0], intent[1],
+                                     source_turn_id=turn_id or None)
+                if draft is not None:
+                    await draft_cb(draft)
+        except Exception:
+            logger.exception("[pipeline] 活动草稿生成失败（不影响回复）")
 
     # G04：她刚发出过一个求助（24h 内），用户这句话若是接受/拒绝就走同一
     # respond 函数；归类不了就不打扰（不猜）。
