@@ -29,7 +29,8 @@ BUNDLE_VERSION = 1
 # 类别 → 表清单（导出与恢复顺序无关；全部表都在 userdb.reset 双清单里）
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
-    "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map"),
+    "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
+               "memory_policy", "memory_annotations", "first_occurrences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs"),
     "tasks": ("tasks", "promises"),
@@ -108,6 +109,10 @@ _REFERENCE_RULES = (
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
     _rule_static("facts", "conflicts_with_fact_id", "facts", frozenset()),
+    _rule_static("memory_policy", "fact_id", "facts", frozenset()),
+    _rule_static("memory_annotations", "fact_id", "facts", frozenset()),
+    _rule_static("memory_annotations", "source_event_id", "relationship_events", frozenset()),
+    _rule_static("first_occurrences", "source_event_id", "relationship_events", frozenset()),
     _rule_static("future_letters", "goal_id", "activities"),
     _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
