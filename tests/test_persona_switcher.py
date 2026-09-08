@@ -39,6 +39,14 @@ async def main() -> None:
         assert luna["name"] == "Luna"
         assert luna["theme"] == "light"
         assert luna["voice"] == "zh-CN-XiaoyiNeural"
+        assert luna["motion_enabled"] is True
+        assert profiles.update_profile(luna["id"], {"motion_enabled": False})["motion_enabled"] is False
+        try:
+            profiles.update_profile(luna["id"], {"motion_enabled": "false"})
+        except profiles.PersonaProfileError:
+            pass
+        else:
+            raise AssertionError("动效设置必须拒绝字符串布尔值")
         profiles.activate(luna["id"])
 
         luna_uid = profiles.active_user_id()

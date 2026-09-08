@@ -6,6 +6,7 @@ export interface PersonaProfile {
   subtitle: string
   theme: 'dark' | 'light'
   voice: string
+  motion_enabled?: boolean
   active: boolean
   created_at: number
 }

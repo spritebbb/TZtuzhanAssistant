@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, onUnmounted } from 'vue'
+import { computed, onMounted, ref, onUnmounted } from 'vue'
 import { apiFetch } from '../api'
 
 const tools = ref({
@@ -11,6 +11,9 @@ const tools = ref({
   mcp: true,
 })
 const backendOk = ref(true)
+const compact = ref(true)
+const detailsOpen = ref(false)
+const loaded = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const labels: Record<string, string> = {
@@ -21,6 +24,10 @@ const labels: Record<string, string> = {
   memory: '记忆',
   mcp: 'MCP',
 }
+const failures = computed(() => [
+  ...Object.entries(tools.value).filter(([, on]) => !on).map(([name]) => ({ name, label: labels[name] || name, detail: `${labels[name] || name}能力当前未配置或已关闭` })),
+  ...(!backendOk.value ? [{ name: 'backend', label: '连接', detail: '后端连接失败，请检查服务是否已启动' }] : []),
+])
 
 // 单色 SVG 图标（stroke 继承 currentColor，天然融入主题）
 const iconPaths: Record<string, string> = {
@@ -37,7 +44,12 @@ async function loadTools() {
     const r = await apiFetch('/api/meta')
     const d = await r.json()
     if (d.tools) Object.assign(tools.value, d.tools)
+    try {
+      const flags = await (await apiFetch('/api/flags')).json()
+      compact.value = flags.flags?.compact_ui_enabled !== false
+    } catch { /* 保持简洁状态栏 */ }
   } catch { /* ignore */ }
+  finally { loaded.value = true }
 }
 
 async function checkBackend() {
@@ -64,7 +76,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="toolbar">
+  <div v-if="loaded && (!compact || failures.length)" class="toolbar" role="status" aria-label="能力异常">
+    <template v-if="compact">
+      <button v-for="item in failures" :key="item.name" class="failure" @click="detailsOpen = !detailsOpen">
+        <span class="dot"></span>{{ item.label }}异常
+      </button>
+      <span v-if="detailsOpen" class="failure-detail">{{ failures.map(item => item.detail).join('；') }}</span>
+    </template>
+    <template v-else>
     <span class="label">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
@@ -81,6 +100,7 @@ onUnmounted(() => {
     <span class="backend-status" :class="{ off: !backendOk }" :title="backendOk ? '后端连接正常' : '后端连接失败，请检查 8801 端口'">
       <span class="dot"></span>{{ backendOk ? '后端在线' : '后端离线' }}
     </span>
+    </template>
   </div>
 </template>
 
@@ -100,6 +120,9 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .toolbar::-webkit-scrollbar { display: none; }
+.failure { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--danger); border-radius: 999px; padding: 4px 10px; color: var(--danger); background: var(--danger-soft); cursor: pointer; }
+.failure .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
+.failure-detail { white-space: normal; color: var(--danger); }
 .label {
   display: inline-flex;
   align-items: center;

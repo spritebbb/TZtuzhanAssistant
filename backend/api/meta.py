@@ -56,6 +56,7 @@ def _memory_status() -> dict:
 async def api_meta(session_id: str = ""):
     """工具开关状态 + 完整工具清单 + 基本信息 + 心情。session_id 可选：传入时按会话隔离用户身份。"""
     from ..api.chat import _user_id
+    from ..core.presence import visual_state
     from ..core.search import last_error as search_last_error
 
     from ..core.affection import display as affection_display
@@ -83,6 +84,7 @@ async def api_meta(session_id: str = ""):
         "mood": {"value": mood_val, "label": mood_label, "emoji": mood_emoji},
         "affection": affection_display(uid),
         "persona": active_profile(),
+        "visual_state": visual_state(uid),
     }
 
 
@@ -125,5 +127,7 @@ async def api_presence():
         )
     except Exception:
         pass
+    from ..core.presence import visual_state
+
     return {"ok": True, "activity": activity, "recent_events": events,
-            "active_outing": active_outing}
+            "active_outing": active_outing, "visual_state": visual_state(uid)}
