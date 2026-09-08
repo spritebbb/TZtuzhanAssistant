@@ -228,6 +228,23 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
     ]
 
 
+def _mark_proactive_variant_used(user_id: str) -> None:
+    """登记主动消息用到的变体冷却（生成成功才调用；失败静默不占冷却）。
+
+    从 _build_proactive_prompt 留存的进程内键位取出本次选中的变体 id；无变体
+    或登记失败都不影响消息本身，只意味着本次不占用 7 天冷却。
+    """
+    variant_id = _PROACTIVE_VARIANT_KEY.pop(user_id, "")
+    if not variant_id:
+        return
+    try:
+        from .greeting_material import mark_variant_used
+
+        mark_variant_used(user_id, variant_id)
+    except Exception as e:
+        logger.warning("[主动性] 变体冷却登记失败: {}", e)
+
+
 async def generate_proactive_message(user_id: str) -> str | None:
     """为某用户生成一条主动消息。返回文本或 None（失败静默）。"""
     # _build_proactive_prompt 内部含同步 Chroma 检索（collect_offline_context），
@@ -241,15 +258,8 @@ async def generate_proactive_message(user_id: str) -> str | None:
     except Exception as e:
         logger.warning("[主动性] LLM 生成失败: {}", e)
         return None
-    variant_id = _PROACTIVE_VARIANT_KEY.pop(user_id, "")
-    if text and variant_id:
-        # F01 冷却：生成成功才登记（失败静默不占冷却）
-        try:
-            from .greeting_material import mark_variant_used
-
-            mark_variant_used(user_id, variant_id)
-        except Exception as e:
-            logger.warning("[主动性] 变体冷却登记失败: {}", e)
+    if text:
+        _mark_proactive_variant_used(user_id)
     return text
 
 
@@ -297,10 +307,12 @@ async def generate_proactive_content(user_id: str) -> ProactiveMessage | None:
     try:
         text = await chat(msgs, max_tokens=100, temperature=0.85)
         text = text.strip()[:200]
-        return _message(text, image) if text else None
     except Exception as e:
         logger.warning("[主动性] LLM 生成失败: {}", e)
         return None
+    if text:
+        _mark_proactive_variant_used(user_id)
+    return _message(text, image) if text else None
 
 
 _last_global_run = 0.0
