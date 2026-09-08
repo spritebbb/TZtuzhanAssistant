@@ -350,6 +350,13 @@ def create_app() -> FastAPI:
             _spawn_bg(_initiative.initiative_loop())
         except Exception:
             logger.exception("[主动性] 后台引擎启动失败")
+        # Agent 定时任务调度：到点的多步任务自动开跑（每 60s 检查一次）
+        try:
+            from .agent import session as _agent_session
+
+            _spawn_bg(_agent_session.agent_scheduler_loop())
+        except Exception:
+            logger.exception("[Agent] 定时任务调度器启动失败")
 
     _bg_tasks: set = set()
 

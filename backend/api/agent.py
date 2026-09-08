@@ -209,6 +209,58 @@ async def api_agent_run(task_id: str):
     return {"ok": True, "status": "running"}
 
 
+
+@router.post("/tasks/{task_id}/schedule")
+async def api_agent_schedule(task_id: str, request: Request):
+    """给任务定时：body {delay_minutes: 30} 或 {at_ts: 1788900000}。
+
+    用户主动定时 = 明确授权 → 计划步骤自动放行（工具级确认钩子仍然生效）。
+    """
+    import time as _time
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    task = agent_session._load(task_id)
+    if task is None:
+        return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
+    if task.status in ("running", "done", "cancelled"):
+        return JSONResponse({"ok": False, "error": f"任务已在 {task.status} 状态"},
+                            status_code=409)
+    at_ts = body.get("at_ts")
+    delay = body.get("delay_minutes")
+    if at_ts is not None:
+        when = float(at_ts)
+    elif delay is not None:
+        when = _time.time() + max(0, float(delay)) * 60
+    else:
+        return JSONResponse({"ok": False, "error": "缺少 delay_minutes 或 at_ts"},
+                            status_code=422)
+    updated = agent_session.schedule_task(task_id, when)
+    return {"ok": True, "task": agent_session.to_dict(updated or task)}
+
+
+@router.post("/tasks/{task_id}/retry")
+async def api_agent_retry(task_id: str):
+    """失败重试：重置为 planned 并立即重跑（受 max_attempts 限制）。"""
+    from ..core.reset import reset_in_progress
+
+    if reset_in_progress():
+        return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
+    task = agent_session._load(task_id)
+    if task is None:
+        return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
+    if task.status != "failed":
+        return JSONResponse({"ok": False, "error": f"任务当前是 {task.status}，只有失败任务可重试"},
+                            status_code=409)
+    if task.attempt >= task.max_attempts:
+        return JSONResponse({"ok": False, "error": f"已达重试上限（{task.max_attempts} 次）"},
+                            status_code=409)
+    updated = await agent_session.retry_task(task_id)
+    return {"ok": True, "task": agent_session.to_dict(updated or task)}
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def api_agent_cancel(task_id: str):
     """取消任务。"""
