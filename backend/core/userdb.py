@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 24  # v24: G01 memory_policy / memory_annotations / first_occurrences
+_SCHEMA_VERSION = 25  # v25: G01 scoring provenance and observation start
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -591,6 +591,8 @@ CREATE TABLE IF NOT EXISTS memory_policy (
     distinct_days INTEGER NOT NULL DEFAULT 0,
     first_event INTEGER NOT NULL DEFAULT 0,
     legacy INTEGER NOT NULL DEFAULT 0,
+    source_message_ids TEXT NOT NULL DEFAULT '[]',
+    first_observed_at TEXT,
     review_at TEXT,
     updated_at TEXT NOT NULL
 );
@@ -725,6 +727,13 @@ class UserDB:
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
+        policy_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(memory_policy)")}
+        for column, definition in (
+            ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            ("first_observed_at", "TEXT"),
+        ):
+            if column not in policy_columns:
+                self.conn.execute(f"ALTER TABLE memory_policy ADD COLUMN {column} {definition}")
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")

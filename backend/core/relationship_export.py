@@ -393,6 +393,9 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         key: (target_user_id if key == "user_id" else row[key])
                         for key in row.keys()
                     }
+                    if table == "memory_policy":
+                        # messages 不属于关系包；旧编号不可指向目标库中的无关消息。
+                        values["source_message_ids"] = "[]"
                     # 导入的是历史，不得让旧重逢弧在新命名空间继续等待回应。
                     if table == "reunion_arcs":
                         values["state"] = "closed"

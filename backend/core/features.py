@@ -6,6 +6,7 @@ Web UI 面板写入 data/feature_flags.json，bot 在 pipeline 注入前动态�
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -23,6 +24,8 @@ _write_lock = threading.Lock()
 # 注意：只保留「有消费方」的动态开关。贴纸现由 STICKER_ENABLED 等环境
 # 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
+    "memory_salience_enabled": os.getenv("FEATURE_MEMORY_SALIENCE_ENABLED", "1").lower()
+        not in {"0", "false", "off"},
     "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
