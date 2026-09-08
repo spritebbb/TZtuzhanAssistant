@@ -160,6 +160,76 @@ def test_keywords_persist_roundtrip() -> int:
     return 0
 
 
+def test_openai_safe_tool_names() -> int:
+    """回归：MCP 工具名含 `::` 不符合 OpenAI 函数名规则，会 400 拒绝整个 tools 数组。"""
+    import asyncio
+    import re
+
+    from backend.tools.base import openai_safe_name, resolve_openai_name
+    from backend.tools.tool_loop import run_tool_loop
+
+    assert openai_safe_name("playwright::browser_navigate") == "playwright__browser_navigate"
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", openai_safe_name("a::b c/d")) is not None
+
+    executed: list[str] = []
+
+    async def _impl(**kwargs):
+        executed.append(str(kwargs.get("url", "")))
+        return "navigated"
+
+    ToolRegistry.register_func(
+        name="pw::browser_navigate", description="x",
+        func=_impl, category="external", needs_confirm=False, owner="mcp:pw",
+    )
+
+    async def call_native(messages, tools):
+        # 下发给模型的 tools 里不允许出现非法字符
+        for item in tools or []:
+            assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item["function"]["name"]), item
+        if executed:
+            return "done", []
+        # 模型回传的是对外安全名
+        return "", [{"name": "pw__browser_navigate", "arguments": {"url": "https://example.com"}}]
+
+    try:
+        out = asyncio.run(run_tool_loop(
+            [{"role": "user", "content": "打开 example.com"}],
+            call_llm=None, call_native=call_native, max_loops=2,
+        ))
+        assert executed == ["https://example.com"], executed
+        assert "done" in out
+    finally:
+        ToolRegistry.unregister("pw::browser_navigate")
+    print("[OK] 对外工具名安全转义 + 回传名映射回真实工具")
+    return 0
+
+
+def test_restore_does_not_truncate_registry() -> int:
+    """回归：启动恢复时逐个写盘会把「尚未恢复」的条目挤出文件（曾丢过 context7）。"""
+    import asyncio
+    import json
+
+    from backend.tools import mcp_server as ms
+
+    ms._EXTERNAL_SERVERS.clear()
+    # 一个能连（本机必然失败 → 用不存在的地址模拟连不上），
+    # 关键断言：恢复失败后文件里的条目仍在。
+    ms._PERSIST_PATH.write_text(json.dumps([
+        {"name": "unreachable", "url": "http://127.0.0.1:9/mcp", "keywords": ["x"]},
+        {"name": "alsounreachable", "url": "http://127.0.0.1:9/mcp", "keywords": ["y"]},
+    ], ensure_ascii=False), encoding="utf-8")
+    try:
+        restored = asyncio.run(ms.restore_persisted_servers())
+        assert restored == 0
+        saved = json.loads(ms._PERSIST_PATH.read_text(encoding="utf-8"))
+        assert [s["name"] for s in saved] == ["unreachable", "alsounreachable"], saved
+    finally:
+        ms._EXTERNAL_SERVERS.clear()
+        ms._PERSIST_PATH.write_text("[]", encoding="utf-8")
+    print("[OK] 启动恢复不写盘：连不上的条目仍保留在文件里")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_no_server_or_always_on()
@@ -167,6 +237,8 @@ def main() -> int:
         + test_hidden_tool_not_executable()
         + test_pinned_https_handler_no_attribute_error()
         + test_keywords_persist_roundtrip()
+        + test_openai_safe_tool_names()
+        + test_restore_does_not_truncate_registry()
     )
     if failed:
         print(f"\n=== MCP 按需注入：{failed} 项失败 ===")

@@ -14,7 +14,7 @@ import re
 from typing import Any, Callable
 
 from ..core.log import logger
-from .base import ToolRegistry
+from .base import ToolRegistry, resolve_openai_name
 from .hardening import (
     MAX_TOOL_CALLS,
     ToolLoopGuard,
@@ -328,9 +328,14 @@ async def _execute_calls(
     specs = {t.name: t for t in ToolRegistry.list()}
     seen = seen if seen is not None else {}
 
+    registry_names = ToolRegistry.tool_names()
+
+    def _real(c: dict) -> str:
+        return resolve_openai_name(c.get("name", ""), registry_names) or c.get("name", "")
+
     def _prepare(c: dict) -> dict:
-        filled = _fill_missing_args(c, fallback, getattr(specs.get(c["name"]), "input_schema", None))
-        return _clean_args({"name": c["name"], "arguments": filled}, fallback)
+        filled = _fill_missing_args(c, fallback, getattr(specs.get(_real(c)), "input_schema", None))
+        return _clean_args({"name": _real(c), "arguments": filled}, fallback)
 
     parts = []
     executed = 0
@@ -489,6 +494,12 @@ async def _run_native(
         # DeepSeek/vLLM 等严格校验端点会因重复 tool_call_id 报 400）
         for i, c in enumerate(calls):
             c["_id"] = f"call_{loop_count}_{i}"
+            # 模型回传的是对外安全名（如 playwright__browser_navigate），
+            # 映射回注册表真实名（playwright::browser_navigate）用于执行；
+            # 历史消息仍保留模型给的名字，保持对话自洽。
+            c["_real_name"] = resolve_openai_name(
+                c.get("name", ""), ToolRegistry.tool_names()
+            ) or c.get("name", "")
 
         # 注入 assistant 的 tool_calls（每个调用独立 id）
         work.append({
@@ -506,17 +517,18 @@ async def _run_native(
         for c in calls:
             if is_cancelled and is_cancelled():
                 return "（操作已取消）"
-            filled = _fill_missing_args(c, fallback, getattr(specs.get(c["name"]), "input_schema", None))
-            filled = _clean_args({"name": c["name"], "arguments": filled}, fallback)
-            logger.info("[工具循环] 调用 {} 参数={}", c["name"], json.dumps(filled, ensure_ascii=False)[:300])
+            real_name = c.get("_real_name") or c["name"]
+            filled = _fill_missing_args(c, fallback, getattr(specs.get(real_name), "input_schema", None))
+            filled = _clean_args({"name": real_name, "arguments": filled}, fallback)
+            logger.info("[工具循环] 调用 {} 参数={}", real_name, json.dumps(filled, ensure_ascii=False)[:300])
             # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
-            await _progress({"type": "tool", "name": c["name"]})
-            fingerprint = _call_fingerprint(c["name"], filled)
-            tool_spec = specs.get(c["name"])
+            await _progress({"type": "tool", "name": real_name})
+            fingerprint = _call_fingerprint(real_name, filled)
+            tool_spec = specs.get(real_name)
             if tool_filter is not None and tool_spec is not None and not tool_filter(tool_spec):
                 # 按需隐藏的工具：模型凭记忆猜名字也不执行（避免绕过可见性）
                 body = structured_tool_error(
-                    kind="permission", name=c["name"],
+                    kind="permission", name=real_name,
                     detail="该工具本轮不可用（未命中触发条件）",
                 )
             elif fingerprint in seen:
@@ -525,24 +537,24 @@ async def _run_native(
                 body = "调用上限已用尽，本次未执行"
             else:
                 # §17.3 熔断与预算：同签名第 2 次拒执行；总预算超限给结构化错误
-                breaker = guard.check_signature(c["name"], filled)
-                budget = None if breaker else guard.check_budget(c["name"])
+                breaker = guard.check_signature(real_name, filled)
+                budget = None if breaker else guard.check_budget(real_name)
                 if breaker or budget:
                     body = breaker or budget
                 else:
-                    result = await ToolRegistry.execute(c["name"], filled)
+                    result = await ToolRegistry.execute(real_name, filled)
                     if result.ok:
                         body = result.output or "（工具返回空结果）"
                         guard.record_result(body)
                     else:
                         # 结构化错误：不把堆栈/密钥塞回上下文
                         body = structured_tool_error(
-                            kind="provider", name=c["name"],
+                            kind="provider", name=real_name,
                             detail=result.error or "调用失败",
                         )
                     seen[fingerprint] = body
                     call_count += 1
-            await _progress({"type": "tool_done", "name": c["name"]})
+            await _progress({"type": "tool_done", "name": real_name})
             work.append({
                 "role": "tool",
                 "tool_call_id": c["_id"],

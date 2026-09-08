@@ -146,7 +146,7 @@ class FunctionTool:
         return {
             "type": "function",
             "function": {
-                "name": self.name,
+                "name": openai_safe_name(self.name),
                 "description": self.description,
                 "parameters": params,
             },
@@ -155,6 +155,30 @@ class FunctionTool:
 
 def ms(t0: float) -> int:
     return int((time.monotonic() - t0) * 1000)
+
+
+_OPENAI_NAME_RE = __import__("re").compile(r"[^A-Za-z0-9_-]")
+
+
+def openai_safe_name(name: str) -> str:
+    """把内部工具名转成符合 OpenAI 函数名规则的写法。
+
+    OpenAI/DeepSeek 等端点要求 ``^[a-zA-Z0-9_-]{1,64}$``；MCP 工具内部用
+    ``服务器::工具`` 命名（便于命名空间隔离），其中的 ``:`` 会让整个 tools
+    数组被 400 拒绝，因此对外暴露时替换为下划线，调用回来时再还原。
+    """
+    return _OPENAI_NAME_RE.sub("_", str(name))[:64]
+
+
+def resolve_openai_name(sent_name: str, registry_names) -> str | None:
+    """把模型回传的（已转义）工具名映射回注册表里的真实名字。"""
+    sent = str(sent_name or "")
+    if sent in registry_names:
+        return sent
+    for real in registry_names:
+        if openai_safe_name(real) == sent:
+            return real
+    return None
 
 
 class ToolRegistry:
