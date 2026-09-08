@@ -15,8 +15,14 @@ os.environ.setdefault("MEMORY_V2", "0")
 import asyncio
 
 from backend.tools import mcp_server as m
-from backend.tools.mcp_server import (
-    _PERSIST_PATH,
+
+# 关键：把持久化路径强制指向临时目录。仅靠 TZTUZHAN_DATA_DIR + setdefault 不够——
+# 在 pytest 会话里 config.data_dir 可能已被其它模块解析为真实 data/，本测试的
+# 卸载流程会把真实 mcp_servers.json 写成 []（2026-09-09 实测踩到）。
+m._PERSIST_PATH = Path(tempfile.mkdtemp(prefix="tztuzhan_test_mcp_")) / "mcp_servers.json"
+_PERSIST_PATH = m._PERSIST_PATH
+
+from backend.tools.mcp_server import (  # noqa: E402
     _EXTERNAL_SERVERS,
     _load_persisted,
     list_external_servers,
@@ -75,4 +81,5 @@ def main():
     print("\n=== MCP 持久化回归: 全部通过 ===")
 
 
-main()
+if __name__ == "__main__":
+    main()
