@@ -488,6 +488,84 @@ def relevant_opinions(user_id: str, query: str, *, limit: int = 2) -> list[dict]
     return [item[2] for item in scored[:max(0, min(4, int(limit)))]]
 
 
+# ---------- LLM 观点提炼（体验收口：书架面板「她的观点」一键生成） ----------
+
+_OPINION_EXTRACT_PROMPT = """你是「{persona}」。下面是一份文档的若干片段。
+请从这些片段里挑出最多 2 条「她读了之后会形成的观点」——不是摘要，而是她读过并消化后，
+愿意在聊天里说出的一句话立场或感受（例如喜欢什么、怀疑什么、对某个说法的判断）。
+要求：
+- 每条观点必须能在给出的片段里找到直接依据，不得编造文档里没有的内容；
+- 用她的口吻写成一句完整的话（30-80 字），不要书名号，不要"我觉得文档说"这类引用腔；
+- span 是观点依据所在的片段编号（从 0 开始，对应输入片段的序号）。
+
+只输出 JSON：{{"opinions": [{{"stance": "...", "spans": [0]}}]}}"""
+
+
+async def extract_opinions(user_id: str, document_id: int) -> list[dict]:
+    """LLM 通读文档分块，提炼 0-2 条带来源分块引用的角色观点。
+
+    每条观点经 save_opinion 落库（来源必须是该文档真实分块，hash 去重）。
+    LLM 失败 / 无产出 → 返回空列表，不报错。"""
+    from .userdb import db
+
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id,text FROM kb_chunks WHERE user_id=? AND doc_id=? ORDER BY seq",
+            (user_id, int(document_id)),
+        ).fetchall()
+        doc = db.conn.execute(
+            "SELECT id FROM kb_documents WHERE user_id=? AND id=?",
+            (user_id, int(document_id)),
+        ).fetchone()
+    if doc is None:
+        raise KnowledgeError("知识文档不存在")
+    if not rows:
+        return []
+
+    from .llm import chat
+    from .persona_profiles import persona_name_for_user_id
+
+    numbered = "\n".join(f"[{seq}] {row['text']}" for seq, row in enumerate(rows))
+    try:
+        resp = await chat(
+            [
+                {"role": "system", "content": _OPINION_EXTRACT_PROMPT.replace(
+                    "{persona}", persona_name_for_user_id(user_id))},
+                {"role": "user", "content": numbered},
+            ],
+            temperature=0.3,
+            max_tokens=500,
+            task="extract",
+        )
+        start, end = resp.find("{"), resp.rfind("}")
+        data = json.loads(resp[start:end + 1]) if 0 <= start < end else {}
+    except Exception:
+        logger.warning("[知识库] 观点提炼失败：doc {}", document_id)
+        return []
+
+    items = data.get("opinions") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    chunk_ids = [int(row["id"]) for row in rows]
+    saved: list[dict] = []
+    for item in items[:2]:
+        if not isinstance(item, dict):
+            continue
+        stance = str(item.get("stance") or "").strip()
+        span_idx = item.get("spans") if isinstance(item.get("spans"), list) else []
+        spans = [chunk_ids[int(i)] for i in span_idx
+                 if isinstance(i, int) and 0 <= int(i) < len(chunk_ids)]
+        if not stance or not spans:
+            continue
+        try:
+            saved.append(save_opinion(user_id, document_id, stance, spans, origin="assistant"))
+        except KnowledgeError:
+            continue
+        if len(saved) >= 2:
+            break
+    return saved
+
+
 # ---------- 检索 ----------
 
 def recall_knowledge(user_id: str, query: str, top_k: int | None = None) -> list[dict]:
