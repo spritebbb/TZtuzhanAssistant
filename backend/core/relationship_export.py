@@ -30,7 +30,8 @@ BUNDLE_VERSION = 1
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
-               "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences"),
+               "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
+               "learning_candidates"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
              "persona_evolution_log"),
@@ -415,6 +416,11 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     if table == "memory_policy":
                         # messages 不属于关系包；旧编号不可指向目标库中的无关消息。
                         values["source_message_ids"] = "[]"
+                    if table == "learning_candidates":
+                        # 同上：学习候选的来源消息不在包内，清空编号。
+                        values["source_message_id"] = None
+                        if values.get("status") == "active":
+                            values["status"] = "candidate"
                     if table == "open_questions":
                         # 同上：源消息不在包内，清空编号避免指向目标库无关消息。
                         values["source_message_id"] = None

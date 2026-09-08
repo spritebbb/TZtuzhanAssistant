@@ -312,6 +312,24 @@ CREATE TABLE IF NOT EXISTS persona_evolution_log (
 );
 CREATE INDEX IF NOT EXISTS idx_evolution_user_param
     ON persona_evolution_log(user_id, parameter, id);
+-- §17.2 学习管线：三类候选确认状态机（模型只能提候选，确认权在用户）。
+CREATE TABLE IF NOT EXISTS learning_candidates (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           TEXT NOT NULL,
+    type              TEXT NOT NULL,     -- expression_preference / glossary / behavior_feedback
+    value_json        TEXT NOT NULL,
+    value_key         TEXT NOT NULL,     -- 去重键（type + 规范化 value）
+    source_message_id INTEGER,           -- 本人格真实消息（恢复时清空）
+    confidence        REAL NOT NULL DEFAULT 0.5,
+    status            TEXT NOT NULL DEFAULT 'candidate', -- candidate/active/revoked/expired
+    created_at        TEXT NOT NULL,
+    expires_at        TEXT NOT NULL,
+    reviewed_at       TEXT,
+    rule_version      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (user_id, value_key, status)
+);
+CREATE INDEX IF NOT EXISTS idx_learning_user_status
+    ON learning_candidates(user_id, status, id);
 -- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
 CREATE TABLE IF NOT EXISTS experience_metrics (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2026,6 +2044,7 @@ class UserDB:
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
                 "persona_evolution_log", "experience_metrics",
+                "learning_candidates",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
