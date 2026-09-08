@@ -136,12 +136,77 @@ def test_schedule_and_retry() -> int:
     return 0
 
 
+def test_prepare_then_remind() -> int:
+    """主动 Agent：需要准备的约定先备料再汇报；不需要的交给普通跟进；备料失败降级。"""
+    import datetime as _dt
+
+    from backend.core import initiative as ini
+    from backend.core.userdb import db, save_promise
+
+    uid = "agent-prepare-user"
+    db.ensure_user(uid)
+    save_promise(uid, "帮我查一下三家竞品的定价", follow_up=_dt.date.today().isoformat())
+
+    prepared_calls: list[str] = []
+
+    async def fake_prepare(user_id, promise):
+        prepared_calls.append(str(promise.get("content")))
+        return "三家定价 99/129/199。"
+
+    sent: list[str] = []
+
+    async def fake_enqueue(user_id, text, image=None, epoch=None):
+        sent.append(text)
+        return True
+
+    old_prepare, old_enqueue = ini._prepare_material, ini.enqueue_proactive
+    ini._prepare_material = fake_prepare
+    ini.enqueue_proactive = fake_enqueue
+    ini._prepare_attempted_today.clear()
+    try:
+        text = asyncio.run(ini.maybe_prepare_then_remind(uid))
+        assert text and "99/129/199" in text and "先替你把功课做了" in text, text
+        assert prepared_calls == ["帮我查一下三家竞品的定价"], prepared_calls
+
+        # 备料失败 → 降级为普通提醒（不编内容）
+        ini._prepare_attempted_today.clear()
+        db.ensure_user("agent-prepare-fail")
+        save_promise("agent-prepare-fail", "帮我整理一下上次的资料",
+                     follow_up=_dt.date.today().isoformat())
+
+        async def none_prepare(user_id, promise):
+            return ""
+
+        async def fake_followup(user_id, promise):
+            return "说好的资料整理呢？"
+
+        ini._prepare_material = none_prepare
+        old_followup = ini._generate_promise_followup
+        ini._generate_promise_followup = fake_followup
+        try:
+            text2 = asyncio.run(ini.maybe_prepare_then_remind("agent-prepare-fail"))
+            assert text2 == "说好的资料整理呢？", text2
+        finally:
+            ini._generate_promise_followup = old_followup
+
+        # 不需要准备的约定 → 不占用这条链路
+        db.ensure_user("agent-prepare-plain")
+        save_promise("agent-prepare-plain", "一起吃个饭", follow_up=_dt.date.today().isoformat())
+        ini._prepare_attempted_today.clear()
+        assert asyncio.run(ini.maybe_prepare_then_remind("agent-prepare-plain")) is None
+    finally:
+        ini._prepare_material, ini.enqueue_proactive = old_prepare, old_enqueue
+    print("[OK] 先做事再汇报：备料→汇报 / 失败降级 / 无关约定不触发")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_detect_dispatch_request()
         + test_report_written_on_success()
         + test_report_failure_does_not_break_task()
         + test_schedule_and_retry()
+        + test_prepare_then_remind()
     )
     if failed:
         print(f"\n=== Agent 派活与产物：{failed} 项失败 ===")

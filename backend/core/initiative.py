@@ -17,6 +17,7 @@ import asyncio
 import datetime
 import json
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -775,6 +776,7 @@ async def _arbitrate_secondary(user_id: str) -> bool:
 
     for proposer in (
         _maybe_rhythm_followup,
+        maybe_prepare_then_remind,
         maybe_follow_up_promise,
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
@@ -787,6 +789,91 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         if text:
             return True
     return False
+
+
+
+# ---- 主动 Agent：需要「先做事」的约定，先备料再汇报 ----
+
+_PREPARE_CUE_RE = re.compile(r"查|准备|整理|调研|资料|方案|清单|对比|汇总|跟进")
+_PREPARE_TIMEOUT = 45        # 备料阶段的硬时限（秒），超时降级为普通提醒
+_prepare_attempted_today: set[str] = set()   # 每用户每天至多一次（进程内即可，够用）
+
+
+async def _prepare_material(user_id: str, promise: dict) -> str:
+    """派一个有界的工具轮次先把材料备好（查证/整理），失败返回空串。
+
+    这是「主动 Agent」与「主动说话」的分界：她不是干提醒，而是先把该做的
+    功课做掉，再带着结果来找你。所有工具调用仍走确认钩子与审计。
+    """
+    content = str(promise.get("content") or "")
+    prompt = (
+        f"[任务] 用户之前说过：「{content}」。今天到了该跟进的日子。\n"
+        "请先用工具把这件事需要的材料准备好（能查的查一下、该整理的整理一下），"
+        "然后用 2~3 句话给出你准备好的要点；查不到就如实说，不要编。"
+    )
+    try:
+        from ..tools.service import run_tool_round
+        from .llm import chat as _chat, chat_native as _chat_native
+
+        messages = [
+            {"role": "system", "content": "你是菟菚，正在为一次主动跟进做准备。只输出要点，不要寒暄。"},
+            {"role": "user", "content": prompt},
+        ]
+        result = await asyncio.wait_for(
+            run_tool_round(
+                messages,
+                chat=lambda ms: _chat(ms),
+                chat_native=lambda ms, tools: _chat_native(ms, tools),
+                max_loops=2,
+            ),
+            timeout=_PREPARE_TIMEOUT,
+        )
+        return str(result or "").strip()[:600]
+    except Exception:
+        logger.info("[主动仲裁] 备料失败，降级为普通提醒")
+        return ""
+
+
+async def maybe_prepare_then_remind(user_id: str) -> str | None:
+    """到点且「需要准备」的约定：先派工具备料，再带着结果主动开口。
+
+    只有内容命中准备线索（查/整理/调研…）才走这条路，其余交给普通约定跟进；
+    每日至多一次，避免把主动额度耗在反复备料上。
+    """
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+    key = f"{user_id}:{today}"
+    if key in _prepare_attempted_today or _promise_followed_today(user_id):
+        return None
+    from .userdb import get_due_promises, mark_promise_done
+
+    due = get_due_promises(user_id, _date.today())
+    if not due:
+        return None
+    promise = next((p for p in due if _PREPARE_CUE_RE.search(str(p.get("content") or ""))), None)
+    if promise is None:
+        return None
+
+    async def produce() -> str | None:
+        material = await _prepare_material(user_id, promise)
+        if not material:
+            return await _generate_promise_followup(user_id, promise)
+        return f"你之前说「{str(promise.get('content'))[:40]}」。我先替你把功课做了：\n{material}"
+
+    def on_delivered() -> None:
+        mark_promise_done(promise["id"])
+        _mark_promise_followed(user_id)
+        _prepare_attempted_today.add(key)
+
+    return await _arbited_proactive(
+        user_id,
+        source="initiative:prepare_remind",
+        idle_minutes=_PROMISE_IDLE_MIN,
+        done_today=lambda: _promise_followed_today(user_id),
+        produce=produce,
+        on_delivered=on_delivered,
+    )
 
 
 async def _maybe_rhythm_followup(user_id: str) -> str | None:
