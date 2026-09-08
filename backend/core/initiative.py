@@ -722,20 +722,24 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     通用闲聊式主动仍走 _eligible_users 兜底，
     与次级源共享同一份每日额度——额度用尽后自然全部静默。
     """
-    def _maybe_surprise(uid: str) -> str | None:
+    async def _maybe_surprise(uid: str) -> str | None:
         from .surprise import maybe_orchestrate_surprise
 
-        return maybe_orchestrate_surprise(uid)
+        return await maybe_orchestrate_surprise(uid)
 
-    def _maybe_outing_note(uid: str) -> str | None:
-        """L06 外出归来候选（拍板 #9）：今日有外出事件且未汇报过 → 说一句。"""
+    async def _maybe_outing_note(uid: str) -> str | None:
+        """L06 外出归来候选（拍板 #9）：今日有外出事件且未汇报过 → 说一句。
+
+        注意：maybe_express_outing 是同步函数，必须在本协程内直接返回其
+        结果——写成同步包装会让仲裁链 `await None` 抛 TypeError 截断后续源。
+        """
         from .life_templates import maybe_express_outing
 
         return maybe_express_outing(uid)
 
-    def _maybe_companion_request(uid: str) -> str | None:
+    async def _maybe_companion_request(uid: str) -> str | None:
         """G04 她的求助：门槛达标时请对方帮个小忙，投递成功才置 offered。"""
-        return _produce_companion_request(uid)
+        return await _produce_companion_request(uid)
 
     for proposer in (
         _maybe_rhythm_followup,

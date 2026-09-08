@@ -134,11 +134,35 @@ async def _test_focus_quiet_mode() -> None:
     print("[OK] 安静模式：专注进行中所有次级源静默，不消耗任何条件")
 
 
+async def _test_secondary_chain_awaitable() -> None:
+    """回归：次级链每个来源都必须可 await。
+
+    历史缺陷：L06 外出候选用同步 def 包装同步函数，链上 `await proposer(...)`
+    对 str/None 直接抛 TypeError，被上层静默捕获——整条次级链（含 G04 求助、
+    惊喜编排）在该环之后全部失效。此用例锁死「链上返回文案时能正常送达」。
+    """
+    uid = "arbiter-chain"
+    _make_user(uid)
+    # 无任何待办来源时，整条链必须干净返回 False（不抛异常）
+    assert await initiative._arbitrate_secondary(uid) is False
+
+    async def fake_enqueue(user_id, text, image=None, epoch=None):
+        return True
+
+    with patch("backend.core.life_templates.maybe_express_outing",
+               new=lambda u: "刚爬完山回来，腿有点酸"), \
+         patch("backend.core.initiative.enqueue_proactive", new=fake_enqueue):
+        assert await initiative._arbitrate_secondary(uid) is True, \
+            "外出候选必须能被 await 并作为本轮出牌"
+    print("[OK] 次级链可 await（同步包装不再截断后续来源）")
+
+
 async def main() -> None:
     await _test_shared_daily_quota()
     await _test_single_send_per_tick()
     await _test_failure_cooldown()
     await _test_focus_quiet_mode()
+    await _test_secondary_chain_awaitable()
     print("统一主动仲裁器测试通过")
 
 
