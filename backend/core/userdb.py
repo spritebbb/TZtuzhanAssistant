@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 28  # v28: G04 companion requests (song/book choice)
+_SCHEMA_VERSION = 29  # v29: F03 thought context receipts
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -665,6 +665,16 @@ CREATE TABLE IF NOT EXISTS companion_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_companion_requests_user
     ON companion_requests(user_id, status);
+-- F03 心事注入回执（runtime，不导出）：记录某轮把哪条心事作为语境选中
+-- （selected）或确认被采用（committed）；唯一三元组，不存模型全文。
+CREATE TABLE IF NOT EXISTS thought_context_receipts (
+    user_id    TEXT NOT NULL,
+    thought_id INTEGER NOT NULL,
+    turn_id    INTEGER NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'selected',  -- selected / committed
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, thought_id, turn_id)
+);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1773,6 +1783,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
+                "thought_context_receipts",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

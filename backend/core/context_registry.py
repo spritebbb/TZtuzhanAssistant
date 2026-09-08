@@ -181,11 +181,62 @@ def register_provider(provider: ContextProvider) -> None:
     _PROVIDERS[provider.entry.id] = provider
 
 
+class PendingThoughtProvider(ContextProvider):
+    """F03 未完成心事：只在话题相关时注入一条，来源失效即退场。
+
+    附着用户发起的一轮，不消耗后台主动额度；注入只记 selected 回执，
+    不 mark_expressed（模型无法可靠声明使用时保守处理），重复抑制交给
+    注册表的 4 回合冷却。
+    """
+
+    def __init__(self) -> None:
+        self.entry = ContextEntry(
+            id="pending_thoughts", namespace="thought/pending",
+            source_type="pending_thought", priority=45.0,
+            sticky_turns=0, cooldown_turns=4,
+        )
+
+    def _to_candidate(self, thought: dict) -> ContextCandidate:
+        from .pending_thoughts import thought_context_text
+
+        text = thought_context_text(thought)
+        return ContextCandidate(
+            entry_id=self.entry.id,
+            source_id=str(thought["id"]),
+            source_version=str(thought.get("updated_at") or thought.get("created_at") or ""),
+            text=text,
+            token_count=_estimate_tokens(text),
+            source_namespace=self.entry.namespace,
+            priority=self.entry.priority,
+            relevance=1.0,
+        )
+
+    def collect(self, user_id: str, query: str, state, turn_id: int) -> list[ContextCandidate]:
+        from .pending_thoughts import context_candidates
+
+        ephemeral = bool((state or {}).get("ephemeral"))
+        thoughts = context_candidates(user_id, query, turn_id, ephemeral=ephemeral)
+        return [self._to_candidate(t) for t in thoughts]
+
+    def refresh(self, user_id: str, source_id: str) -> ContextCandidate | None:
+        from .pending_thoughts import due_thoughts
+
+        for thought in due_thoughts(user_id, limit=10):
+            if str(thought["id"]) == str(source_id):
+                return self._to_candidate(thought)
+        return None
+
+    def render(self, candidates: list[ContextCandidate]) -> str:
+        return "\n".join(c.text for c in candidates)
+
+
 def _ensure_default_providers() -> None:
     if "colists" not in _PROVIDERS:
         register_provider(CoListsProvider())
     if "knowledge_opinions" not in _PROVIDERS:
         register_provider(KnowledgeOpinionsProvider())
+    if "pending_thoughts" not in _PROVIDERS:
+        register_provider(PendingThoughtProvider())
 
 
 # ---- 生命周期（context_lifecycle 表，读写都走 userdb 连接锁语义）----

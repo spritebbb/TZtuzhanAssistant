@@ -193,6 +193,127 @@ def dismiss_thought(user_id: str, thought_id: int) -> bool:
     return bool(cur.rowcount)
 
 
+# ---- F03 心事语境门控（注入到用户发起的一轮，不占后台主动额度） ----
+
+THOUGHT_CONTEXT_MAX_CHARS = 200
+_RELEVANCE_MIN = 1          # 关键词二元组命中阈值（与 colists/事实检索同法）
+_STAGE_GATE_EARLY = "初识"   # 初识只允许非私人化心事（与 planner 一致）
+
+
+def _bigrams(text: str) -> set[str]:
+    clean = "".join(ch for ch in str(text or "") if ch.isalnum() or "一" <= ch <= "鿿")
+    return {clean[i:i + 2] for i in range(len(clean) - 1)} if len(clean) >= 2 else set()
+
+
+def _source_alive(user_id: str, thought: dict) -> bool:
+    """来源必须仍存在（活动/事实/开放问题）；来源消失的候选直接失效。"""
+    source_type = str(thought.get("source_type") or "")
+    source_id = thought.get("source_id")
+    if source_id is None:
+        return False
+    table = {"activity": "activities", "fact": "facts", "open_question": "open_questions"}.get(source_type)
+    if table is None:
+        return False
+    with db._lock:
+        row = db.conn.execute(
+            f"SELECT 1 FROM {table} WHERE user_id = ? AND id = ?",
+            (user_id, int(source_id)),
+        ).fetchone()
+    return row is not None
+
+
+def context_candidates(user_id: str, query: str, turn_id: int, *,
+                       ephemeral: bool = False, limit: int = 1) -> list[dict]:
+    """本轮可注入的心事候选：到点 + 来源合法 + 阶段允许 + 与话题相关。
+
+    最多 limit 条、单条 200 字；临时轮只读不写回执（不改变心事状态）。
+    选中即记 selected 回执（不等于「已表达」——模型无法可靠声明使用时保守处理，
+    重复抑制交给 registry 的 4 回合冷却）。
+    """
+    from .features import flag
+
+    if not flag("context_registry_enabled"):
+        return []
+    clean_query = str(query or "").strip()
+    query_bigrams = _bigrams(clean_query)
+    out: list[dict] = []
+    for thought in due_thoughts(user_id, limit=5):
+        if not _source_alive(user_id, thought):
+            continue
+        content = str(thought.get("content") or "").strip()
+        if not content:
+            continue
+        if query_bigrams:
+            overlap = len(query_bigrams & _bigrams(content))
+            if overlap < _RELEVANCE_MIN:
+                continue  # 话题不相关就不塞心事
+        out.append(thought)
+        if len(out) >= max(1, int(limit)):
+            break
+    if not out:
+        return []
+    if not ephemeral and turn_id:
+        for thought in out:
+            try:
+                record_receipt(user_id, int(thought["id"]), int(turn_id), status="selected")
+            except Exception:
+                logger.warning("[心事] 注入回执写入失败 thought={}", thought.get("id"))
+    return out
+
+
+def thought_context_text(thought: dict) -> str:
+    """渲染注入文本（≤200 字），保留来源属性与「只在自然时提起」的约束。"""
+    content = " ".join(str(thought.get("content") or "").split())
+    if len(content) > THOUGHT_CONTEXT_MAX_CHARS:
+        content = content[: THOUGHT_CONTEXT_MAX_CHARS - 1] + "…"
+    return (
+        "你心里一直惦记一件小事：" + content
+        + "。只有当对方当下的话确实和这件事相关时，才自然提一句；"
+        "不相关就照常回应，别硬扯、别追问、别像提醒事项。"
+    )
+
+
+def record_receipt(user_id: str, thought_id: int, turn_id: int, *,
+                   status: str = "selected") -> bool:
+    """写一条注入回执（唯一 user/thought/turn；重复调用幂等）。"""
+    if status not in {"selected", "committed"}:
+        raise ValueError(f"未知回执状态：{status}")
+    with db._lock:
+        cur = db.conn.execute(
+            "INSERT OR IGNORE INTO thought_context_receipts "
+            "(user_id, thought_id, turn_id, status, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, int(thought_id), int(turn_id), status, _now()),
+        )
+        db.conn.commit()
+    return bool(cur.rowcount)
+
+
+def commit_receipt(user_id: str, thought_id: int, turn_id: int) -> bool:
+    """确认该候选真的被采用（selected → committed）。
+
+    首版保守：模型无法可靠声明「用了哪条」，生产路径不调用它；保留接口给
+    未来能给出确定性信号的表达层，测试覆盖。
+    """
+    with db._lock:
+        cur = db.conn.execute(
+            "UPDATE thought_context_receipts SET status = 'committed' "
+            "WHERE user_id = ? AND thought_id = ? AND turn_id = ? AND status = 'selected'",
+            (user_id, int(thought_id), int(turn_id)),
+        )
+        db.conn.commit()
+    return bool(cur.rowcount)
+
+
+def receipts_for_turn(user_id: str, turn_id: int) -> list[dict]:
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT * FROM thought_context_receipts WHERE user_id = ? AND turn_id = ? "
+            "ORDER BY thought_id",
+            (user_id, int(turn_id)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def stats(user_id: str) -> dict:
     """可观测性：心事池的状态分布（M5 退出标准：可观测）。"""
     with db._lock:
