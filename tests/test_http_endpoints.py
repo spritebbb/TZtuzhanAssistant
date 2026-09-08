@@ -324,6 +324,10 @@ def test_agent_full_flow_gate_to_done() -> None:
                         is_cancelled=None, tool_filter=None):
         return "任务完成：已查完。"
 
+    # 任务成功会写报告到 workspace/agent-reports/：测试期间改到临时目录，别污染工作区
+    import backend.agent.session as _agent_mod
+    _old_report_dir = _agent_mod._REPORT_DIR
+    _agent_mod._REPORT_DIR = Path(tempfile.mkdtemp(prefix="tztuzhan_http_reports_"))
     tool_loop.run_tool_loop = fake_loop
     try:
         with TestClient(app) as client:
@@ -365,7 +369,8 @@ def test_agent_full_flow_gate_to_done() -> None:
                     break
                 time.sleep(0.1)
             assert t["status"] == "done", t
-            assert t["result"] == "任务完成：已查完。", t["result"]
+            # 任务成功后会在结果里附上落盘报告路径（Agent 产物落地），故按前缀断言
+            assert t["result"].startswith("任务完成：已查完。"), t["result"]
 
             # 5) SSE stream：任务结束后迟到连接补看 task_done 帧
             r7 = client.get(f"/api/agent/tasks/{tid}/stream")
@@ -378,6 +383,7 @@ def test_agent_full_flow_gate_to_done() -> None:
         print("[OK] agent 全链路：门禁 → confirm-step/all → run → done → stream 补看")
     finally:
         tool_loop.run_tool_loop = orig_loop
+        _agent_mod._REPORT_DIR = _old_report_dir
         _cleanup_agent()
 
 

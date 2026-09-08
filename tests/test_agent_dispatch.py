@@ -99,6 +99,9 @@ def test_schedule_and_retry() -> int:
     """定时：到点才进 due；重试：失败后可重跑、受上限约束。"""
     import time as _time
 
+    tmp = Path(tempfile.mkdtemp(prefix="tztuzhan_sched_reports_"))
+    old_dir = ag._REPORT_DIR
+    ag._REPORT_DIR = tmp
     uid = "agent-sched-user"
     task = asyncio.run(ag.create_task(uid, "分几步整理周报"))
     # 未定时 → 不在 due 里
@@ -132,6 +135,7 @@ def test_schedule_and_retry() -> int:
         assert any(item.get("type") == "retry" for item in retried.log)
     finally:
         ag.run_tool_round = old_round
+        ag._REPORT_DIR = old_dir
     print("[OK] 定时到点判定 + 重试（含 attempt 记录）")
     return 0
 
