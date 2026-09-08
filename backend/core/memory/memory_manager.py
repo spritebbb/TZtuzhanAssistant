@@ -23,6 +23,8 @@ _FALLBACK_IMPORTANCE_CUTOFF = 0.3  # 重要性低于此阈值的记忆优先遗�
 # Mem0 降级策略：连续失败达到阈值才降级；降级后经过冷却期允许自动重建
 _DEGRADE_THRESHOLD = 3
 _DEGRADE_COOLDOWN_SEC = 300.0
+# 清除时统计条数用的 top_k：get_all 默认只回 20 条，会低估「已清除 N 条」
+_COUNT_TOP_K = 1000
 
 # Mem0 及其依赖（sentence-transformers / chroma / huggingface_hub 等）在初始化时
 # 会通过 Python warnings 和 stdlib logging 打印一批无害噪音（方法改名 FutureWarning、
@@ -278,6 +280,37 @@ class Mem0Manager:
             return self._fallback.forget_old(user_id, max_age_days)
         return 0
 
+    def clear_user(self, user_id: str) -> int:
+        """彻底清除该用户的全部管理记忆，返回删除条数（供「失忆重开」调用）。
+
+        Mem0 的向量库是独立目录（data/chroma_mem0），不归 vector_store.clear_user
+        管；漏掉它会让重置后的召回继续命中旧记忆（long_term 会拼入上下文）。
+        """
+        self._ensure_ready()
+        if self._mem0 is not None:
+            before = self._count_mem0(user_id)
+            try:
+                self._mem0.delete_all(user_id=user_id)
+            except Exception as e:
+                self._record_failure("清除", e)
+                raise
+            return max(0, before - self._count_mem0(user_id))
+        if self._fallback is not None:
+            return self._fallback.clear_user(user_id)
+        return 0
+
+    def _count_mem0(self, user_id: str) -> int:
+        """统计该用户在 Mem0 里的记忆条数（用于清除前后报数）。
+
+        get_all 默认只回 20 条，会低估条数；这里显式放大 top_k。
+        """
+        try:
+            result = self._mem0.get_all(filters={"user_id": user_id}, top_k=_COUNT_TOP_K)
+        except Exception:
+            return 0
+        items = result.get("results") if isinstance(result, dict) else result
+        return len(items or [])
+
     def stats(self, user_id: str | None = None) -> dict:
         """管理统计信息。"""
         self._ensure_ready()
@@ -470,6 +503,20 @@ class _FallbackManager:
         return self._prune(
             user_id, max_age_days=int(max_age_days or _FALLBACK_MAX_AGE_DAYS)
         )
+
+    def clear_user(self, user_id: str) -> int:
+        """清空该用户在 mem 集合中的全部记忆，返回删除条数。"""
+        col = self._mem_collection()
+        if col is None:
+            return 0
+        try:
+            got = col.get(where={"user_id": user_id})
+            ids = list(got.get("ids") or [])
+            if ids:
+                col.delete(ids=ids)
+            return len(ids)
+        except Exception:
+            return 0
 
 
 # 全局单例

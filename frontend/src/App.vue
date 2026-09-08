@@ -109,8 +109,10 @@ async function archiveNow() {
 // === 彻底重置（失忆重开）：清空菟菚记忆/好感/昵称/向量 + 当前会话 ===
 const resetOpen = ref(false)   // 确认弹窗
 const resetting = ref(false)   // 重置进行中
+const deepReset = ref(false)   // 同时清除归档/备份/语音缓存
 function openResetConfirm() {
   if (resetting.value || generating.value) return
+  deepReset.value = false
   resetOpen.value = true
 }
 function closeResetConfirm() {
@@ -120,7 +122,7 @@ async function doReset() {
   if (resetting.value) return
   resetting.value = true
   try {
-    await resetUser()
+    await resetUser(deepReset.value)
     // 重置成功：侧栏（心情/记忆/归档视图复位）+ 对话区重载到全新空白会话
     sessionListKey.value += 1
     chatReloadKey.value += 1
@@ -408,7 +410,16 @@ onUnmounted(() => {
             <li>{{ activePersona.name }}的记忆、你告诉对方的事、共同回忆、向量库</li>
             <li>当前这段对话的气泡</li>
           </ul>
-          <p class="muted">回到最开始的「初识」状态。此操作<b>不可撤销</b>（已归档的对话仍保留，可在侧栏查看）。</p>
+          <label class="deep-reset">
+            <input v-model="deepReset" type="checkbox" :disabled="resetting" />
+            <span>
+              连同<b>归档对话</b>、<b>本机备份</b>与语音缓存一起删除
+              <small class="muted">备份与缓存无法按人格拆分，会一并清掉；本机将不再保留任何可恢复副本。</small>
+            </span>
+          </label>
+          <p class="muted">
+            回到最开始的「初识」状态。此操作<b>不可撤销</b>（未勾选时已归档的对话仍保留，可在侧栏查看）。
+          </p>
         </div>
         <div class="modal-actions">
           <button class="btn ghost" :disabled="resetting" @click="closeResetConfirm">取消</button>
@@ -785,6 +796,21 @@ onUnmounted(() => {
 .modal-body { color: var(--text-dim); font-size: 0.88rem; line-height: 1.7; }
 .modal-body ul { margin: 6px 0 4px; padding-left: 18px; }
 .modal-body .muted { color: var(--text-faint); font-size: 0.8rem; margin-top: 8px; }
+.deep-reset {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.deep-reset input { margin-top: 3px; accent-color: var(--danger); flex: none; }
+.deep-reset span { display: flex; flex-direction: column; gap: 3px; }
+.deep-reset small { font-size: 0.76rem; line-height: 1.5; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .modal-actions .btn {
   padding: 7px 16px;

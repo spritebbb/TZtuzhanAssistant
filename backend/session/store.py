@@ -453,6 +453,23 @@ async def clear_current() -> int:
         return await asyncio.to_thread(_clear_current_sync)
 
 
+def _delete_archives_sync(persona_id: str) -> int:
+    """删除某人格的全部归档，返回删除条数（供「彻底清除」深度模式调用）。"""
+    conn = _connect()
+    try:
+        cur = conn.execute("DELETE FROM archives WHERE persona_id=?", (persona_id,))
+        conn.commit()
+        return max(0, int(cur.rowcount or 0))
+    finally:
+        conn.close()
+
+
+async def delete_archives(persona_id: str) -> int:
+    """删除某人格的全部归档（走 async 锁，不阻塞事件循环）。"""
+    async with _lock:
+        return await asyncio.to_thread(_delete_archives_sync, persona_id)
+
+
 async def archive_current() -> dict | None:
     """归档当前会话（打包消息存入 archives，清空当前会话）。无消息返回 None。"""
     async with _lock:

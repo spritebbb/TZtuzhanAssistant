@@ -12,13 +12,14 @@ router = APIRouter(prefix="/api", tags=["reset"])
 
 
 @router.post("/user/reset")
-async def api_user_reset():
+async def api_user_reset(deep: bool = False):
     """让菟菚忘记当前用户积累的一切（好感/昵称/记忆/向量/当前会话气泡）。
 
-    返回清理统计。此操作不可撤销（不删除归档），前端调用前应二次确认。
+    ``deep=true`` 额外清除当前人格的归档、本机全部备份与语音缓存。
+    返回清理统计。此操作不可撤销（默认不删除归档），前端调用前应二次确认。
     """
     try:
-        stats = await reset_core.reset_everything()
+        stats = await reset_core.reset_everything(deep=deep)
         if not stats.get("ok"):
             logger.warning("[重置] 用户重置未完整完成：{}", stats.get("failures"))
             return JSONResponse(
