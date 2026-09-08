@@ -129,7 +129,9 @@ def test_state_projection_and_persona_gate() -> int:
     assert load_state(uid).discrete_emotions == [], "无情绪时派生快照为空"
 
     # P1-01 闭环：恋人 + trust 95 + hurt 0.6 → 深水区切片被真实状态激活
-    apply_emotion(uid, "hurt", 0.6, now=BASE)
+    # 集成门控读取使用真实当前时刻；不能把固定历史锚写入后再按墙钟衰减，
+    # 否则测试会随执行日期从通过变失败。
+    apply_emotion(uid, "hurt", 0.6, now=datetime.now())
     state = load_state(uid)
     assert state.discrete_emotions and state.discrete_emotions[0]["emotion"] == "hurt"
     emotions = {i["emotion"]: i["intensity"] for i in state.discrete_emotions}
