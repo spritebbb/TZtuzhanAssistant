@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Body, JSONResponse
+from fastapi import APIRouter, Body
+from fastapi.responses import JSONResponse
 
 from ..core import shared_resources as sr
 from ..core.persona_profiles import active_user_id
