@@ -8,7 +8,9 @@
 >
 > 2026-09-07 实施更新：波次 0 已由 Codex 完成。P0-01A=`ad110c2`、P0-01B=`9bbc224`、P0-02=`63c80b4`、P0-03=`a17471e`、P0-04A=`9720fca`、P0-04B=`0f2b64b`；P0-04C1 已真实运行，C2 因未配置 Tavily/Bocha 凭据按合同标记 unavailable。实现与验证档案见 `deliverables/P0-COMPLETION-2026-09-07.md`。后续接手不得重做这些切片，先审实际接口和回归。
 >
-> 2026-09-08 实施更新：P1、P2 已由 Codex 完成。P1-01=`9b8d39b`、P1-02=`87090f1`、P1-03=`7e9c12e`、P1-04=`b1b2c87`、P1-05=`1d25d0f`；P2-01=`88e6c28`、P2-02=`b8bb8c1`、P2-03=`36bc59b`、P2-04=`6d99a18`、P2-05=`b6b3f2b`、P2-06=`469bafc`。全量测试发现并修复开放约定看板计数（`8add635`）及应用内时间 tick 共享连接事务竞争（`58a6c28`）。后续接手应以实际 schema v21 和本文“实施结果”为准，不得重复实现 P1/P2。
+> 2026-09-08 实施更新：P1、P2 已由 Codex 完成。P1-01=`9b8d39b`、P1-02=`87090f1`、P1-03=`7e9c12e`、P1-04=`b1b2c87`、P1-05=`1d25d0f`；P2-01=`88e6c28`、P2-02=`b8bb8c1`、P2-03=`36bc59b`、P2-04=`6d99a18`、P2-05=`b6b3f2b`、P2-06=`469bafc`。全量测试发现并修复开放约定看板计数（`8add635`）及应用内时间 tick 共享连接事务竞争（`58a6c28`）。P2 完成时 schema 为 v21；后续接手应以本文“实施结果”和代码中的当前版本为准，不得重复实现 P1/P2。
+>
+> 2026-09-08 P3 实施更新：P3-01=`1db8435`；P3-02A=`a438861`、P3-02B=`5164323`、P3-02C=`d7cc2c2`。全量测试发现情绪门控测试存在固定历史时间与墙钟混用，已由 `5df95bf` 消除漂移。当前 bot.db schema v22；P3-01/P3-02 不再是待实现工作。
 
 ## 1. 接手边界与当前基线
 
@@ -28,11 +30,11 @@
 |---|---|
 | M8.3–M8.7 收尾 | `f4d39ea` 已提交，不再是待提交工作树 |
 | M9-00 识图事实层 | `6081d67` 已提交，勿重做 |
-| 后端 | 89/89，Codex 实跑聚合测试，430.14 秒（2026-09-08） |
+| 后端 | 93/93，Codex 实跑聚合测试，504.36 秒（2026-09-08） |
 | 前端 | Vitest 69/69；vue-tsc 与生产构建通过 |
 | 浏览器 | Playwright 7/7，临时数据目录 |
 | 人格 | 现有 golden set 48 场景；签名/魅力专项尚未建设 |
-| bot.db schema | `backend/core/userdb.py` 当前版本 21；其他数据库有各自版本 |
+| bot.db schema | `backend/core/userdb.py` 当前版本 22；其他数据库有各自版本 |
 | 工作区遗留 | `.zcode/` 本机配置未跟踪，不加入业务提交 |
 | 真实端点验证 | 本轮识图用 mock 验证，无真实视觉模型效果结论 |
 
@@ -122,7 +124,7 @@ git diff --check
 | P1-04 | 行程状态机与时间 tick | 已完成 `b1b2c87`；并发修复 `58a6c28` |
 | P1-05 | 纪念日/季节换挡 | 已完成 `1d25d0f` |
 | P2-01～06 | 二维关系、校准、对称约定、链式事件、节奏仪式、重逢 | 已全部完成 `88e6c28`～`469bafc` |
-| P3-01～05 | 全情绪矩阵、知识内化/求证、TTS、数据安全、演化/遥测 | 主线基础完成后独立交付 |
+| P3-01～05 | 全情绪矩阵、知识内化/求证、TTS、数据安全、演化/遥测 | P3-01/02 已完成；P3-03～05 待后续独立交付 |
 | G01～04 | 记忆质感、副语言、悬念、求助 | 明确补设计边界，不伪装成已拍板细节 |
 
 一行不等于必须一个巨大提交；表中明确要求拆分的主题按子步骤独立提交。只开一个活动实现主题，不同时让两个代理编辑同一工作树。
@@ -416,6 +418,14 @@ VERIFY: .venv/Scripts/python.exe tests/test_reunion_flow.py ;; .venv/Scripts/pyt
 VERIFY: .venv/Scripts/python.exe tests/test_attitude_matrix.py ;; .venv/Scripts/python.exe tests/test_persona_signatures.py ;; .venv/Scripts/python.exe tests/test_state_interaction.py
 ```
 
+**实施结果（`1db8435`）**：
+
+1. `emotion_state.py` 保留七类离散情绪为唯一情绪来源，将五轴基础向量按活跃强度确定性合成；信任主要修正防备与耐心，亲密主要修正柔软和追问意愿，全部夹紧至 0–1。深夜/低精力只降低追问，不借关系值升级亲密。
+2. `attitude_instruction()` 把矩阵编译成短行为指令，不输出轴名、数值或心理理论。受伤/戒备与 tenderness 可同时保留；低亲密追加明确的称呼和暧昧边界；任何状态最后都保留菟菚直白、克制、具体关心人的人格签名。
+3. `AgentState.attitude_axes` 是只读派生属性，不建表、不写 kv。`behavior._emotion_line` 保留原三个高价值锚点并消费完整矩阵；相同状态连续 30 轮输出确定，不产生隐式个体演化。
+4. 人格切片 `state_keys_version` 从 1 升到 2，封闭键增加 `attitude.patience/humor/guard/directness/followup`，仅支持 0–1 的 gte/lte。状态视图由现有 emotions/trust/intimacy/energy/time 派生这些键，资源和测试同步升级；无情绪仍完全走旧行为路径。
+5. `tests/test_attitude_matrix.py` 覆盖七类向量、双维独立修正、高信任低亲密不越级、矛盾情绪、低精力边界、运行时无理论泄露和 30 轮稳定性；人格签名、状态修复、情绪衰减和切片编译回归通过。
+
 ### P3-02：联网动态 2+1 与知识内化
 
 必须拆成 A 工具执行合同、B 多源求证、C 知识内化三个切片。**已有落点** `backend/tools/tool_loop.py:run_tool_loop/_run_native`、`core/intent.py`、`core/search.py:web_search`、`core/knowledge.py`、`core/daily.py`；新建建议 `core/source_verification.py`、`tests/test_source_verification.py`、`tests/test_knowledge_opinions.py`。
@@ -442,6 +452,16 @@ C 单独使用：
 ```text
 VERIFY: .venv/Scripts/python.exe tests/test_knowledge_opinions.py ;; .venv/Scripts/python.exe tests/test_knowledge_base.py ;; .venv/Scripts/python.exe tests/test_relationship_bundle.py
 ```
+
+**实施结果（A=`a438861`、B=`5164323`、C=`d7cc2c2`，schema v22）**：
+
+1. A 在既有 `tool_loop.py` 原生/文本双循环上增加取消钩子、每个工具循环总计最多 8 次真实执行和规范化调用指纹。每个原生调用仍生成独立 `tool_call_id` 并与 tool 消息一一配对；同一循环重复 name+args 复用首次结果，不再次触发写入或外部副作用；文本回退改为可取消的顺序执行。进度事件只报告 thinking/tool/tool_done，循环结束后单独生成最终人格表达。
+2. B 新建 `source_verification.py`。查询经 NFKC、小写和空白规范化；URL 去 fragment/跟踪参数，站点按注册域近似归一，重复 URL、同站子域和明显同文转载只算一个来源。正常路径选择两个独立站点；同实体、指标、单位和时期的结构化 claim 数值冲突时加入第三站，仍冲突则返回 conflict 并要求并列，不可比较项标记 not_comparable。
+3. `search.py` 对价格/天气/汇率/当前版本使用 2 分钟缓存，对新闻/最新/今天使用 5 分钟，普通查询最多 24 小时；结果携带 provider、fetched_at 和 cache_hit。`intent.requires_search` 确定性识别时效问题。pipeline 和 web_search 插件消费 supported/insufficient/conflict/failed 报告，保留 URL，把来源包装为不可信材料；缓存结果不宣称“刚查到”，失败和证据不足不伪装成一致。
+4. C 新增 `knowledge_opinions` 与 `knowledge_opinion_sources`。观点保存 stance/origin/confidence/version/status，来源表保存 document/chunk 的片段范围及 hash；同一规范化观点+来源幂等，撤销/复活推进版本。读取重新验证用户、文档、分块、范围和 hash，源变更立即停止注入；观点不写入 facts、long_memory 或用户画像。
+5. `KnowledgeOpinionsProvider` 只在当前查询与观点相关时进入 context registry，并继续受统一预算、sticky/cooldown 和成功回合提交控制；渲染明确它是角色观点，不是用户事实或外界证明。知识 API 新增观点列表、文档下创建和撤销；原始 kb 召回提示也改为带文档来源的不可信资料，不再说成她已经形成的观点。
+6. schema v21→v22 只新增两张空表和索引。两张表加入 userdb/reset 清单；关系包 knowledge 类别按 document→chunk→opinion→source 恢复并重映射三层 id；删除文档先删除观点来源和观点。迁移与回滚见 `docs/adr/M9-knowledge-opinions.md`。
+7. 新增 `test_tool_execution_contract.py`、`test_source_verification.py`、`test_knowledge_opinions.py`，覆盖 A/B/C 的取消、去重、来源独立、转载、冲突第三源、缓存、失败状态、观点生命周期、语境、hash 失效、API、导出恢复和删除。最终后端 93/93、前端 69/69、vue-tsc/生产构建、Playwright 7/7 全绿。
 
 ### P3-03：本地 GPT-SoVITS TTS
 
@@ -721,7 +741,7 @@ VERIFY: .venv/Scripts/python.exe tests/test_output_hygiene.py ;; .venv/Scripts/p
 
 运行时资源 schema=1：`PersonaSlice{id,kind,namespace,trigger_ids,priority,examples[<=3],instruction,source_doc,version}`。核心 identity/boundaries 不接受动态覆盖，正典条目和例句写在 persona 实例资源目录；JSON Schema 校验失败时整个新版不激活，继续旧版本。编译先固定核心，再按状态谓词选至多3条动态切片，总动态预算800 tokens；缓存键 persona_version+state_fingerprint，不跨人格复用。
 
-状态谓词与指纹（2026-09-07 补充，P1-01/P3-01 共用）：`trigger_ids` 引用封闭状态键集合，谓词是 JSON 条件 `{"field","op","value"}` 的 AND 列表，不支持任意表达式或脚本。首版状态键：`derived_stage`、`trust`、`intimacy`、`energy_band`、`emotion.<name>`（该情绪存在且 intensity≥0.4）、`time_of_day`、`quiet`；键表带 `state_keys_version`，新增键必须同步 eval 用例。`state_fingerprint` 为上述键按固定顺序取值做 canonical JSON 序列化后的哈希；某切片未引用的键不参与该切片的指纹。`time_of_day` 值域（审查 I9 补）：`morning`（06–12）/`afternoon`（12–18）/`evening`（18–23）/`late`（23–06），按用户时区本地时间；`energy_band` 值域 `high`/`normal`/`low`（由既有 state 精力分档映射）。
+状态谓词与指纹（2026-09-07 补充，P1-01/P3-01 共用）：`trigger_ids` 引用封闭状态键集合，谓词是 JSON 条件 `{"field","op","value"}` 的 AND 列表，不支持任意表达式或脚本。当前 `state_keys_version=2`：基础键为 `derived_stage`、`trust`、`intimacy`、`energy_band`、`emotion.<name>`（该情绪存在且 intensity≥0.4）、`time_of_day`、`quiet`；P3-01 新增 `attitude.patience/humor/guard/directness/followup`，仅允许对 0–1 数值使用 gte/lte。新增键必须同步 eval 用例。`state_fingerprint` 为上述键按固定顺序取值做 canonical JSON 序列化后的哈希；某切片未引用的键不参与该切片的指纹。`time_of_day` 值域（审查 I9 补）：`morning`（06–12）/`afternoon`（12–18）/`evening`（18–23）/`late`（23–06），按用户时区本地时间；`energy_band` 值域 `high`/`normal`/`low`（由既有 state 精力分档映射）。
 
 情绪集合首版 joy/sadness/anger/hurt/anxiety/calm/tenderness，intensity∈[0,1]，同时最多3条，超量按绝对强度和稳定id排序；不以删除情绪事件原文保持情绪。“吃醋”若后续加入只能是低压角色表达，不产生控制用户的规则。消退 `i(now)=i0*2^(-hours/half_life)`，初版半衰期 joy6h/sadness12h/anger4h/hurt12h/anxiety6h/tenderness8h，calm作为无主态回退；i<0.05移除。显式道歉/安抚按已验证来源加0.2修复量，每来源只一次。
 
@@ -1321,8 +1341,8 @@ E03 导入先验证 manifest、schema、namespace、source_links 和 id remap，
 | M6 在场、空间、审美、桌宠、界面克制 | L07/L08/L10、§20.5 | 方案完成；桌宠按条件延期 |
 | M7 世界来源、D8、QQ、微信、跨端时间线 | L11～L14 | 方案完成；部署/账号属外部条件 |
 | M8 回望、重逢、封存、导出恢复 | P2-06、§21.4、LC-1 | P2-06 重逢已实现；M8 全部 Epic 完成 |
-| 18 个长期 Epic | 对应 M0–M8 行 + P3-01～05、L15/L16 | 全部有实现或完整方案 |
-| M9 §4.1～4.10 | P3-01、P2-04、P1-01/02/04、P0-04、§17 | 全部有模块/数据/测试落点 |
+| 18 个长期 Epic | 对应 M0–M8 行 + P3-01～05、L15/L16 | P3-01/02 已实现；其余均有完整方案 |
+| M9 §4.1～4.10 | P3-01、P2-04、P1-01/02/04、P0-04、§17 | P3-01/02 已实现；其余均有模块/数据/测试落点 |
 | M9 26 项缺陷 | 原 §10 映射 + §14、§17、§20～21 | 1～26 全覆盖 |
 | 七项用户功能反馈 | F01～F07 | 七项均有独立任务书 |
 | 五项设计空白 | G01～G04 + P3-04 | 权重/边界/加密均已固定 |
