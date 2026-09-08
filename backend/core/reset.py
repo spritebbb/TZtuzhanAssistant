@@ -53,6 +53,7 @@ _TABLES = (
     "domain_trust_events", "domain_trust_snapshot",
     "aesthetic_preferences", "artifact_placements",
     "shared_resources", "resource_grants",
+    "persona_evolution_log", "experience_metrics",
     "kb_documents", "kb_chunks", "unlocks",
 )
 

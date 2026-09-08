@@ -32,7 +32,8 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links"),
+    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
+             "persona_evolution_log"),
     "tasks": ("tasks", "promises", "open_questions"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -106,6 +107,7 @@ _REFERENCE_RULES = (
     _rule_static("artifact_placements", "artifact_id", "artifacts", frozenset()),
     _rule_dynamic("aesthetic_preferences", "source_id", "source_type"),
     _rule_static("resource_grants", "resource_id", "shared_resources", frozenset()),
+    _rule_static("persona_evolution_log", "source_event_id", "relationship_events", frozenset()),
     _rule_static("activity_notes", "activity_id", "activities"),
     _rule_static("reading_segments", "activity_id", "activities"),
     _rule_static("observation_entries", "activity_id", "activities"),
