@@ -68,7 +68,8 @@ async def test_run_task_context() -> None:
     orig_call = tool_loop.run_tool_loop
 
     async def fake_loop(messages, call_llm, *, max_loops=2, mock=False,
-                        final_instruction=None, call_native=None, on_progress=None):
+                        final_instruction=None, call_native=None, on_progress=None,
+                        is_cancelled=None, tool_filter=None):
         # 直接调用 fake_native 模拟一轮工具调用 + 一轮结束
         text, tcs = await fake_native(messages, None)
         return text or "任务完成。"

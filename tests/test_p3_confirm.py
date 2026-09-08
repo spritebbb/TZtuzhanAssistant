@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.tools.base import ToolRegistry, CATEGORY_RUN, DANGER_HIGH
+from backend.core.config import config as _cfg
 from backend.tools.confirm import ConfirmService, current_sse_push
 from backend.models.tool import ToolSpec
 
@@ -119,6 +120,8 @@ async def test_toolregistry_integration() -> None:
 
 
 async def main() -> None:
+    # 部署级演示模式会让确认钩子直接放行，确认语义测试必须显式关闭
+    _cfg.agent_demo_mode = False
     await test_allow_flow()
     await test_deny_flow()
     await test_timeout_flow()

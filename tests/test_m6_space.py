@@ -54,7 +54,9 @@ def _test_artifacts_space() -> None:
         data = client.get("/api/artifacts").json()
         assert data["ok"] and data["artifacts"], "空间里应有真实 artifact"
         found = next(
-            (a for a in data["artifacts"] if a["source_id"] == activity["id"]), None
+            (a for a in data["artifacts"]
+             if a["source_id"] == activity["id"] and a["artifact_type"] == "book_summary"),
+            None,
         )
         assert found is not None
         assert found["artifact_type"] == "book_summary"
