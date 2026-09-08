@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Message } from '../../api/sessions'
@@ -6,6 +6,10 @@ import MessageBubble from '../MessageBubble.vue'
 
 vi.mock('../../api/activityDrafts', () => ({
   confirmActivityDraft: vi.fn(async () => ({ ok: true, activity_id: 5, kind: 'goal' })),
+}))
+vi.mock('../../api/memory', () => ({
+  updateFactPinned: vi.fn(async () => undefined),
+  deleteFact: vi.fn(async () => undefined),
 }))
 
 function botMessage(explanation: Message['explanation']): Message {
@@ -33,6 +37,8 @@ describe('MessageBubble 记忆生命周期露出（G01/F07）', () => {
             kind: '长期事实',
             text: '用户喜欢猫',
             lifecycle: {
+              fact_id: 7,
+              version: 'v1',
               pinned: true,
               expires_at: null,
               tier: 'long',
@@ -73,6 +79,8 @@ describe('MessageBubble 记忆生命周期露出（G01/F07）', () => {
             kind: '长期事实',
             text: '用户最近在学吉他',
             lifecycle: {
+              fact_id: 8,
+              version: 'v2',
               pinned: false,
               expires_at: '2026-10-08T12:00:00',
               tier: 'short',
@@ -114,5 +122,34 @@ describe('MessageBubble 活动草稿卡（F06）', () => {
     const { confirmActivityDraft } = await import('../../api/activityDrafts')
     expect(confirmActivityDraft).toHaveBeenCalledWith('tok.abc')
     expect(wrapper.text()).toContain('好，这就开始')
+  })
+})
+
+describe('MessageBubble 记忆生命周期操作（F07）', () => {
+  it('固定切换与删除都带版本号，删除后收起正文', async () => {
+    const message = botMessage(baseExplanation([
+      {
+        kind: '长期事实',
+        text: '用户喜欢猫',
+        lifecycle: {
+          fact_id: 42, version: 'v9', pinned: false, expires_at: null, tier: 'short',
+          retention: '尚待确认', confidence: 0.7, verified_at: null,
+          user_confirmed: false, can_edit: true,
+        },
+      },
+    ]))
+    const wrapper = mount(MessageBubble, {
+      props: { message, isStreamingLast: false, ttsKey: 'k7' },
+    })
+    await wrapper.get('.whybtn').trigger('click')
+    await wrapper.get('.lc-btn').trigger('click')
+    await flushPromises()
+    const memory = await import('../../api/memory')
+    expect(memory.updateFactPinned).toHaveBeenCalledWith(42, true)
+    await wrapper.findAll('.lc-btn')[1].trigger('click')
+    await flushPromises()
+    expect(memory.deleteFact).toHaveBeenCalledWith(42, 'v9')
+    expect(wrapper.text()).toContain('这条已经删掉了')
+    expect(wrapper.text()).not.toContain('用户喜欢猫')
   })
 })
