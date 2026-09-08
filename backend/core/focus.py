@@ -216,6 +216,8 @@ def complete_focus(user_id: str, activity_id: int) -> dict:
         )
         detail = _row_to_detail(_get_row_locked(user_id, activity_id))
         _record_focus_finished_locked(user_id, activity_id, detail, now)
+        # F04：完成事件先写，收尾消息同事务入箱（后台重试，不占主动额度）
+        _enqueue_wrapup_locked(user_id, activity_id, detail, now)
         db.conn.commit()
     return detail
 
@@ -233,6 +235,12 @@ def cancel_focus(user_id: str, activity_id: int) -> dict:
             "UPDATE activities SET status = 'cancelled', ends_at = NULL, "
             "completed_at = ?, updated_at = ? WHERE id = ?",
             (now, now, activity_id),
+        )
+        # F04：取消的活动永不发收尾
+        db.conn.execute(
+            "UPDATE wrapup_outbox SET status = 'cancelled', updated_at = ? "
+            "WHERE user_id = ? AND activity_id = ? AND status = 'pending'",
+            (now, user_id, activity_id),
         )
         db.conn.commit()
         row = _get_row_locked(user_id, activity_id)
@@ -359,11 +367,90 @@ def focus_context(user_id: str, query: str, *, settle: bool = True) -> str:
     )
 
 
+MAX_WRAPUP_ATTEMPTS = 2
+_WRAPUP_MATERIAL_MAX = 100
+
+
+def build_wrapup_material(detail: dict, state=None) -> str:
+    """收尾素材：只取真实已用时长/是否中断/用户显式目标，≤100 字。
+
+    不评分、不声称用户完成了目标（F04 契约）。
+    """
+    parts: list[str] = []
+    elapsed = int(detail.get("elapsed_seconds") or 0)
+    if elapsed:
+        parts.append(f"实际专注约 {max(1, round(elapsed / 60))} 分钟")
+    if detail.get("status") == "cancelled":
+        parts.append("这段是提前结束的")
+    goal = str(detail.get("goal") or "").strip()
+    if goal:
+        parts.append(f"他开始时说要做的是「{goal[:30]}」")
+    if state is not None:
+        frame_line = str(getattr(state, "mood_line", "") or "").strip()
+        if frame_line:
+            parts.append(frame_line[:24])
+    text = "；".join(parts)
+    return text[:_WRAPUP_MATERIAL_MAX]
+
+
+def _enqueue_wrapup_locked(user_id: str, activity_id: int, detail: dict, now: str) -> None:
+    """完成专注时入箱（幂等：同 user/activity 只一条）。"""
+    from .features import flag
+
+    if not flag("focus_wrapup_enabled") or not wrapup_eligible(detail):
+        return
+    db.conn.execute(
+        "INSERT OR IGNORE INTO wrapup_outbox "
+        "(user_id, activity_id, status, candidate_text, attempt, delivery_id, "
+        "created_at, updated_at) VALUES (?, ?, 'pending', ?, 0, ?, ?, ?)",
+        (user_id, int(activity_id), build_wrapup_material(detail),
+         f"wrapup:{user_id}:{int(activity_id)}", now, now),
+    )
+
+
+def _claim_wrapup(user_id: str, activity_id: int, *, now: str) -> dict | None:
+    """认领一条待投递收尾；重试上限 2 次。"""
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT * FROM wrapup_outbox WHERE user_id=? AND activity_id=? "
+            "AND status='pending' AND attempt < ?",
+            (user_id, int(activity_id), MAX_WRAPUP_ATTEMPTS),
+        ).fetchone()
+        if row is None:
+            return None
+        db.conn.execute(
+            "UPDATE wrapup_outbox SET attempt = attempt + 1, updated_at=? WHERE id=?",
+            (now, int(row["id"])),
+        )
+        db.conn.commit()
+    return dict(row)
+
+
+def _finish_wrapup(user_id: str, activity_id: int, ok: bool, *, now: str) -> None:
+    with db._lock:
+        db.conn.execute(
+            "UPDATE wrapup_outbox SET status=?, updated_at=? WHERE user_id=? AND activity_id=?",
+            ("sent" if ok else "failed", now, user_id, int(activity_id)),
+        )
+        db.conn.commit()
+
+
+def wrapup_pending(user_id: str, activity_id: int) -> dict | None:
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT * FROM wrapup_outbox WHERE user_id=? AND activity_id=?",
+            (user_id, int(activity_id)),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
 async def maybe_send_wrapup(user_id: str, activity_id: int) -> bool:
     """结束复盘：由她说一句简短收尾（不绩效评判）。
 
     经 enqueue_proactive 走既有投递队列（SSE + 落库），失败静默；
-    这是用户发起的活动闭环消息，不消耗每日主动额度。
+    这是用户发起的活动闭环消息，不消耗每日主动额度（语义保留）。
+    F04：投递走 wrapup_outbox（唯一 user/activity、重试 ≤2 次、delivery_id 去重）；
+    API 超时不回滚已完成的专注——完成事件与入箱都已先提交。
     """
     from .config import config
 
@@ -373,8 +460,12 @@ async def maybe_send_wrapup(user_id: str, activity_id: int) -> bool:
         detail = get_focus(user_id, activity_id)
         if detail is None or not wrapup_eligible(detail):
             return False
+        claim = _claim_wrapup(user_id, activity_id, now=_now())
+        if claim is None:
+            return False  # 已投递 / 已取消 / 重试用尽
         user = db.get_user(user_id)
         if not user:
+            _finish_wrapup(user_id, activity_id, False, now=_now())
             return False
         from .affection import stage_of
         from .llm import chat
@@ -389,6 +480,7 @@ async def maybe_send_wrapup(user_id: str, activity_id: int) -> bool:
             affection=affection_val,
             user_id=user_id,
         )
+        material = build_wrapup_material(detail)
         minutes = detail["planned_minutes"]
         msgs = [
             {"role": "system", "content": sys_prompt},
@@ -396,19 +488,29 @@ async def maybe_send_wrapup(user_id: str, activity_id: int) -> bool:
                 "role": "user",
                 "content": (
                     f"对方刚结束一段 {minutes} 分钟的专注，这段时间你一直安静陪着。"
-                    "现在时间到了，你说一句简短的收尾：告诉他时间到了，"
+                    + (f"（可参考的真实情况：{material}）" if material else "")
+                    + "现在时间到了，你说一句简短的收尾：告诉他时间到了，"
                     "让他起来活动一下或喝口水。一两句就够。"
                     "不要评价他做得好不好，不要统计、不要打分、不要问成果；"
                     "符合你的人格和说话方式，别加括号动作。"
                 ),
             },
         ]
-        text = (await chat(msgs, max_tokens=80, temperature=0.8)).strip()[:160]
+        text = ""
+        try:
+            text = (await chat(msgs, max_tokens=80, temperature=0.8)).strip()[:160]
+        except Exception as e:
+            logger.warning("[专注] 复盘文案生成失败，按重试预算处理: {}", e)
         if not text:
-            return False
+            if int(claim["attempt"]) + 1 >= MAX_WRAPUP_ATTEMPTS:
+                text = "时间到了，起来动一动，喝口水。"  # 确定性短回顾兜底
+            else:
+                return False  # 保持 pending，留给下一次重试
         from .initiative import enqueue_proactive
 
-        return await enqueue_proactive(user_id, text)
+        ok = await enqueue_proactive(user_id, text)
+        _finish_wrapup(user_id, activity_id, ok, now=_now())
+        return ok
     except Exception as e:
         logger.warning("[专注] 复盘消息生成失败（不影响完成流程）: {}", e)
         return False

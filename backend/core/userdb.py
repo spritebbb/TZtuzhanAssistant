@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 31  # v31: F02 source links (narrative material interop)
+_SCHEMA_VERSION = 32  # v32: F04 focus wrapup outbox
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -709,6 +709,21 @@ CREATE INDEX IF NOT EXISTS idx_source_links_owner
     ON source_links(user_id, owner_type, owner_id);
 CREATE INDEX IF NOT EXISTS idx_source_links_source
     ON source_links(user_id, source_type, source_id);
+-- F04 专注收尾投递箱：完成事件先写，收尾消息在同事务入箱，后台重试 ≤2 次，
+-- delivery_id 去重；用户发起的活动闭环，不占每日主动额度（语义保留）。
+CREATE TABLE IF NOT EXISTS wrapup_outbox (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    activity_id    INTEGER NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',  -- pending / sent / failed / cancelled
+    candidate_text TEXT NOT NULL DEFAULT '',
+    attempt        INTEGER NOT NULL DEFAULT 0,
+    next_retry     TEXT,
+    delivery_id    TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    UNIQUE (user_id, activity_id)
+);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1817,7 +1832,7 @@ class UserDB:
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
-                "thought_context_receipts", "humor_usage", "source_links",
+                "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

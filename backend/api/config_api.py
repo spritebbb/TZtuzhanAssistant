@@ -22,6 +22,7 @@ _FLAG_LABELS = {
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",
     "companion_requests_enabled": "她的请求：关系够近时她偶尔请你帮个小忙（挑歌/挑书）",
     "humor_memory_enabled": "幽默记忆：只有你明确认可的梗她才会反复玩（不认可的立刻收起来）",
+    "focus_wrapup_enabled": "专注收尾：结束专注时她按真实情况说一句收尾（不评分）",
 }
 
 
