@@ -174,6 +174,35 @@ def revert(user_id: str, log_id: int) -> dict:
     return {"parameter": parameter, "value": current_value(user_id, parameter)}
 
 
+def has_evolution(user_id: str, parameter: str) -> bool:
+    """该参数是否已有有效演化（未演化时消费方保持默认行为，不引入扰动）。"""
+    from .userdb import db
+
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT 1 FROM persona_evolution_log WHERE user_id=? AND parameter=? "
+            "AND reverted_at IS NULL LIMIT 1",
+            (user_id, parameter),
+        ).fetchone()
+    return row is not None
+
+
+def behavior_hints(user_id: str) -> dict[str, float]:
+    """消费侧入口：三个白名单参数的当前值（读失败回默认，绝不阻塞主链路）。
+
+    - verbosity_preference → 行为帧长度档
+    - humor_usage_rate → 幽默选择频率门
+    - initiative_template_weight → 主动候选必要性权重
+    """
+    hints: dict[str, float] = {}
+    for parameter, (base, _lo, _hi) in WHITELIST.items():
+        try:
+            hints[parameter] = current_value(user_id, parameter)
+        except Exception:
+            hints[parameter] = base
+    return hints
+
+
 def history(user_id: str, parameter: str | None = None, limit: int = 30) -> list[dict]:
     """演化历史（给用户的可解释视图：只报参数/方向/时间/是否已撤销）。"""
     from .userdb import db

@@ -32,12 +32,15 @@ class BehaviorFrame:
     emotion_line: str = ""  # 离散情绪（P1-03）：少量锚点 + 自然语言摘要
     calendar_line: str = "" # 日历调制（P1-05）：纪念日/自然季节的轻语气提示
     style_line: str = ""    # 长期关系气质（L03）：表达带宽的轻倾向，不写分数/等级
+    evolution_line: str = "" # P3-05 表达层演化：话多话少/幽默频率的自然语言体现
 
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
         parts = [self.mood_line, self.stage_line]
         if self.texture_line:
             parts.append(self.texture_line)
+        if self.evolution_line:
+            parts.append(self.evolution_line)
         if self.season_line:
             parts.append(self.season_line)
         if self.emotion_line:
@@ -316,10 +319,12 @@ def _emotion_line(s: AgentState, emotions: list | None = None,
 
 
 def build_behavior_frame(state: AgentState, season_line: str = "",
-                         calendar_line: str = "", style_line: str = "") -> BehaviorFrame:
+                         calendar_line: str = "", style_line: str = "",
+                         evolution_line: str = "") -> BehaviorFrame:
     """根据状态生成一轮行为帧。season_line 由 seasons.current_season 预先算好；
     calendar_line 由 calendar_modulation.compose_line 预先算好（P1-05）；
-    style_line 由 relationship_style 推导预先算好（L03）。"""
+    style_line 由 relationship_style 推导预先算好（L03）；
+    evolution_line 由 persona_evolution 白名单参数推导预先算好（P3-05）。"""
     return BehaviorFrame(
         mood_line=_mood_line(state),
         stage_line=_stage_line(state),
@@ -334,4 +339,5 @@ def build_behavior_frame(state: AgentState, season_line: str = "",
         emotion_line=_emotion_line(state),
         calendar_line=calendar_line,
         style_line=style_line,
+        evolution_line=evolution_line,
     )

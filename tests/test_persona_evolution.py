@@ -146,6 +146,19 @@ def test_export_roundtrip_evolution() -> int:
     return 0
 
 
+def test_behavior_hints_and_consumption() -> int:
+    """P3-05 消费侧：behavior_hints 返回三参数当前值；演化后可见。"""
+    uid = "p305-hints"
+    db.ensure_user(uid)
+    hints = evo.behavior_hints(uid)
+    assert set(hints) == set(evo.WHITELIST), hints
+    assert all(abs(v - 0.5) < 1e-9 for v in hints.values())
+    evo.evolve(uid, "verbosity_preference", -0.1, reason="test")  # 单步上限 ±0.1
+    assert abs(evo.behavior_hints(uid)["verbosity_preference"] - 0.4) < 1e-9
+    print("[OK] behavior_hints 消费侧入口")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_whitelist_and_step_cap()
@@ -153,6 +166,7 @@ def main() -> int:
         + test_source_death_invalidates_offset()
         + test_metrics_aggregate_and_exclusion()
         + test_export_roundtrip_evolution()
+        + test_behavior_hints_and_consumption()
     )
     if failed:
         print(f"\n=== P3-05：{failed} 项失败 ===")
@@ -163,3 +177,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

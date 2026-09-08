@@ -214,6 +214,31 @@ def _recent_term_ids(user_id: str, *, within_turns: int = REPEAT_COOLDOWN_TURNS,
     return {int(r["term_id"]) for r in rows}
 
 
+def _rate_gate_allows(user_id: str, moment: datetime) -> bool:
+    """P3-05 humor_usage_rate 频率门：只在用户真的调过该参数时生效。
+
+    未演化 → 完全保持原有行为（不引入任何扰动）；演化后按
+    (用户, 当天, 小时段) 确定性取值与 rate 比较：1.0 全开、0 全关。
+    """
+    try:
+        from .persona_evolution import behavior_hints, has_evolution
+
+        if not has_evolution(user_id, "humor_usage_rate"):
+            return True
+        rate = float(behavior_hints(user_id).get("humor_usage_rate", 0.5))
+    except Exception:
+        return True
+    if rate >= 0.999:
+        return True
+    if rate <= 0.001:
+        return False
+    import hashlib
+
+    slot = f"{user_id}|{moment.date().isoformat()}|{moment.hour}"
+    draw = int(hashlib.sha256(slot.encode("utf-8")).hexdigest()[:8], 16) / 0xFFFFFFFF
+    return draw < rate
+
+
 def select_humor(user_id: str, *, stage: str = "熟悉", serious: bool = False,
                  query: str = "", now: datetime | None = None) -> dict | None:
     """选一个可用的梗：approved、未退役、未封锁、最近 3 回合没用过。
@@ -227,6 +252,10 @@ def select_humor(user_id: str, *, stage: str = "熟悉", serious: bool = False,
     if stage == "初识" or serious:
         return None
     moment = _now(now)
+    # P3-05 消费接线：humor_usage_rate 作为频率门（确定性、按时段伪随机，
+    # 不做在线自调）。默认 0.5；用户教学调低后她明显收着玩笑。
+    if not _rate_gate_allows(user_id, moment):
+        return None
     blocked = _recent_term_ids(user_id, now=moment)
     try:
         from .userdb import db

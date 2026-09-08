@@ -144,6 +144,23 @@ def drop_topic(user_id: str, topic_id: str, *, ephemeral: bool = False) -> dict[
     return topics
 
 
+def topic_key(text: str) -> str:
+    """确定性话题键：取消息里最长的内容性片段（CJK 2–6 字 / 拉丁词 ≥3）。
+
+    这是「话题 id」的无 LLM 代理：同一条消息永远得到同一个键，重复提到同一
+    话题会持续命中；提不出内容时退化为 ``misc``（不参与衰减竞争）。
+    """
+    import re
+
+    clean = str(text or "")
+    cjk_runs = re.findall(r"[\u4e00-\u9fff]{2,6}", clean)
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", clean)
+    candidates = cjk_runs + words
+    if not candidates:
+        return "misc"
+    return max(candidates, key=len)[:12]
+
+
 def snapshot(user_id: str) -> list[dict]:
     """只读视图（给解释层：主题 id + 权重档，不涉正文）。"""
     topics = _load(user_id)

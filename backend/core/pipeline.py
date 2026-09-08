@@ -416,6 +416,28 @@ _STYLE_HINT_TEXT = {
 }
 
 
+def _evolution_line(user_id: str) -> str:
+    """P3-05 表达层演化 → 行为帧 evolution_line（无演化时为空串，行为不变）。"""
+    try:
+        from .persona_evolution import behavior_hints
+
+        hints = behavior_hints(user_id)
+        verbosity = float(hints.get("verbosity_preference", 0.5))
+        humor = float(hints.get("humor_usage_rate", 0.5))
+        fragments: list[str] = []
+        if verbosity >= 0.7:
+            fragments.append("你最近更愿意多说一点，可以把想法铺开讲")
+        elif verbosity <= 0.3:
+            fragments.append("你最近说话偏简短，别铺陈，一两句说到就好")
+        if humor >= 0.7:
+            fragments.append("你最近玩笑开得比平时多一点")
+        elif humor <= 0.3:
+            fragments.append("你最近收着玩笑，少玩梗")
+        return "；".join(fragments) + "。" if fragments else ""
+    except Exception:
+        return ""
+
+
 def _style_line(user_id: str) -> str:
     """derive_style → 行为帧 style_line；关闭/未形成时为空串。"""
     try:
@@ -750,6 +772,23 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             observe_user_turn(user_id, turn_id, text)
         except Exception:
             logger.exception("[pipeline] 重逢回应状态推进失败（不影响回复）")
+
+    # §17.1 注意力漂移：每轮推进话题权重（显式转题立即置顶）。只存 topic id
+    # 与权重，不复制正文；临时轮不落盘。
+    if not ephemeral:
+        try:
+            from . import attention_state as _attention
+            from .context import topic_switch_hint
+
+            key = _attention.topic_key(text)
+            recent = [str(m["content"] or "") for m in db.recent_messages(user_id, 4)]
+            prev = recent[:-1] if recent and recent[-1].strip() == text.strip() else recent
+            if topic_switch_hint(prev, text):
+                _attention.switch_topic(user_id, key, turn_id=turn_id or 0)
+            else:
+                _attention.advance_turn(user_id, key, turn_id=turn_id or 0)
+        except Exception:
+            logger.exception("[pipeline] 注意力推进失败（不影响回复）")
 
     # G03：用户明确要求「以后有结果告诉我 / 帮我继续查」才记下待查；
     # 普通提问与「我不知道」不追踪（确定性正则，无 LLM）。
@@ -1127,6 +1166,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             reply_state, season_line=reply_season["line"],
             calendar_line=compose_line(cal_mod),
             style_line=_style_line(user_id),
+            evolution_line=_evolution_line(user_id),
         )
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
