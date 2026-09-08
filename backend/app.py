@@ -17,6 +17,7 @@ from .api import (
     audit,
     chat,
     colists,
+    companion_requests,
     config_api,
     confirm,
     dashboard,
@@ -189,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(possibilities.router)
     app.include_router(colists.router)
     app.include_router(memory_admin.router)
+    app.include_router(companion_requests.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)
     app.include_router(unlocks.router)

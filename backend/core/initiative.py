@@ -719,12 +719,17 @@ async def _arbitrate_secondary(user_id: str) -> bool:
 
         return maybe_express_outing(uid)
 
+    def _maybe_companion_request(uid: str) -> str | None:
+        """G04 她的求助：门槛达标时请对方帮个小忙，投递成功才置 offered。"""
+        return _produce_companion_request(uid)
+
     for proposer in (
         _maybe_rhythm_followup,
         maybe_follow_up_promise,
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
         _maybe_outing_note,
+        _maybe_companion_request,
         _maybe_surprise,
     ):
         text = await proposer(user_id)
@@ -883,6 +888,56 @@ async def maybe_suggest_archive(user_id: str) -> str | None:
 # ---- 未完成心事（M5）：Narrative Planner 择优，经既有主动队列表达 ----
 _PLANNER_KEY = "initiative:planner_expressed"  # kv 去重键（每日最多一条）
 _PLANNER_IDLE_MIN = 120
+_COMPANION_IDLE_MIN = 120
+
+
+async def _produce_companion_request(user_id: str) -> str | None:
+    """G04：她的求助经统一仲裁投递，投递成功才置 offered（24h 倒计时）。
+
+    候选不绕过 initiative——额度、勿扰、冷却、失败退避全部复用仲裁闸门；
+    门槛不达标或没有生活源时零开销返回。
+    """
+    from .companion_requests import mark_offered, maybe_create_candidate, offer_prompt, pending_candidate
+
+    candidate = await asyncio.to_thread(pending_candidate, user_id)
+    if candidate is None:
+        created = await asyncio.to_thread(maybe_create_candidate, user_id)
+        if not created:
+            return None
+        candidate = await asyncio.to_thread(pending_candidate, user_id)
+    if candidate is None:
+        return None
+
+    user = db.get_user(user_id)
+    if not user:
+        return None
+
+    async def produce() -> str | None:
+        sys_prompt = build_system_prompt(
+            stage=stage_of(user["affection"] or 0),
+            address=user["nickname_pref"] or "",
+            lover_confirm=bool(user["lover_confirm"]),
+            first_chat=False,
+            affection=user["affection"] or 0,
+            user_id=user_id,
+        )
+        msgs = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": offer_prompt(user_id, candidate)},
+        ]
+        return (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
+
+    text = await _arbited_proactive(
+        user_id,
+        source="initiative:companion_request",
+        idle_minutes=_COMPANION_IDLE_MIN,
+        done_today=lambda: False,  # 同一候选投递成功即转 offered，不会重复出牌
+        produce=produce,
+        on_delivered=lambda: mark_offered(user_id, int(candidate["id"])),
+    )
+    if text:
+        logger.info("[求助] 已发出请求 #{}", candidate["id"])
+    return text
 
 
 async def maybe_express_pending_thoughts(user_id: str) -> str | None:

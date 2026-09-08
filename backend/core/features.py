@@ -47,6 +47,9 @@ FLAG_DEFAULTS = {
     # F01：基于真实素材的问候与变体池。关闭后问候退回旧素材逻辑（离线叙事
     # 与兜底池），不破坏原 gap 门控与并发去重；不选变体、不记冷却。
     "greeting_material_enabled": True,
+    # G04：她的求助与愿望（亲密+信任双门槛时偶尔请对方帮个小忙）。关闭后
+    # 不再生成候选；已发出的请求仍可回应，已接受的产物保留。
+    "companion_requests_enabled": True,
 }
 
 
