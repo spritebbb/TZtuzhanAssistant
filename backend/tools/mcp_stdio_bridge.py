@@ -76,6 +76,33 @@ class StdioBridge:
         self._reader = threading.Thread(target=self._read_loop, daemon=True,
                                         name="mcp-stdio-reader")
         self._reader.start()
+        # 就绪探针：子进程（npx/Playwright）启动要几秒到几十秒，探针成功后
+        # GET /health 才返回 200，启动器据此判断「桥真的能用了」再起后端。
+        self.ready = False
+        threading.Thread(target=self._probe_until_ready, daemon=True,
+                         name="mcp-stdio-probe").start()
+
+    def _probe_until_ready(self) -> None:
+        from .mcp_client import PROTOCOL_VERSION, _CLIENT_INFO
+
+        for _ in range(20):          # 最多约 60 秒
+            try:
+                resp = self.request({
+                    "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                    "params": {"protocolVersion": PROTOCOL_VERSION,
+                               "capabilities": {}, "clientInfo": _CLIENT_INFO},
+                })
+                if isinstance(resp.get("result"), dict):
+                    self.notify({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                    self.ready = True
+                    server = resp["result"].get("serverInfo") or {}
+                    print(f"✅ MCP 子进程就绪：{server.get('name', '?')} "
+                          f"{server.get('version', '')}", file=sys.stderr)
+                    return
+            except Exception:
+                pass
+            time.sleep(3)
+        print("[bridge] 警告：子进程 60 秒内未就绪，/health 将保持 503", file=sys.stderr)
 
     # ---- 子进程 → 桥 ----
 
@@ -189,6 +216,11 @@ def make_handler(bridge: StdioBridge):
             return self._reply(response, extra=extra)
 
         def do_GET(self):
+            # 健康探针：桥 + 子进程都就绪才 200（启动器据此决定何时起后端）
+            if self.path.rstrip("/") == "/health":
+                if bridge.ready:
+                    return self._reply({"ok": True, "ready": True})
+                return self._reply({"ok": False, "ready": False}, status=503)
             # Streamable HTTP 允许 GET 开 SSE 流；本桥只支持请求/响应模式
             self._reply({"error": "this bridge only supports POST /mcp"}, status=405)
 

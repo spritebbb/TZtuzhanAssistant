@@ -65,6 +65,45 @@ python -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @modelcontextp
 - 工具调用结果进入对话前会经过截断（4000 字符）与总预算（32KB）控制；失败会给结构化错误。
 - 卸载：设置页删除该服务器，或 `DELETE /api/mcp/servers/{name}`。
 
+
+## 按需注入（默认行为）
+
+MCP 工具**默认不出现在工具表里**，只有命中触发条件才注入该服务器的工具（本地工具永远可见）：
+
+| 命中方式 | 例子 |
+|---|---|
+| 用户消息含服务器名/关键词 | 「帮我用**浏览器**打开 example.com」→ 暴露 playwright 全部工具 |
+| 用户消息含某个工具名 | 「调用 **browser_snapshot** 看看」 |
+| 命中的技能正文提到 | 技能里写了「用 browser 抓取页面」 |
+| Agent 任务目标命中 | 任务描述里提到「网页」→ 该任务可用 playwright |
+
+关键词在 `data/mcp_servers.json` 的 `keywords` 字段里配置，例如：
+
+```json
+{ "name": "playwright", "url": "http://127.0.0.1:8932/mcp",
+  "keywords": ["浏览器", "网页", "browser", "打开网站", "登录"] }
+```
+
+未命中时外部工具**既不下发也不可执行**（模型凭记忆猜名字调用会得到结构化拒绝）。
+需要全部常驻时设 `AGENT_MCP_ALWAYS_ON=1`（演示/排查用，代价是每轮工具 schema 变大）。
+
+## 已接入的服务器
+
+| 服务器 | 提供什么（本地工具做不到的） | 状态 |
+|---|---|---|
+| **playwright** | 真实浏览器：导航、点击、填表、截图、读页面 | 已接入并实测 |
+| **context7** | 实时库/框架文档与代码示例（`resolve-library-id` / `query-docs`） | 已接入并实测 |
+
+需要凭据、可自行添加的（关键词照上面配）：
+
+| 服务器 | 用途 | 前置 |
+|---|---|---|
+| GitHub MCP | PR/Issue/代码检索 | 需要 GitHub token |
+| Notion MCP | 笔记/知识库读写 | 需要 Notion integration token |
+| Obsidian MCP | 本地笔记库读写 | 需要 Obsidian Local REST API 插件 |
+
+**不建议接入**（与本地工具重复，见「重复检查」）：filesystem / shell / memory / 桌面控制 / 搜索 / fetch。
+
 ## 已验证 / 未验证
 
 **已验证**（`tests/test_mcp_client.py` 4 项 + `tests/test_mcp_stdio_bridge.py` 2 项）：
@@ -74,7 +113,9 @@ python -m backend.tools.mcp_stdio_bridge --port 8932 -- npx --yes @modelcontextp
 - 注册 → 工具进全局注册表（`external` + 需确认）→ 调用 → 卸载 端到端；
 - stdio 桥：HTTP → 子进程 stdin/stdout 转发、通知 202、id 解耦、子进程退出返回结构化错误。
 
-**真实服务器已实测通过**（2026-09-09，Playwright MCP 1.63.0-alpha）：
+**真实服务器已实测通过**（2026-09-09）：Playwright MCP 1.63.0-alpha + Context7 4.0.5
+（后者暴露了 `build_pinned_opener` 在 Python 3.12 上的 HTTPS bug：`HTTPSHandler` 不设
+`_check_hostname`，导致所有 HTTPS 出网 AttributeError；已修复并加回归用例）。
 - 桥启动 → 菟菚后端自动恢复并连接（Streamable HTTP）→ 注册 24 个 `playwright::*` 工具；
 - `/api/mcp/servers` 返回 `{"name":"playwright","tools":24}`；
 - 真实调用 `browser_navigate` 打开 example.com、`browser_snapshot` 抓到 "Example Domain"。

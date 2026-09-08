@@ -416,6 +416,17 @@ _STYLE_HINT_TEXT = {
 }
 
 
+def _mcp_tool_filter(user_text: str, skill_texts: list[str]):
+    """MCP 外部工具按需注入：未命中触发条件时隐藏（本地工具不受影响）。"""
+    try:
+        from ..tools.mcp_server import mcp_tool_filter
+
+        return mcp_tool_filter(user_text, skill_texts)
+    except Exception:
+        logger.exception("[pipeline] MCP 工具可见性判定失败，按全部可见处理")
+        return None
+
+
 def _evolution_line(user_id: str) -> str:
     """P3-05 表达层演化 + L05 领域调制 + L03 气质倾向 → 行为帧 evolution_line。
 
@@ -1806,13 +1817,13 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 必须排在工具循环判定之前：技能正文点名了工具（如「用 agent_fanout 并行派发」）时，
     # 这一轮就得给模型工具通道，否则指令落进纯流式轮次只能嘴上照做。
     matched_skills: list = []
+    skill_texts: list[str] = []
     try:
         if not is_chitchat:
             from ..skills import load_catalog, match_skills
 
             matched_skills = match_skills(text, load_catalog())
             if matched_skills:
-                skill_texts = []
                 for s in matched_skills:
                     skill_texts.append(
                         f"【技能：{s.name}】{s.description}\n{s.content}"
@@ -1892,6 +1903,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             max_loops=2,
             final_instruction=final_instruction,
             on_progress=progress_cb,
+            tool_filter=_mcp_tool_filter(text, skill_texts),
         )
         # 卫生开关关闭时保持旧流式契约；开启后 raw 必须先经过完整候选检查，
         # 工具进度仍由 progress_cb 实时发送，正文在最终定稿后统一切片。

@@ -192,6 +192,12 @@ class Config:
         self.agent_mcp_allow_loopback: bool = os.getenv(
             "AGENT_MCP_ALLOW_LOOPBACK", "0"
         ).strip().lower() in {"1", "true", "on", "yes"}
+        # MCP 工具常驻（AGENT_MCP_ALWAYS_ON=1）：默认 MCP 工具按需注入
+        # （技能/用户消息命中服务器名或关键词才暴露），此开关打开后全部常驻，
+        # 用于演示或排查（代价是每轮工具 schema 变大）。
+        self.agent_mcp_always_on: bool = os.getenv(
+            "AGENT_MCP_ALWAYS_ON", "0"
+        ).strip().lower() in {"1", "true", "on", "yes"}
         # 允许读写操作的根目录白名单（分号分隔；文件/命令工具只允许在此范围内操作）
         self.agent_allowed_roots: list[str] = [
             p.strip() for p in os.getenv("AGENT_ALLOWED_ROOTS", "").split(";") if p.strip()

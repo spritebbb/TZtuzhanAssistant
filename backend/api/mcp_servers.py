@@ -22,19 +22,24 @@ async def api_mcp_list_servers():
 
 @router.post("/servers")
 async def api_mcp_register_server(request: Request):
-    """注册一个外部 MCP 服务器。body: {"name": "...", "url": "..."}"""
+    """注册一个外部 MCP 服务器。
+
+    body: {"name": "...", "url": "...", "keywords": ["浏览器", "browser"]}
+    keywords 可选：按需注入的触发词（用户消息/技能命中即暴露该服务器工具）。
+    """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "JSON 解析失败"}, status_code=400)
     name = (body.get("name") or "").strip()
     url = (body.get("url") or "").strip()
+    keywords = [str(k).strip() for k in (body.get("keywords") or []) if str(k).strip()]
     if not name or not url:
         return JSONResponse({"ok": False, "error": "缺少 name 或 url"}, status_code=400)
-    ok = await register_external_server(name, url)
+    ok = await register_external_server(name, url, keywords=keywords)
     if not ok:
         return JSONResponse({"ok": False, "error": "连接失败，请检查服务器地址"}, status_code=502)
-    return {"ok": True, "server": {"name": name, "url": url}}
+    return {"ok": True, "server": {"name": name, "url": url, "keywords": keywords}}
 
 
 @router.delete("/servers/{name}")

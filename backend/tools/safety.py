@@ -234,12 +234,18 @@ def build_pinned_opener(resolved_ip: str, *handlers):
     class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
         def https_open(self, req):
             def factory(host, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, **kwargs):
+                # Python 3.12 的 HTTPSHandler 只设 _context，不设 _check_hostname
+                # （3.13 才加），必须 getattr 兜底，否则所有 HTTPS 请求都
+                # AttributeError（web_fetch / 公网 MCP 全部受影响）。
+                conn_kwargs = dict(kwargs)
+                context = getattr(self, "_context", None)
+                if context is not None:
+                    conn_kwargs.setdefault("context", context)
+                check_hostname = getattr(self, "_check_hostname", None)
+                if check_hostname is not None:
+                    conn_kwargs.setdefault("check_hostname", check_hostname)
                 conn = http.client.HTTPSConnection(
-                    host,
-                    timeout=timeout,
-                    context=self._context,
-                    check_hostname=self._check_hostname,
-                    **kwargs,
+                    host, timeout=timeout, **conn_kwargs,
                 )
                 original = conn._create_connection
                 conn._create_connection = lambda address, *a, **kw: original(
