@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .log import logger
 
-_SUPPORTED_FORMATS = {"pdf", "txt", "md"}
+_SUPPORTED_FORMATS = {"pdf", "txt", "md", "epub"}
 
 
 class KnowledgeError(ValueError):
@@ -34,12 +34,21 @@ class KnowledgeError(ValueError):
 def detect_format(filename: str) -> str:
     suffix = Path(filename).suffix.lower().lstrip(".")
     if suffix not in _SUPPORTED_FORMATS:
-        raise KnowledgeError(f"不支持的格式 .{suffix}，目前只读 pdf / txt / md")
+        raise KnowledgeError(f"不支持的格式 .{suffix}，目前只读 pdf / txt / md / epub")
     return suffix
 
 
 def parse_document(fmt: str, data: bytes) -> str:
     """把文件字节解析成纯文本。解析失败抛 KnowledgeError。"""
+    if fmt == "epub":
+        # L01：EPUB 走受限解析（spine 顺序 + 防炸），不破坏既有 txt/md/pdf 路径
+        from .document_import import DocumentImportError, parse_epub
+
+        try:
+            text = parse_epub(data)
+        except DocumentImportError as exc:
+            raise KnowledgeError(str(exc)) from exc
+        return text
     if fmt == "pdf":
         try:
             import io

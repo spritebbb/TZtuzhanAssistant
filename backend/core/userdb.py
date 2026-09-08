@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 34  # v34: F06 activity draft receipts
+_SCHEMA_VERSION = 35  # v35: L01 document segments and import jobs
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -762,6 +762,30 @@ CREATE TABLE IF NOT EXISTS activity_draft_receipts (
     created_at  TEXT NOT NULL,
     PRIMARY KEY (user_id, draft_id)
 );
+-- L01 文档摄入：结构化阅读段（独立于检索 chunks）与导入任务。
+CREATE TABLE IF NOT EXISTS document_segments (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,
+    document_id   INTEGER NOT NULL,
+    segment_index INTEGER NOT NULL,
+    title         TEXT NOT NULL DEFAULT '',
+    text_start    INTEGER NOT NULL DEFAULT 0,
+    text_end      INTEGER NOT NULL DEFAULT 0,
+    content_hash  TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    UNIQUE (user_id, document_id, segment_index)
+);
+CREATE TABLE IF NOT EXISTS document_import_jobs (
+    job_id     TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL,            -- url / upload
+    source     TEXT NOT NULL DEFAULT '', -- 规范化 URL 或文件名（不含正文）
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending/running/succeeded/failed/cancelled
+    document_id INTEGER,
+    error      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -868,6 +892,15 @@ class UserDB:
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
+        # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
+        kb_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(kb_documents)")}
+        for column, definition in (
+            ("source_url", "TEXT"),
+            ("source_hash", "TEXT"),
+            ("parser_version", "TEXT"),
+        ):
+            if column not in kb_columns:
+                self.conn.execute(f"ALTER TABLE kb_documents ADD COLUMN {column} {definition}")
         policy_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(memory_policy)")}
         for column, definition in (
             ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
@@ -1871,6 +1904,7 @@ class UserDB:
                 "user_preferences", "event_chains", "reunion_arcs",
                 "greeting_variant_usage", "open_questions", "companion_requests",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
+                "document_segments", "document_import_jobs",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

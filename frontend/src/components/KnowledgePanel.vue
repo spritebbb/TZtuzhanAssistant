@@ -146,7 +146,7 @@ watch(() => props.show, (show) => { if (show) void load() })
         <input
           ref="fileInput"
           type="file"
-          accept=".pdf,.txt,.md"
+          accept=".pdf,.txt,.md,.epub"
           hidden
           @change="onPick"
         />
