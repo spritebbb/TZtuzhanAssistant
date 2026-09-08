@@ -7,6 +7,7 @@
 v2：工具已插件化——通过插件系统加载后取插件模块里的实现函数。
 """
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -39,9 +40,14 @@ code_exec, run_command_impl = _code_exec._run_python, _code_exec._run_command
 from backend.tools.safety import check_path, check_command, check_cwd
 from backend.core.config import config
 
+_TEST_WORKSPACE = Path(__file__).resolve().parents[1] / ".tmp"
+_TEST_WORKSPACE.mkdir(exist_ok=True)
+_TEST_DIRECTORY = tempfile.TemporaryDirectory(prefix="tools-integration-", dir=_TEST_WORKSPACE)
+
 
 def _ensure_temp() -> Path:
-    p = config.data_dir / "inttest"
+    # 工具只允许工作区内路径；数据隔离目录可能位于系统 TEMP，不能复用。
+    p = Path(_TEST_DIRECTORY.name)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
