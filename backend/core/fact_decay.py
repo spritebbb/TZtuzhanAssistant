@@ -16,7 +16,8 @@ def decay_expired_facts(user_id: str, *, now: datetime | None = None) -> list[in
     ``pinned=1`` 永远不会被自动衰减。实际删除统一走 fact_lifecycle，确保
     冲突候选、关系事件、pending thought 与向量缓存一起收敛。
     """
-    moment = (now or datetime.now()).isoformat(timespec="seconds")
+    now_dt = now or datetime.now()
+    moment = now_dt.isoformat(timespec="seconds")
     with db._lock:
         rows = db.conn.execute(
             "SELECT id FROM facts WHERE user_id = ? AND status = 'active' "
@@ -26,7 +27,7 @@ def decay_expired_facts(user_id: str, *, now: datetime | None = None) -> list[in
         ).fetchall()
     from .memory_salience import policy_expired_ids
 
-    expired_ids = sorted({int(row["id"]) for row in rows} | policy_expired_ids(user_id, now=now))
+    expired_ids = sorted({int(row["id"]) for row in rows} | policy_expired_ids(user_id, now=now_dt))
     if not expired_ids:
         return []
 
@@ -35,7 +36,7 @@ def decay_expired_facts(user_id: str, *, now: datetime | None = None) -> list[in
     deleted = []
     # 用户可能在扫描后固定/重评了记忆；删除前在同一写锁下复查，避免迟到清理。
     with db._lock:
-        policy_expired = policy_expired_ids(user_id, now=now)
+        policy_expired = policy_expired_ids(user_id, now=now_dt)
         for fact_id in expired_ids:
             row = db.conn.execute(
                 "SELECT status, pinned, expires_at FROM facts WHERE user_id=? AND id=?",
