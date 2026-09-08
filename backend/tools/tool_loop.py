@@ -15,10 +15,14 @@ from typing import Any, Callable
 
 from ..core.log import logger
 from .base import ToolRegistry
+from .hardening import (
+    MAX_TOOL_CALLS,
+    ToolLoopGuard,
+    structured_tool_error,
+)
 
 # 工具循环轮次上限
 MAX_LOOPS = 3
-MAX_TOOL_CALLS = 8
 
 # 文本协议正则（回退模式用）
 _TOOL_BLOCK_RE = re.compile(r"```tool[ \t]*(?:\n| )([\s\S]*?)```", re.MULTILINE)
@@ -445,6 +449,7 @@ async def _run_native(
     loop_count = 0
     call_count = 0
     seen: dict[str, str] = {}
+    guard = ToolLoopGuard()
     while loop_count < max_loops:
         if is_cancelled and is_cancelled():
             return "（操作已取消）"
@@ -493,10 +498,24 @@ async def _run_native(
             elif call_count >= MAX_TOOL_CALLS:
                 body = "调用上限已用尽，本次未执行"
             else:
-                result = await ToolRegistry.execute(c["name"], filled)
-                body = result.output if result.ok else (result.error or "调用失败")
-                seen[fingerprint] = body
-                call_count += 1
+                # §17.3 熔断与预算：同签名第 2 次拒执行；总预算超限给结构化错误
+                breaker = guard.check_signature(c["name"], filled)
+                budget = None if breaker else guard.check_budget(c["name"])
+                if breaker or budget:
+                    body = breaker or budget
+                else:
+                    result = await ToolRegistry.execute(c["name"], filled)
+                    if result.ok:
+                        body = result.output or "（工具返回空结果）"
+                        guard.record_result(body)
+                    else:
+                        # 结构化错误：不把堆栈/密钥塞回上下文
+                        body = structured_tool_error(
+                            kind="provider", name=c["name"],
+                            detail=result.error or "调用失败",
+                        )
+                    seen[fingerprint] = body
+                    call_count += 1
             await _progress({"type": "tool_done", "name": c["name"]})
             work.append({
                 "role": "tool",

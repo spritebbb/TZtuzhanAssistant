@@ -20,6 +20,9 @@ from .log import logger
 _client: AsyncOpenAI | None = None
 _client_cache: dict[tuple[str, str, str, int, int], AsyncOpenAI] = {}
 
+# §17.3 有界客户端缓存（默认 32 个）：淘汰最久未用的 client，只释放内存对象
+_CLIENT_CACHE_MAX = 32
+
 
 def _build_http_client(timeout: int | None = None) -> httpx.AsyncClient | None:
     """构建 LLM 请求的底层 HTTP 客户端。
@@ -104,6 +107,14 @@ def _client_for_route(route) -> AsyncOpenAI:
             http_client=_build_http_client(route.timeout_sec),
         )
         if cacheable:
+            # §17.3 LRU 有界：超上限时淘汰最久未用条目（只释放内存对象，
+            # 不影响任何持久数据）
+            if len(_client_cache) >= _CLIENT_CACHE_MAX:
+                try:
+                    oldest = min(_client_cache, key=_client_cache.get)
+                    _client_cache.pop(oldest, None)
+                except (ValueError, TypeError):
+                    pass
             _client_cache[cache_key] = client
     return client
 
