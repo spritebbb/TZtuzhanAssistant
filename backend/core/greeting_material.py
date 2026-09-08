@@ -216,8 +216,9 @@ def _collect_activities(user_id: str, since: str, limit: int) -> list[SourceRef]
         rows = db.conn.execute(
             "SELECT id, kind, title, status, updated_at FROM activities "
             "WHERE user_id=? AND status IN ('active', 'paused') "
+            "AND updated_at >= ? "
             "ORDER BY updated_at DESC LIMIT ?",
-            (user_id, max(1, int(limit))),
+            (user_id, since, max(1, int(limit))),
         ).fetchall()
     out: list[SourceRef] = []
     for row in rows:
