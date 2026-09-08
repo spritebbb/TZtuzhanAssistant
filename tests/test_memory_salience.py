@@ -477,6 +477,19 @@ def test_policy_lifecycle_consumption() -> int:
     return 0
 
 
+def test_fact_ids_by_content_strip() -> int:
+    """M1 修复回归：F07 反查按 strip 归一化，检索/向量带空白也能命中。"""
+    uid = "g01-reverse-lookup"
+    db.ensure_user(uid)
+    fid = _fact(uid, "用户喜欢秋天")
+    got = db.fact_ids_by_content(uid, ["  用户喜欢秋天  ", "\t用户喜欢秋天\n"])
+    assert got.get("用户喜欢秋天") == fid, f"strip 后应命中（实际={got}）"
+    assert db.fact_ids_by_content(uid, ["", "   "]) == {}, "空/纯空白输入不应报错或误命中"
+    assert db.fact_ids_by_content(uid, ["用户不喜欢秋天"]) == {}, "不存在的正文不应命中"
+    print("[OK] F07 反查 strip 归一化：带空白正文命中、空输入安全")
+    return 0
+
+
 async def main() -> int:
     failed = (
         test_score_formula()
@@ -493,6 +506,7 @@ async def main() -> int:
         + test_production_sources()
         + test_lifecycle_display_and_fading()
         + test_policy_lifecycle_consumption()
+        + test_fact_ids_by_content_strip()
     )
     if failed:
         print(f"\n=== G01 记忆显著度：{failed} 项失败 ===")

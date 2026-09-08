@@ -108,10 +108,37 @@ async def _test_empty_batch_and_two_day_trigger() -> None:
     print("[OK] 跨两天：空日 batch 可清理；全空档回来首句仍会独立触发")
 
 
+def _test_single_scan_instant() -> None:
+    """L1 修复回归：一次扫描固定同一时刻，两次 policy 查询不得各自取当前时间。"""
+    from backend.core import memory_salience as ms
+
+    past = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+    fact_id = _seed("用户临时在试用新键盘", expires_at=past)
+    seen: list = []
+    real = ms.policy_expired_ids
+
+    def spy(user_id, *, now=None):
+        seen.append(now)
+        return real(user_id, now=now)
+
+    with patch.object(ms, "policy_expired_ids", side_effect=spy):
+        # 不传 now：旧实现两次各自 datetime.now()，微秒漂移会让边界判定抖动。
+        decay_expired_facts(UID)
+
+    assert not _exists(fact_id), "到期事实仍应被删除"
+    assert len(seen) == 2, f"应查询两次 policy（扫描 + 删除前复查），实际={len(seen)}"
+    assert seen[0] == seen[1], (
+        f"两次 policy 查询必须用同一时刻，实际 {seen[0]} vs {seen[1]}"
+    )
+    print("[OK] 衰减扫描时刻统一：扫描与删除前复查共用同一 now")
+    return 0
+
+
 async def main() -> None:
     db.ensure_user(UID)
     _test_cascade_and_retention_boundaries()
     _test_idempotent()
+    _test_single_scan_instant()
     await _test_empty_batch_and_two_day_trigger()
     print("\n=== M1 事实自然衰减回归全部通过 ===")
 
