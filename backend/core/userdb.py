@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 22
+_SCHEMA_VERSION = 23  # v23: L03 relationship_style_evidence（气质证据表）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -562,12 +562,26 @@ CREATE TABLE IF NOT EXISTS relationship_dimension_ledger (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dim_ledger_unique
     ON relationship_dimension_ledger(user_id, event_id, rule_id);
+-- L03 关系气质证据：唯一 user/event/style；只吃明确事件，90 天窗+30 天半衰期
+-- 由 derive_style 现算，不存派生分数。reset 清空，LC-1 长期关系类别导出。
+CREATE TABLE IF NOT EXISTS relationship_style_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    event_id INTEGER NOT NULL,
+    style TEXT NOT NULL,               -- companion/playful/confidant/growth/romantic
+    weight REAL NOT NULL DEFAULT 1.0,
+    occurred_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_style_evidence_unique
+    ON relationship_style_evidence(user_id, event_id, style);
+CREATE INDEX IF NOT EXISTS idx_style_evidence_user
+    ON relationship_style_evidence(user_id, occurred_at);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
-    category TEXT NOT NULL,        -- comfort / address / reminder / humor
+    category TEXT NOT NULL,        -- comfort / address / reminder / humor / style
     value_json TEXT NOT NULL,
     origin TEXT NOT NULL,          -- user_teaching / legacy / observed
     source_message_id INTEGER,
@@ -1636,7 +1650,8 @@ class UserDB:
                 "activity_writings", "writing_turns", "activity_lists", "list_items",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
-                "relationship_dimension_ledger", "user_preferences", "event_chains", "reunion_arcs",
+                "relationship_dimension_ledger", "relationship_style_evidence",
+                "user_preferences", "event_chains", "reunion_arcs",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

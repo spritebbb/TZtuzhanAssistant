@@ -19,7 +19,7 @@ from datetime import datetime
 
 from .userdb import db
 
-CATEGORIES = ("comfort", "address", "reminder", "humor")
+CATEGORIES = ("comfort", "address", "reminder", "humor", "style")
 ORIGINS = ("user_teaching", "legacy", "observed")
 STATUS = ("candidate", "active", "revoked")
 
@@ -29,6 +29,9 @@ _VALUE_VALIDATORS = {
     "address": lambda v: (isinstance(v.get("allowed"), list) or isinstance(v.get("forbidden"), list)),
     "reminder": lambda v: v.get("intensity") in (0, 1, 2) if "intensity" in v else True,
     "humor": lambda v: isinstance(v.get("forbidden_topics"), list) or isinstance(v.get("allow_teasing"), bool),
+    # L03 关系气质屏蔽：value={"style": "companion|playful|confidant|growth|romantic"}
+    "style": lambda v: isinstance(v.get("style"), str) and v.get("style") in (
+        "companion", "playful", "confidant", "growth", "romantic"),
 }
 
 

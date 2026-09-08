@@ -233,3 +233,46 @@ async def api_revoke_preference(pref_id: int):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
     logger.info("[偏好教学] 撤销偏好 #{}", pref_id)
     return {"ok": True, "item": row}
+
+
+@router.get("/relationship-style")
+async def api_relationship_style_get():
+    """L03 长期关系气质：高层描述 + 最多 2 条形成原因（不返回分数）。"""
+    from ..core.relationship_style import derive_style, style_label
+
+    uid = active_user_id()
+    result = await asyncio.to_thread(derive_style, uid)
+    result["style_labels"] = [style_label(s) for s in result.get("style_ids", [])]
+    return {"ok": True, **result}
+
+
+@router.post("/relationship-style/{style}/block")
+async def api_relationship_style_block(style: str):
+    """「不要这种气质」：走 P2-02 偏好屏蔽（category=style）。"""
+    from fastapi import HTTPException
+
+    from ..core.relationship_style import (
+        RelationshipStyleError,
+        block_style,
+        style_label,
+    )
+
+    uid = active_user_id()
+    try:
+        ok = await asyncio.to_thread(block_style, uid, style)
+    except RelationshipStyleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
+        return {"ok": True, "note": "已屏蔽过"}
+    logger.info("[关系气质] 用户屏蔽 {}（{}）", style, style_label(style))
+    return {"ok": True}
+
+
+@router.delete("/relationship-style/{style}/block")
+async def api_relationship_style_unblock(style: str):
+    """撤销气质屏蔽。"""
+    from ..core.relationship_style import unblock_style
+
+    uid = active_user_id()
+    ok = await asyncio.to_thread(unblock_style, uid, style)
+    return {"ok": True, "removed": bool(ok)}

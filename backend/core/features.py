@@ -36,6 +36,9 @@ FLAG_DEFAULTS = {
     # 接主动候选源、概率 0.25、用户意见可取消、出门可沉默但事件/状态行
     # 必须可见。关闭后 choose_life_event 与外出主动候选全部停用。
     "life_templates_enabled": True,
+    # L03：长期关系气质（陪伙伴/玩闹/知心/成长/浪漫）。证据只来自明确事件，
+    # derive_style 不回分数；关闭后 evidence 停止登记、derive 返回 forming。
+    "relationship_style_enabled": True,
 }
 
 
