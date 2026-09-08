@@ -24,6 +24,7 @@ _write_lock = threading.Lock()
 # 注意：只保留「有消费方」的动态开关。贴纸现由 STICKER_ENABLED 等环境
 # 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
+    "aesthetics_enabled": os.getenv("FEATURE_AESTHETICS_ENABLED", "1").lower() not in {"0", "false", "off"},
     "memory_lifecycle_enabled": os.getenv("FEATURE_MEMORY_LIFECYCLE_ENABLED", "1").lower()
         not in {"0", "false", "off"},
     "memory_salience_enabled": os.getenv("FEATURE_MEMORY_SALIENCE_ENABLED", "1").lower()

@@ -267,8 +267,8 @@ def test_v24_policy_upgrade() -> int:
                 row = upgraded.conn.execute("SELECT * FROM memory_policy").fetchone()
                 assert row["tier"] == "legacy" and row["source_message_ids"] == "[]"
                 assert row["first_observed_at"] is None
-                assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 37
-                assert list((root / "backups").glob("schema-bot-v24-to-v37-*/bot.db"))
+                assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 38
+                assert list((root / "backups").glob("schema-bot-v24-to-v38-*/bot.db"))
             finally:
                 upgraded.conn.close()
     return 0

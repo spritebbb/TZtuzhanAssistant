@@ -30,14 +30,14 @@ BUNDLE_VERSION = 1
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
-               "memory_policy", "memory_annotations", "first_occurrences"),
+               "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links"),
     "tasks": ("tasks", "promises", "open_questions"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
-        "reading_segments", "reading_bookmarks", "observation_entries",
+        "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
     ),
     "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot"),
@@ -47,6 +47,9 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
 
 # 事件/心事的 source_type → 被引用表（payload 里的来源声明）
 _SOURCE_TABLE_BY_TYPE = {
+    "relationship_event": "relationship_events",
+    "artifact": "artifacts",
+    "knowledge_opinion": "knowledge_opinions",
     "activity": "activities",
     "promise": "promises",
     "fact": "facts",
@@ -99,6 +102,8 @@ def _rule_dynamic(table: str, column: str, type_column: str):
 
 
 _REFERENCE_RULES = (
+    _rule_static("artifact_placements", "artifact_id", "artifacts", frozenset()),
+    _rule_dynamic("aesthetic_preferences", "source_id", "source_type"),
     _rule_static("activity_notes", "activity_id", "activities"),
     _rule_static("reading_segments", "activity_id", "activities"),
     _rule_static("observation_entries", "activity_id", "activities"),

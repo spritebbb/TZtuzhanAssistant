@@ -1098,7 +1098,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                     pass
             from . import imagegen
             if imagegen.enabled():
-                drawn_image_path = await imagegen.generate(text)
+                from .aesthetic_preferences import image_prompt
+
+                drawn_image_path = await imagegen.generate(image_prompt(user_id, text))
                 if drawn_image_path:
                     await image_cb(drawn_image_path)
         except Exception:

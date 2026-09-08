@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import RoomPanel from './RoomPanel.vue'
 import {
   deleteFact,
   deleteUserTerm,
@@ -427,6 +428,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
           <p v-for="item in section.items" :key="item">· {{ item }}</p>
         </article>
         <article class="profile-card">
+          <RoomPanel preferences-only />
           <small>互动偏好（自动形成，可重置）</small>
           <p v-if="userStyle">· 她习惯对你的说话方式：{{ userStyle }}</p>
           <p v-else>· 说话偏好还没形成，多聊聊就有了</p>

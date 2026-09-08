@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import RoomPanel from './RoomPanel.vue'
 import { listArtifacts, type ArtifactItem } from '../api/artifacts'
 import {
   createDualPerspective,
@@ -717,6 +718,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
         <p v-if="loading" class="empty">正在整理角落…</p>
         <p v-else-if="error" class="empty">{{ error }}</p>
         <template v-else>
+          <RoomPanel />
           <section v-if="lettersAvailable" class="letters" aria-label="写给未来的我们">
             <div class="section-head">
               <h3>写给未来的我们</h3>
