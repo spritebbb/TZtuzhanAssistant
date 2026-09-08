@@ -54,6 +54,7 @@ _TABLES = (
     "aesthetic_preferences", "artifact_placements",
     "shared_resources", "resource_grants",
     "persona_evolution_log", "experience_metrics",
+    "learning_candidates",
     "kb_documents", "kb_chunks", "unlocks",
 )
 
