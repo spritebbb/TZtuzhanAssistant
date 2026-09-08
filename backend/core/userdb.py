@@ -1418,6 +1418,20 @@ class UserDB:
         return [{"content": c} for _, c in scored[:top_k]]
 
     @_locked
+    def fact_ids_by_content(self, user_id: str, contents: list[str]) -> dict[str, int]:
+        """按正文反查 active 事实 id（F07 只给本轮实际引用的事实附生命周期元数据）。"""
+        clean = [str(c) for c in contents if str(c or "").strip()]
+        if not clean:
+            return {}
+        placeholders = ",".join("?" for _ in clean)
+        rows = self.conn.execute(
+            f"SELECT id, content FROM facts WHERE user_id = ? AND status = 'active' "
+            f"AND content IN ({placeholders})",
+            (user_id, *clean),
+        ).fetchall()
+        return {str(r["content"]): int(r["id"]) for r in rows}
+
+    @_locked
     def facts_not_for_proactive(self, user_id: str, limit: int = 50) -> list[str]:
         """返回用户明确要求不要在主动消息里提起的事实。"""
         now = datetime.now().isoformat(timespec="seconds")

@@ -15,10 +15,11 @@ from datetime import datetime, timedelta
 from .log import logger
 from .userdb import db
 
-_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath")  # chain_aftermath=P2-04 链式回望（event_chains 产出）
+_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选
 _PAUSED_READING_DAYS = 3
 _CONFIRM_MEMORY_HOURS = 2
 _THOUGHT_TTL_DAYS = 7
+_FADING_WINDOW_DAYS = 3
 
 
 def _now() -> str:
@@ -61,9 +62,18 @@ def sync_pending_thoughts(user_id: str) -> int:
 
     - resume_reading：有共读搁置超过 3 天 → 她惦记那本书。
     - confirm_memory：一天内纠偏过记忆 → 她想找时机确认现在记对了没。
+    - memory_fading：有短期记忆即将到期 → 她想趁还记得再聊一次（G01 可见遗忘，
+      只取非敏感元数据，不含事实原文；到期后不靠墓碑复原）。
     """
     added = 0
     now = _now()
+    fading: list[dict] = []
+    try:
+        from .memory_salience import expiring_soon_candidates
+
+        fading = expiring_soon_candidates(user_id, within_days=_FADING_WINDOW_DAYS)[:2]
+    except Exception:
+        fading = []  # 候选查询失败不影响其余心事同步
     with db._lock:
         paused = db.conn.execute(
             "SELECT a.id, a.updated_at, d.filename FROM activities a "
@@ -110,6 +120,14 @@ def sync_pending_thoughts(user_id: str) -> int:
             user_id, "goal_checkin", "activity", int(row["id"]),
             f"对方请你在合适时轻轻问一次共同目标「{row['title']}」；下一小步是「{row['next_step']}」",
             earliest_at=row["reminder_at"], priority=5, commit=False,
+        ):
+            added += 1
+    for item in fading:
+        if _add(
+            user_id, "memory_fading", "fact", int(item["fact_id"]),
+            f"有一条关于你的事快到保留期限了（{item['retention']}），"
+            "她想趁还记得的时候再聊一次",
+            earliest_at=now, priority=6, commit=False,
         ):
             added += 1
     if added:

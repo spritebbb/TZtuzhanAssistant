@@ -2,6 +2,8 @@
 
 执行：Codex，2026-09-08。依据：技术指导 §14.8、§22.3，以及体验升级总纲批次 3。本记录描述当前切片，不代表 G01 或全部 15 批次完成。
 
+> 2026-09-08 后续（执行：ZCode）：本文件「未完成」清单的关系锚点/初历生产来源、视角注释生产路径、聊天解释层露出与可见遗忘已由 ZCode 接手落地，见下方「片3/片4 收尾」节。
+
 ## 已落地
 
 - `e807658` 接收 ZCode 的影子评分、注释和初历底座；修补来源归属、删除级联、恢复重映射与版本守卫。
@@ -34,3 +36,27 @@
 ## 未完成
 
 关系锚点与初历加分目前仍只有底层参数和侧表，尚未接通全部生产事件来源；视角注释仍缺生产生成/确认路径；聊天解释层的有权限来源展开和可见遗忘尚待接线。源码中现有评分及期限消费不能作为这些体验已经完成的证据。下一片须按 §14.8 与 F07 的二次授权、已删除来源失效规则推进，不展示墓碑正文，不编造初历。
+
+## 片3/片4 收尾（执行：ZCode，2026-09-08）
+
+上节「未完成」三项已按 §14.8 与 F07 落地，无新表、无 schema 变更、无新增 kv 键、无新增定时 LLM 调用。
+
+### 片3：生产来源接线
+
+- **关系锚点**：`memory_salience.reevaluate_recent_facts_after_event` 挂在 `relationship_events.record` 提交成功之后（与 L03 气质证据同一 reducer 出口），对事件发生 ±24h 内新建且已有 policy 的事实重评并置 `relationship_anchor=1`（+20 分）。锚点只吃真实 active 事件，跨人格由事件查询隔离。
+- **初历**：`note_event_for_first_occurrence` 在同一出口按事件 `object`（约定内容/目标标题/日子标签/故事标题）规范化建 `first_occurrences` 记录，同一 `(event_type, topic_key)` 后续事件不再吃首次加成；事件作废走既有 `invalidate_for_source` 级联清除。
+- **视角注释**：`record_user_teaching_annotation` 由 `record_memory_corrected` 在用户亲手改写/确认记忆（`rewrite`/`conflict_accept`）时调用，写 `origin='user_teaching'` 一条，同一事实只保留最近一条；不改写事实文本、不抬 confidence。
+- **自行补充的决策（2 项，理由）**：① 锚点判定取「事件发生 ±24h 内新建事实」，因 §14.8 只规定评分输入含关系事件、未给事实↔事件的确定性外键；时间邻近是唯一无 LLM、可测试的确定性关联。② 注释生产只接「用户亲手确认」这一条真实路径（LLM 自动生成注释留待批次 12 学习管线的确认状态机，避免两套确认机制并存）。
+
+### 片4：解释层露出与可见遗忘
+
+- **F07 露出（非敏感元数据范围）**：`lifecycle_for_facts` 对**本轮实际注入的事实 id**返回 `pinned/expires_at/tier/retention/confidence/verified_at/user_confirmed/can_edit`，由 `build_reply_explanation` 附在对应记忆行 `lifecycle` 键上（旧客户端忽略、旧快照无此键不渲染）。**不含 score 与权重算法**；非 active、`never_surface`、已删除事实在返回时二次授权排除；`short` 事实的「保留到 X」按 `first_observed_at + 30/7/1 天`确定性推导，与 `policy_expired_ids` 同条件，不虚报。
+- **可见遗忘**：`expiring_soon_candidates` 只返回即将到期事实的 id/到期时刻（不含原文），经 `pending_thoughts` 新 kind `memory_fading` 成为候选，走既有主动仲裁与每日额度，不新增投递通道；到期后仍由 `decay_expired_facts` 物理删除，不保留墓碑正文。
+- **前端**：`MessageBubble` 折叠面板的「用到的记忆」行显示保留徽章与「你确认过」标记；`MemoryPanel` 心事标签补 `memory_fading` 文案。
+
+### 验证范围（本轮实跑）
+
+- 后端针对性：memory_salience（新增 2 组：生产来源、解释层露出与可见遗忘）、memory_correction、fact_decay、ephemeral_privacy、relationship_bundle、pinned_retention、memory_v2、flags_http、m5_thoughts、proactive_arbiter、relationship_style、daily_trigger —— 12/12 通过。
+- 前端：`vue-tsc --noEmit` 零错误；`vitest run` 71/71（新增 MessageBubble 组件测试 2 例）。
+- 未跑全量聚合（按执行口径 5，节点聚合留待批次 7 后）。
+

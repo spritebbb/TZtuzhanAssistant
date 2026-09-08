@@ -189,6 +189,10 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
           <div class="why-label">用到的记忆</div>
           <div v-for="(item, i) in message.explanation.memories" :key="i" class="why-row">
             <b>{{ item.kind }}</b><span>{{ item.text }}</span>
+            <span v-if="item.lifecycle" class="why-lifecycle">
+              {{ item.lifecycle.retention }}
+              <template v-if="item.lifecycle.user_confirmed"> · 你确认过</template>
+            </span>
           </div>
         </div>
         <div class="why-tools">
@@ -422,6 +426,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 .why-row { display: grid; grid-template-columns: 66px 1fr; gap: 7px; margin-top: 4px; }
 .why-row b { color: var(--text); font-weight: 600; }
 .why-row span { min-width: 0; overflow-wrap: anywhere; }
+.why-lifecycle { grid-column: 2; color: var(--text-dim); font-size: 11px; }
 .why-tools { margin-top: 10px; }
 .why-tools span { background: var(--bg-hover); color: var(--text-dim); }
 .mdimg {

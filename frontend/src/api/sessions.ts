@@ -23,8 +23,20 @@ export interface MessageExplanation {
     tension?: number
   }
   behavior: Array<{ label: string; text: string }>
-  memories: Array<{ kind: string; text: string }>
+  memories: Array<{ kind: string; text: string; lifecycle?: MemoryLifecycle }>
   tools: { search: boolean; media: 'none' | 'generated_image' | 'sticker' | string }
+}
+
+/** G01/F07 记忆生命周期露出：只含非敏感元数据，不含评分权重。 */
+export interface MemoryLifecycle {
+  pinned: boolean
+  expires_at: string | null
+  tier: 'short' | 'long' | 'legacy' | null
+  retention: string
+  confidence: number
+  verified_at: string | null
+  user_confirmed: boolean
+  can_edit: boolean
 }
 
 export interface ProactiveMessage {

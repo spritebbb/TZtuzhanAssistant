@@ -849,9 +849,11 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     try:
         remembered = await recall(user_id, text, mock=mock)
         facts = await recall_facts(user_id, text, mock=mock)
+        # F07：反查本轮实际引用的事实 id，供解释快照附生命周期元数据。
+        fact_id_map = await asyncio.to_thread(db.fact_ids_by_content, user_id, facts)
     except Exception:
         logger.exception("[pipeline] 记忆检索失败，按无记忆继续")
-        remembered, facts = [], []
+        remembered, facts, fact_id_map = [], [], {}
 
     # 3.0) 知识库召回（D2 RAG）：本地向量检索，无云端 LLM 成本；
     # 距离阈值门控——不像就一条不注入，避免无关内容硬凑带偏回复。
@@ -1842,9 +1844,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         try:
             from .explainability import build_reply_explanation
 
-            memory_rows: list[tuple[str, object]] = []
+            memory_rows: list[tuple] = []
             memory_rows.extend(("相关对话", value) for value in remembered[:2])
-            memory_rows.extend(("长期事实", value) for value in facts[:2])
+            fact_ids_used: list[int] = []
+            for value in facts[:2]:
+                fact_id = fact_id_map.get(value)
+                memory_rows.append(("长期事实", value, fact_id))
+                if fact_id:
+                    fact_ids_used.append(fact_id)
             memory_rows.extend(
                 ("知识库", f"《{h['filename']}》相关段落" if h.get("filename") else "相关段落")
                 for h in kb_hits[:2]
@@ -1871,6 +1878,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 media=("generated_image" if drawn_image_path else "sticker" if sticker_path else "none"),
                 contexts=(context_selection.explain()
                           if context_selection is not None else ()),
+                fact_ids=fact_ids_used,
+                user_id=user_id,
             )
             await explain_cb(snapshot)
         except Exception:

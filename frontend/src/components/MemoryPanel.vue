@@ -51,6 +51,7 @@ const THOUGHT_KIND_LABEL: Record<string, string> = {
   confirm_memory: '想确认一条记忆',
   goal_checkin: '想问问目标的进展',
   chain_aftermath: '想回望完成的事',
+  memory_fading: '想趁还记得聊一次',
 }
 const restoreBusy = ref(false)
 const restoreNotice = ref('')
