@@ -28,10 +28,17 @@ test.afterEach(async ({ request }) => {
 })
 
 test('opens the application and exposes the companion controls', async ({ page }) => {
+  await page.route('**/api/presence', route => route.fulfill({
+    json: {
+      ok: true,
+      activity: { activity: 'reading', activity_label: '读书', location_label: '小屋' },
+      recent_events: [],
+    },
+  }))
   await openApp(page)
   await expect(page.getByTitle('一起做点什么')).toBeVisible()
   await expect(page.getByTitle('成长总览')).toBeVisible()
-  await expect(page.getByText('陪伴中')).toBeVisible()
+  await expect(page.locator('.presence').filter({ hasText: '在小屋读书' })).toBeVisible()
 })
 
 test('renders a streamed chat reply without calling a real model', async ({ page }) => {
