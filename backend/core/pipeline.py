@@ -718,6 +718,18 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 重逢回应状态推进失败（不影响回复）")
 
+    # G03：用户明确要求「以后有结果告诉我 / 帮我继续查」才记下待查；
+    # 普通提问与「我不知道」不追踪（确定性正则，无 LLM）。
+    if not ephemeral:
+        try:
+            from .open_questions import detect_tracking_request, track_question
+
+            topic = detect_tracking_request(text)
+            if topic:
+                track_question(user_id, topic, source_message_id=turn_id or None)
+        except Exception:
+            logger.exception("[pipeline] 开放问题登记失败（不影响回复）")
+
     # 1.0b) P2-05：晚安/停止/换题取消旧追发；明确临时离开时，从紧邻的
     # assistant 来源挂一条有期限追发。临时轮不读写节奏状态。
     if not ephemeral:

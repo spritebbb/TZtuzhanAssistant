@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 26  # v26: F01 greeting variant cooldown (runtime)
+_SCHEMA_VERSION = 27  # v27: G03 open questions (cross-process research)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -630,6 +630,24 @@ CREATE TABLE IF NOT EXISTS greeting_variant_usage (
     last_source_id TEXT,
     PRIMARY KEY (user_id, variant_id)
 );
+-- G03 悬念/开放问题：用户明确要求「有结果告诉我」的事；7 天到期、最多 2 次
+-- 复查、间隔 24h；last_evidence_hash 只存证据条目规范化哈希，不存模型叙述。
+CREATE TABLE IF NOT EXISTS open_questions (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            TEXT NOT NULL,
+    source_message_id  INTEGER,
+    topic              TEXT NOT NULL,
+    topic_key          TEXT NOT NULL,           -- 规范化主题（同主题幂等）
+    status             TEXT NOT NULL DEFAULT 'open',  -- open/researching/resolved/dismissed/expired
+    next_check_at      TEXT,
+    expires_at         TEXT NOT NULL,
+    attempts           INTEGER NOT NULL DEFAULT 0,
+    last_evidence_hash TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_open_questions_user
+    ON open_questions(user_id, status, next_check_at);
 -- P2-02 用户偏好教学：四类封闭类别，候选→确认→撤销状态机；
 -- origin=legacy 的行由旧称呼/提醒配置一次性迁移生成。
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1428,8 +1446,12 @@ class UserDB:
 
     @_locked
     def fact_ids_by_content(self, user_id: str, contents: list[str]) -> dict[str, int]:
-        """按正文反查 active 事实 id（F07 只给本轮实际引用的事实附生命周期元数据）。"""
-        clean = [str(c) for c in contents if str(c or "").strip()]
+        """按正文反查 active 事实 id（F07 只给本轮实际引用的事实附生命周期元数据）。
+
+        正文统一 strip 归一化：检索/向量返回的文本若与库中正文存在前后空白
+        差异，反查仍能命中（同 user 下正文已由 add_fact 查重保证唯一）。
+        """
+        clean = [str(c).strip() for c in contents if str(c or "").strip()]
         if not clean:
             return {}
         placeholders = ",".join("?" for _ in clean)
@@ -1438,7 +1460,7 @@ class UserDB:
             f"AND content IN ({placeholders})",
             (user_id, *clean),
         ).fetchall()
-        return {str(r["content"]): int(r["id"]) for r in rows}
+        return {str(r["content"]).strip(): int(r["id"]) for r in rows}
 
     @_locked
     def facts_not_for_proactive(self, user_id: str, limit: int = 50) -> list[str]:
@@ -1733,7 +1755,7 @@ class UserDB:
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
-                "greeting_variant_usage",
+                "greeting_variant_usage", "open_questions",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",

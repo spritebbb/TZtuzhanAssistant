@@ -4,6 +4,7 @@
 - 长期记忆的事实提炼（facts 表，带去重）
 由 affection.on_message 跨天回滚或 pipeline 惰性触发。
 """
+import asyncio
 import json
 from datetime import date, datetime, timedelta
 
@@ -126,6 +127,15 @@ async def run_daily_batch(user_id: str, day: date) -> None:
         await decay_expired_facts_async(user_id)
     except Exception:
         logger.exception("[每日总结] {} 的过期事实清理失败", user_id)
+
+    # G03：到点的开放问题做一次有限度复查（JOB-1 认领，最多 2 次、间隔 24h）；
+    # 无新证据不发假进展，有新证据只挂候选，表达仍走主动仲裁与共享额度。
+    try:
+        from .open_questions import research_due_questions
+
+        await asyncio.to_thread(research_due_questions, user_id)
+    except Exception:
+        logger.exception("[每日总结] {} 的开放问题复查失败", user_id)
 
     # 幂等防重跑：同一天只执行一次（schedule 按 key 去重，这里再兜一道）
     done_key = f"daily_batch:{day.isoformat()}"

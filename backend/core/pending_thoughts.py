@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from .log import logger
 from .userdb import db
 
-_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选
+_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading", "open_question_result")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选；open_question_result=G03 待查有结果
 _PAUSED_READING_DAYS = 3
 _CONFIRM_MEMORY_HOURS = 2
 _THOUGHT_TTL_DAYS = 7
