@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 21
+_SCHEMA_VERSION = 22
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -229,6 +229,35 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_kb_docs_user ON kb_documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks(user_id, doc_id);
+-- P3-02C 知识内化：角色观点与来源片段分表，绝不写入用户事实。
+CREATE TABLE IF NOT EXISTS knowledge_opinions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    document_id INTEGER NOT NULL,
+    stance TEXT NOT NULL,
+    opinion_hash TEXT NOT NULL,
+    origin TEXT NOT NULL,             -- assistant / user
+    confidence REAL NOT NULL DEFAULT 0.5,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active', -- active / revoked
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, document_id, opinion_hash)
+);
+CREATE TABLE IF NOT EXISTS knowledge_opinion_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    opinion_id INTEGER NOT NULL,
+    chunk_id INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL DEFAULT 0,
+    end_offset INTEGER NOT NULL DEFAULT 0,
+    source_hash TEXT NOT NULL,
+    UNIQUE (user_id, opinion_id, chunk_id, start_offset, end_offset)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_opinions_user
+    ON knowledge_opinions(user_id, document_id, status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_opinion_sources
+    ON knowledge_opinion_sources(user_id, opinion_id);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1608,6 +1637,7 @@ class UserDB:
                 "relationship_events", "artifacts", "context_lifecycle",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "user_preferences", "event_chains", "reunion_arcs",
+                "knowledge_opinion_sources", "knowledge_opinions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",

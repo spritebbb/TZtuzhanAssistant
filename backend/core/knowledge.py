@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import re
 import time
+import hashlib
+import json
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -224,6 +227,21 @@ def delete_document(user_id: str, doc_id: int) -> bool:
     if doc is None:
         return False
     with db._lock:
+        opinion_rows = db.conn.execute(
+            "SELECT id FROM knowledge_opinions WHERE user_id=? AND document_id=?",
+            (user_id, doc_id),
+        ).fetchall()
+        opinion_ids = [int(row["id"]) for row in opinion_rows]
+        if opinion_ids:
+            marks = ",".join("?" for _ in opinion_ids)
+            db.conn.execute(
+                f"DELETE FROM knowledge_opinion_sources WHERE user_id=? AND opinion_id IN ({marks})",
+                [user_id, *opinion_ids],
+            )
+        db.conn.execute(
+            "DELETE FROM knowledge_opinions WHERE user_id=? AND document_id=?",
+            (user_id, doc_id),
+        )
         activity_rows = db.conn.execute(
             "SELECT id FROM activities WHERE user_id = ? AND document_id = ?",
             (user_id, doc_id),
@@ -275,6 +293,199 @@ def clear_user_documents(user_id: str) -> int:
     for doc in docs:
         delete_document(user_id, doc["id"])
     return len(docs)
+
+
+# ---------- 有来源的角色观点（P3-02C） ----------
+
+def _normalize_stance(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).strip().split())
+
+
+def _opinion_hash(stance: str, spans: list[dict]) -> str:
+    payload = {
+        "stance": _normalize_stance(stance).lower(),
+        "spans": [(int(s["chunk_id"]), int(s.get("start", 0)), int(s.get("end", 0))) for s in spans],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def save_opinion(
+    user_id: str, document_id: int, stance: str, source_spans: list[dict | int], *,
+    origin: str = "user", confidence: float = 1.0,
+) -> dict:
+    """保存一条角色观点；每个来源必须是该用户该文档的真实知识分块。"""
+    from .userdb import db
+
+    stance = _normalize_stance(stance)
+    if not stance or len(stance) > 2000:
+        raise KnowledgeError("观点内容必须为 1–2000 字")
+    if origin not in {"assistant", "user"}:
+        raise KnowledgeError("观点来源必须是 assistant 或 user")
+    spans: list[dict] = []
+    for raw in source_spans or []:
+        item = {"chunk_id": int(raw)} if isinstance(raw, int) else dict(raw)
+        try:
+            spans.append({
+                "chunk_id": int(item["chunk_id"]),
+                "start": max(0, int(item.get("start", 0))),
+                "end": max(0, int(item.get("end", 0))),
+            })
+        except (KeyError, TypeError, ValueError):
+            raise KnowledgeError("来源片段格式无效") from None
+    if not spans:
+        raise KnowledgeError("观点至少需要一个来源片段")
+    # 稳定去重，避免重复来源改变 opinion_hash。
+    spans = [dict(zip(("chunk_id", "start", "end"), key)) for key in sorted({
+        (item["chunk_id"], item["start"], item["end"]) for item in spans
+    })]
+    digest = _opinion_hash(stance, spans)
+    now = datetime.now().isoformat(timespec="seconds")
+    confidence = max(0.0, min(1.0, float(confidence)))
+
+    with db._lock:
+        doc = db.conn.execute(
+            "SELECT id FROM kb_documents WHERE user_id=? AND id=?", (user_id, int(document_id))
+        ).fetchone()
+        if doc is None:
+            raise KnowledgeError("知识文档不存在")
+        source_rows: list[tuple[dict, str]] = []
+        for span in spans:
+            row = db.conn.execute(
+                "SELECT id,text FROM kb_chunks WHERE user_id=? AND doc_id=? AND id=?",
+                (user_id, int(document_id), span["chunk_id"]),
+            ).fetchone()
+            if row is None:
+                raise KnowledgeError("来源片段不属于该文档")
+            text = str(row["text"])
+            end = span["end"] or len(text)
+            if span["start"] >= end or end > len(text):
+                raise KnowledgeError("来源片段范围越界")
+            span["end"] = end
+            source_hash = hashlib.sha256(text[span["start"]:end].encode("utf-8")).hexdigest()
+            source_rows.append((span, source_hash))
+        # end_offset 规范化后重算，保证同一来源的省略 end 与显式末尾同键。
+        digest = _opinion_hash(stance, spans)
+        existing = db.conn.execute(
+            "SELECT id,status,version FROM knowledge_opinions "
+            "WHERE user_id=? AND document_id=? AND opinion_hash=?",
+            (user_id, int(document_id), digest),
+        ).fetchone()
+        if existing is not None:
+            if existing["status"] != "active":
+                db.conn.execute(
+                    "UPDATE knowledge_opinions SET status='active',version=version+1,"
+                    "confidence=?,updated_at=? WHERE id=? AND user_id=?",
+                    (confidence, now, int(existing["id"]), user_id),
+                )
+                db.conn.commit()
+            return get_opinion(user_id, int(existing["id"]))
+        cur = db.conn.execute(
+            "INSERT INTO knowledge_opinions "
+            "(user_id,document_id,stance,opinion_hash,origin,confidence,version,status,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,1,'active',?,?)",
+            (user_id, int(document_id), stance, digest, origin, confidence, now, now),
+        )
+        opinion_id = int(cur.lastrowid)
+        for span, source_hash in source_rows:
+            db.conn.execute(
+                "INSERT INTO knowledge_opinion_sources "
+                "(user_id,opinion_id,chunk_id,start_offset,end_offset,source_hash) "
+                "VALUES (?,?,?,?,?,?)",
+                (user_id, opinion_id, span["chunk_id"], span["start"], span["end"], source_hash),
+            )
+        db.conn.commit()
+    return get_opinion(user_id, opinion_id)
+
+
+def get_opinion(user_id: str, opinion_id: int) -> dict | None:
+    from .userdb import db
+
+    with db._lock:
+        row = db.conn.execute(
+            "SELECT o.*,d.filename FROM knowledge_opinions o "
+            "JOIN kb_documents d ON d.id=o.document_id AND d.user_id=o.user_id "
+            "WHERE o.user_id=? AND o.id=?", (user_id, int(opinion_id)),
+        ).fetchone()
+        if row is None:
+            return None
+        sources = db.conn.execute(
+            "SELECT s.chunk_id,s.start_offset,s.end_offset,s.source_hash,c.text "
+            "FROM knowledge_opinion_sources s JOIN kb_chunks c "
+            "ON c.id=s.chunk_id AND c.user_id=s.user_id "
+            "WHERE s.user_id=? AND s.opinion_id=? ORDER BY s.chunk_id,s.start_offset",
+            (user_id, int(opinion_id)),
+        ).fetchall()
+    valid_sources = []
+    for source in sources:
+        text = str(source["text"])
+        start, end = int(source["start_offset"]), int(source["end_offset"])
+        if start < 0 or end > len(text) or start >= end:
+            return None
+        digest = hashlib.sha256(text[start:end].encode("utf-8")).hexdigest()
+        if digest != source["source_hash"]:
+            return None
+        valid_sources.append({key: source[key] for key in (
+            "chunk_id", "start_offset", "end_offset", "source_hash"
+        )})
+    if not valid_sources:
+        return None
+    result = dict(row)
+    result["source_spans"] = valid_sources
+    return result
+
+
+def list_opinions(user_id: str, document_id: int | None = None, *, active_only: bool = True) -> list[dict]:
+    from .userdb import db
+
+    where = ["user_id=?"]
+    args: list = [user_id]
+    if document_id is not None:
+        where.append("document_id=?")
+        args.append(int(document_id))
+    if active_only:
+        where.append("status='active'")
+    with db._lock:
+        rows = db.conn.execute(
+            f"SELECT id FROM knowledge_opinions WHERE {' AND '.join(where)} ORDER BY id DESC",
+            args,
+        ).fetchall()
+    return [opinion for row in rows if (opinion := get_opinion(user_id, int(row["id"]))) is not None]
+
+
+def revoke_opinion(user_id: str, opinion_id: int) -> bool:
+    from .userdb import db
+
+    with db._lock:
+        cur = db.conn.execute(
+            "UPDATE knowledge_opinions SET status='revoked',version=version+1,updated_at=? "
+            "WHERE user_id=? AND id=? AND status='active'",
+            (datetime.now().isoformat(timespec="seconds"), user_id, int(opinion_id)),
+        )
+        db.conn.commit()
+    return cur.rowcount == 1
+
+
+def _terms(text: str) -> set[str]:
+    normalized = _normalize_stance(text).lower()
+    latin = set(re.findall(r"[a-z0-9_]{2,}", normalized))
+    chinese = re.sub(r"[^\u4e00-\u9fff]", "", normalized)
+    return latin | {chinese[i:i + 2] for i in range(max(0, len(chinese) - 1))}
+
+
+def relevant_opinions(user_id: str, query: str, *, limit: int = 2) -> list[dict]:
+    """只返回与当前查询有词面交集且来源仍有效的角色观点。"""
+    query_terms = _terms(query)
+    if not query_terms:
+        return []
+    scored = []
+    for opinion in list_opinions(user_id):
+        overlap = len(query_terms & _terms(opinion["stance"]))
+        if overlap:
+            scored.append((overlap, int(opinion["id"]), opinion))
+    scored.sort(key=lambda item: (-item[0], -item[1]))
+    return [item[2] for item in scored[:max(0, min(4, int(limit)))]]
 
 
 # ---------- 检索 ----------

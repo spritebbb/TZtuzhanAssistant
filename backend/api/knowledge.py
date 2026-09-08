@@ -6,6 +6,7 @@ import asyncio
 
 from fastapi import APIRouter, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from ..core import knowledge
 from ..core.config import config
@@ -13,6 +14,12 @@ from ..core.log import logger
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+
+
+class OpinionCreate(BaseModel):
+    stance: str = Field(min_length=1, max_length=2000)
+    source_spans: list[dict]
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 @router.post("/upload")
 async def api_knowledge_upload(file: UploadFile):
@@ -53,4 +60,33 @@ async def api_knowledge_list():
 async def api_knowledge_delete(doc_id: int):
     if not await asyncio.to_thread(knowledge.delete_document, active_user_id(), doc_id):
         return {"ok": False, "error": "文档不存在"}
+    return {"ok": True}
+
+
+@router.get("/opinions")
+async def api_opinion_list(document_id: int | None = None):
+    opinions = await asyncio.to_thread(
+        knowledge.list_opinions, active_user_id(), document_id,
+    )
+    return {"ok": True, "opinions": opinions}
+
+
+@router.post("/documents/{doc_id}/opinions")
+async def api_opinion_create(doc_id: int, payload: OpinionCreate):
+    try:
+        opinion = await asyncio.to_thread(
+            knowledge.save_opinion,
+            active_user_id(), doc_id, payload.stance, payload.source_spans,
+            origin="user", confidence=payload.confidence,
+        )
+    except knowledge.KnowledgeError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+    return {"ok": True, "opinion": opinion}
+
+
+@router.delete("/opinions/{opinion_id}")
+async def api_opinion_revoke(opinion_id: int):
+    ok = await asyncio.to_thread(knowledge.revoke_opinion, active_user_id(), opinion_id)
+    if not ok:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "观点不存在"})
     return {"ok": True}
