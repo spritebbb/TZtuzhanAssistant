@@ -76,6 +76,26 @@ def _remove_closed_reasoning_outside_fences(text: str) -> str:
     )
 
 
+def remove_closed_reasoning(text: str) -> str:
+    """移除围栏外完整闭合的推理块，供最终检查与增量出口共用。"""
+    return _remove_closed_reasoning_outside_fences(text or "")
+
+
+def scan_rules(text: str, *, context: HygieneContext) -> tuple[str, ...]:
+    """扫描不可展示的内部标记；调用方应先移除完整闭合的推理块。"""
+    scan = _outside_fences(text or "")
+    rules: list[str] = []
+    if _OPEN_REASONING_RE.search(scan) or _BRACKET_REASONING_RE.search(scan):
+        rules.append("reasoning_marker")
+    if _TOOL_PROTOCOL_RE.search(scan):
+        rules.append("tool_protocol")
+    if _KNOWN_INTERNAL_RE.search(scan):
+        rules.append("known_internal_instruction")
+    if not context.user_requested_explanation and _SYSTEM_DISCLOSURE_RE.search(scan):
+        rules.append("system_instruction_disclosure")
+    return tuple(dict.fromkeys(rules))
+
+
 def inspect_reply(text: str, *, context: HygieneContext) -> HygieneResult:
     """检查最终候选；返回安全文本和下一步动作。
 
@@ -87,22 +107,14 @@ def inspect_reply(text: str, *, context: HygieneContext) -> HygieneResult:
         return HygieneResult("", "fallback", ("empty_reply",))
 
     rules: list[str] = []
-    cleaned = _remove_closed_reasoning_outside_fences(candidate).strip()
+    cleaned = remove_closed_reasoning(candidate).strip()
     if cleaned != candidate:
         rules.append("closed_reasoning_block")
         candidate = cleaned
         if not candidate:
             return HygieneResult("", "fallback", tuple(rules))
 
-    scan = _outside_fences(candidate)
-    if _OPEN_REASONING_RE.search(scan) or _BRACKET_REASONING_RE.search(scan):
-        rules.append("reasoning_marker")
-    if _TOOL_PROTOCOL_RE.search(scan):
-        rules.append("tool_protocol")
-    if _KNOWN_INTERNAL_RE.search(scan):
-        rules.append("known_internal_instruction")
-    if not context.user_requested_explanation and _SYSTEM_DISCLOSURE_RE.search(scan):
-        rules.append("system_instruction_disclosure")
+    rules.extend(scan_rules(candidate, context=context))
 
     if rules and rules != ["closed_reasoning_block"]:
         return HygieneResult(candidate, "rewrite", tuple(dict.fromkeys(rules)))

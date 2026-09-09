@@ -16,6 +16,7 @@ async def run_tool_round(
     *,
     chat: Callable[[list[dict]], str] | None = None,
     chat_native: Callable[[list[dict], list[dict] | None], tuple[str, list[dict]]] | None = None,
+    chat_final_stream: Callable | None = None,
     mock: bool = False,
     max_loops: int = 2,
     final_instruction: list[dict] | None = None,
@@ -28,6 +29,7 @@ async def run_tool_round(
         messages: 已注入人格/记忆/上下文的消息列表（最后一条是 user）
         chat: 纯文本 LLM 回调（用于回退模式）
         chat_native: 原生 Function Calling LLM 回调
+        chat_final_stream: 最终正文轮的异步流回调（工具选择轮仍为非流式）
         mock: 测试模式（不真实调用 LLM）
         max_loops: 工具循环最大轮次
         final_instruction: 最终回复轮次追加的 system 消息
@@ -51,12 +53,15 @@ async def run_tool_round(
             return ""
         return await chat(msgs)
 
-    return await run_tool_loop(
-        messages,
-        call_llm=_call_llm,
-        call_native=chat_native,
-        max_loops=max_loops,
-        final_instruction=final_instruction,
-        on_progress=on_progress,
-        tool_filter=tool_filter,
-    )
+    loop_kwargs = {
+        "call_llm": _call_llm,
+        "call_native": chat_native,
+        "max_loops": max_loops,
+        "final_instruction": final_instruction,
+        "on_progress": on_progress,
+        "tool_filter": tool_filter,
+    }
+    # 保持旧调用契约：没有最终流回调的后台任务与测试替身不接收新关键字。
+    if chat_final_stream is not None:
+        loop_kwargs["call_final_stream"] = chat_final_stream
+    return await run_tool_loop(messages, **loop_kwargs)
