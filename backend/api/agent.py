@@ -23,6 +23,7 @@ _agent_bg_by_id: dict[str, asyncio.Task] = {}
 # 延迟清理通道的后台任务强引用（防 _drop_channel_later 的 sleep 任务被 GC 回收，
 # 导致对应 channel 永不清理、_task_channels 无限增长）
 _channel_cleanup_tasks: set[asyncio.Task] = set()
+_channel_cleanup_by_id: dict[str, asyncio.Task] = {}
 
 # 每个任务的确认/进度通道（task_id → asyncio.Queue），由 POST /run 创建、
 # GET stream 消费；任务结束后保留最近事件供迟到连接补看
@@ -46,6 +47,85 @@ async def _drop_channel_later(task_id: str, delay: float = 300.0) -> None:
         _task_channels.pop(task_id, None)
     except asyncio.CancelledError:
         pass
+
+
+def _start_agent_task(task_id: str, *, request_epoch: int | None = None) -> asyncio.Task | None:
+    """原子认领并后台启动任务，统一身份、确认、取消、reset 与 SSE 契约。"""
+    from ..core.current_user import current_user_id
+    from ..core.reset import epoch_is_current, reset_epoch
+    from ..tools.confirm import current_sse_push
+
+    task = agent_session._load(task_id)
+    if task is None or task.status != "planned":
+        return None
+    # 在创建后台协程前认领。双击/并发请求中的失败者不会创建协程，因此不会
+    # 伪造 task_done、覆盖取消句柄或让两个请求都返回“已启动”。
+    if not agent_session._claim_running(task_id):
+        return None
+
+    epoch = reset_epoch() if request_epoch is None else int(request_epoch)
+    queue = _channel(task_id)
+    # 重试/再次执行前丢弃上一轮的 task_done，并取消上一轮的延迟清理；否则旧帧会
+    # 让新 SSE 立刻结束，旧清理任务也可能在新一轮执行中删掉正在使用的通道。
+    previous_cleanup = _channel_cleanup_by_id.pop(task_id, None)
+    if previous_cleanup is not None and not previous_cleanup.done():
+        previous_cleanup.cancel()
+    while True:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+
+    async def push(event: dict) -> None:
+        # 丢弃已满的旧事件，保留最新（确认请求很重要，尽力推）
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(event)
+            except Exception:
+                pass
+
+    ctx = contextvars.copy_context()
+    ctx.run(current_sse_push.set, push)
+    ctx.run(current_user_id.set, task.user_id)
+
+    async def _run() -> None:
+        try:
+            if not epoch_is_current(epoch):
+                agent_session.cancel_task(task_id)
+                return
+            await agent_session.run_task(task_id, already_claimed=True)
+        except asyncio.CancelledError:
+            agent_session.cancel_task(task_id)
+            raise
+        except Exception:
+            logger.exception("[Agent] 执行任务 {} 异常", task_id)
+        finally:
+            current = asyncio.current_task()
+            if _agent_bg_by_id.get(task_id) is current:
+                _agent_bg_by_id.pop(task_id, None)
+            await push({"type": "task_done", "task_id": task_id})
+            cleanup = asyncio.create_task(_drop_channel_later(task_id))
+            _channel_cleanup_tasks.add(cleanup)
+            _channel_cleanup_by_id[task_id] = cleanup
+
+            def _cleanup_done(done: asyncio.Task) -> None:
+                _channel_cleanup_tasks.discard(done)
+                if _channel_cleanup_by_id.get(task_id) is done:
+                    _channel_cleanup_by_id.pop(task_id, None)
+
+            cleanup.add_done_callback(_cleanup_done)
+
+    bg = ctx.run(asyncio.create_task, _run())
+    _agent_bg_tasks.add(bg)
+    _agent_bg_by_id[task_id] = bg
+    bg.add_done_callback(_agent_bg_tasks.discard)
+    return bg
 
 
 @router.post("/tasks")
@@ -136,76 +216,13 @@ async def api_agent_run(task_id: str):
     task = agent_session._load(task_id)
     if task is None:
         return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
-    if task.status in ("running", "done"):
+    if task.status != "planned":
         return JSONResponse({"ok": False, "error": f"任务已在 {task.status} 状态"}, status_code=409)
-    if task.status == "cancelled":
-        # 取消后旧的后台执行可能仍在收尾，重跑同一任务会互相覆盖状态；
-        # 明确拒绝并提示新建任务，避免"返回 running 但实际什么都没执行"
-        return JSONResponse(
-            {"ok": False, "error": "任务已取消，无法重新执行，请新建任务"},
-            status_code=409,
-        )
-
-    queue = _channel(task_id)
-
-    async def push(event: dict) -> None:
-        # 丢弃已满的旧事件，保留最新（确认请求很重要，尽力推）
-        try:
-            queue.put_nowait(event)
-        except asyncio.QueueFull:
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                queue.put_nowait(event)
-            except Exception:
-                pass
-
-    # 执行上下文里注入 SSE 推送器（供 confirm_hook 使用）
-    from ..core.current_user import current_user_id
-    from ..tools.confirm import current_sse_push
-    ctx = contextvars.copy_context()
-    ctx.run(current_sse_push.set, push)
-    # 任务可能在创建后才执行；固定使用任务创建时的人格用户空间，避免切换后
-    # 工具调用、用量统计或记忆写入落进另一个人格。
-    ctx.run(current_user_id.set, task.user_id)
-
-    async def _run():
-        try:
-            from ..core.reset import epoch_is_current
-            if not epoch_is_current(request_epoch):
-                return
-            # 总超时保护：任务卡死（LLM 挂起等）到点自动取消
-            await asyncio.wait_for(
-                agent_session.run_task(task_id),
-                timeout=agent_session.TASK_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("[Agent] 任务 {} 执行超时（{}s），自动取消", task_id, agent_session.TASK_TIMEOUT)
-            agent_session.cancel_task(task_id)
-        except asyncio.CancelledError:
-            agent_session.cancel_task(task_id)
-            raise
-        except Exception as e:
-            logger.exception("[Agent] 执行任务 {} 异常", task_id)
-        finally:
-            current = asyncio.current_task()
-            if _agent_bg_by_id.get(task_id) is current:
-                _agent_bg_by_id.pop(task_id, None)
-            await push({"type": "task_done", "task_id": task_id})
-            _t = asyncio.create_task(_drop_channel_later(task_id))
-            _channel_cleanup_tasks.add(_t)
-            _t.add_done_callback(_channel_cleanup_tasks.discard)
-
-    # 在 ctx 上下文内创建任务（Task 拷贝此刻上下文，确认钩子能读到 push）。
-    # 历史 bug：写成 asyncio.create_task(ctx.run(asyncio.create_task, _run()))——
-    # 内层 create_task 返回 Task，外层 create_task 需要 coroutine → 恒 TypeError，
-    # POST /run 恒 500，Agent 任务从未被 HTTP 端点真正启动过（HTTP 层无测试漏网）。
-    bg = ctx.run(asyncio.create_task, _run())
-    _agent_bg_tasks.add(bg)
-    _agent_bg_by_id[task_id] = bg
-    bg.add_done_callback(_agent_bg_tasks.discard)
+    bg = _start_agent_task(task_id, request_epoch=request_epoch)
+    if bg is None:
+        current = agent_session._load(task_id)
+        state = current.status if current else "missing"
+        return JSONResponse({"ok": False, "error": f"任务未启动，当前状态 {state}"}, status_code=409)
     return {"ok": True, "status": "running"}
 
 
@@ -257,8 +274,14 @@ async def api_agent_retry(task_id: str):
     if task.attempt >= task.max_attempts:
         return JSONResponse({"ok": False, "error": f"已达重试上限（{task.max_attempts} 次）"},
                             status_code=409)
-    updated = await agent_session.retry_task(task_id)
-    return {"ok": True, "task": agent_session.to_dict(updated or task)}
+    prepared = agent_session.prepare_retry(task_id)
+    if prepared is None or prepared.status != "planned":
+        return JSONResponse({"ok": False, "error": "任务未能进入重试状态"}, status_code=409)
+    bg = _start_agent_task(task_id)
+    if bg is None:
+        return JSONResponse({"ok": False, "error": "重试任务未能启动"}, status_code=409)
+    current = agent_session._load(task_id) or prepared
+    return {"ok": True, "status": "running", "task": agent_session.to_dict(current)}
 
 
 @router.post("/tasks/{task_id}/cancel")

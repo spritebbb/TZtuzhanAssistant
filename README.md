@@ -219,7 +219,7 @@ voice: zh-CN-XiaoyiNeural
 
 ### 从 v2.x / v3.0 升级
 
-直接用 v3.1 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到 v22（信任/亲密双维、情绪状态、事件链等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
+直接用 v3.1 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到当前 v41（信任/亲密双维、情绪状态、事件链、网页监视等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
 
 ### 日常使用
 
@@ -327,7 +327,7 @@ netstat -ano | findstr 8801
 `.env` 中设置 `LLM_PROXY=off` 强制直连（本机有失效代理时）。
 
 **Q6：从 v2.x 升级后好感度/记忆还在吗**
-在。首次启动会自动迁移 schema 到 v22：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
+在。首次启动会自动迁移 schema 到当前 v41：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
 
 ---
 
@@ -369,7 +369,7 @@ backend/                      # Python 后端
 │   ├── fact_decay.py         # 琐碎记忆自然衰减
 │   ├── fact_lifecycle.py     # 事实生命周期（来源/置信度/级联清理）
 │   ├── memory/               # 记忆系统（事实/话题/五元组/日期记忆 + 压缩）
-│   ├── userdb.py             # SQLite 数据层（schema v22）
+│   ├── userdb.py             # SQLite 数据层（schema v41）
 │   ├── search.py             # 联网搜索 + 多源求证
 │   ├── knowledge.py          # 知识库（文档/分块/观点/来源）
 │   ├── imagegen.py           # 文生图
@@ -470,7 +470,7 @@ persona-菟菚.md               # 人格源文件
 
 ## 开发状态
 
-- 当前版本：**v3.1.0**（schema v40）
+- 当前版本：**v3.1.0**（schema v41）
 - 后端聚合回归 **141/141**、前端 Vitest **90/90**、vue-tsc 与生产构建通过（2026-09-09 全量实跑）
 - 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
 - 欢迎提 Issue 与 PR；提交请保持小切片、一个主题一个提交

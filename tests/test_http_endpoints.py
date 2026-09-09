@@ -388,21 +388,28 @@ def test_agent_full_flow_gate_to_done() -> None:
 
 
 def test_agent_cancel_and_404() -> None:
-    """cancel planned 任务返回 ok；不存在任务 404。"""
+    """cancel planned 定时任务真正落为 cancelled；不存在任务 404。"""
     _mock_plan()
     try:
         with TestClient(app) as client:
             r = client.post("/api/agent/tasks", json={"objective": "x", "user_id": AGENT_USER})
             tid = r.json()["task"]["id"]
+            scheduled = client.post(
+                f"/api/agent/tasks/{tid}/schedule", json={"delay_minutes": 30}
+            )
+            assert scheduled.status_code == 200
+            assert scheduled.json()["task"]["scheduled_at"] > 0
             rc = client.post(f"/api/agent/tasks/{tid}/cancel")
             assert rc.status_code == 200 and rc.json()["ok"], rc.text
+            assert rc.json()["task"]["status"] == "cancelled", rc.text
+            assert rc.json()["task"]["scheduled_at"] == 0, rc.text
             r404 = client.get("/api/agent/tasks/no-such-task")
             assert r404.status_code == 404, r404.text
             r404b = client.post("/api/agent/tasks/no-such-task/run")
             assert r404b.status_code == 404, r404b.text
             r404c = client.post("/api/agent/tasks/no-such-task/cancel")
             assert r404c.status_code == 404, r404c.text
-        print("[OK] agent cancel / 404 语义")
+        print("[OK] agent 定时取消落库 / 404 语义")
     finally:
         _cleanup_agent()
 

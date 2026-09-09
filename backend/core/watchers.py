@@ -122,6 +122,24 @@ def remove_watch(user_id: str, watch_id: int) -> bool:
     return bool(cur.rowcount)
 
 
+def acknowledge_changes(user_id: str, watch_ids: list[int]) -> int:
+    """投递成功后确认变化；未确认的哈希会在后续主动轮次继续返回。"""
+    from .userdb import db
+
+    ids = sorted({int(item) for item in watch_ids if int(item) > 0})
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    with db._lock:
+        cur = db.conn.execute(
+            f"UPDATE watches SET last_notified_hash=last_hash, updated_at=? "
+            f"WHERE user_id=? AND id IN ({placeholders})",
+            (_now(), user_id, *ids),
+        )
+        db.conn.commit()
+    return max(0, int(cur.rowcount or 0))
+
+
 def check_due_watches(user_id: str | None = None, *, now: datetime | None = None,
                       force: bool = False) -> list[dict]:
     """检查到期的监视项，返回**发生变化**的条目（同步，调用方放线程池）。
@@ -145,6 +163,17 @@ def check_due_watches(user_id: str | None = None, *, now: datetime | None = None
     for row in rows:
         watch_id = int(row["id"])
         owner = str(row["user_id"])
+        old_hash = str(row["last_hash"] or "")
+        notified_hash = str(row["last_notified_hash"] or "")
+        # 检测已完成但主动消息尚未真正投递：不重新抓取、不吞变化，直接重试通知。
+        if old_hash and notified_hash != old_hash:
+            changes.append({
+                "watch_id": watch_id,
+                "user_id": owner,
+                "label": str(row["label"] or ""),
+                "url": str(row["url"]),
+            })
+            continue
         last_checked = row["last_checked_at"]
         if not force and last_checked:
             try:
@@ -168,13 +197,22 @@ def check_due_watches(user_id: str | None = None, *, now: datetime | None = None
                 db.conn.commit()
             continue
         digest = _hash(text)
-        old_hash = str(row["last_hash"] or "")
         with db._lock:
-            db.conn.execute(
-                "UPDATE watches SET last_checked_at=?, last_hash=?, updated_at=?"
-                " WHERE id=?",
-                (_now(), digest, _now(), watch_id),
-            )
+            if old_hash:
+                # 变化先进入 pending（last_hash != last_notified_hash）；只有主动消息
+                # 投递成功后 acknowledge_changes 才推进确认哈希。
+                db.conn.execute(
+                    "UPDATE watches SET last_checked_at=?, last_hash=?, updated_at=?"
+                    " WHERE id=?",
+                    (_now(), digest, _now(), watch_id),
+                )
+            else:
+                # 首次抓取只是建立基线，不产生通知。
+                db.conn.execute(
+                    "UPDATE watches SET last_checked_at=?, last_hash=?,"
+                    " last_notified_hash=?, updated_at=? WHERE id=?",
+                    (_now(), digest, digest, _now(), watch_id),
+                )
             if old_hash and old_hash != digest:
                 db.conn.execute(
                     "UPDATE watches SET last_changed_at=? WHERE id=?", (_now(), watch_id)

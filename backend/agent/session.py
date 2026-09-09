@@ -97,6 +97,7 @@ def _init() -> None:
             "step_confirmations TEXT NOT NULL DEFAULT '{}',"
             "log TEXT NOT NULL DEFAULT '[]', result TEXT NOT NULL DEFAULT '',"
             "created_at REAL NOT NULL, updated_at REAL NOT NULL,"
+            "artifact_path TEXT NOT NULL DEFAULT '',"
             "scheduled_at REAL NOT NULL DEFAULT 0,"
             "attempt INTEGER NOT NULL DEFAULT 0,"
             "max_attempts INTEGER NOT NULL DEFAULT 2)"
@@ -268,8 +269,8 @@ def due_tasks(now: float | None = None) -> list[str]:
         conn.close()
 
 
-async def retry_task(task_id: str) -> AgentTask | None:
-    """失败重试：重置为 planned 并立即重跑（保留历史日志，记一次尝试）。"""
+def prepare_retry(task_id: str) -> AgentTask | None:
+    """把失败任务准备为下一次执行；实际启动由调用方决定。"""
     task = _load(task_id)
     if task is None:
         return None
@@ -285,6 +286,17 @@ async def retry_task(task_id: str) -> AgentTask | None:
                      "content": f"第 {task.attempt} 次重试"})
     task.updated_at = time.time()
     _save(task)
+    return task
+
+
+async def retry_task(task_id: str) -> AgentTask | None:
+    """兼容直接调用：准备失败任务并立即执行。HTTP 层使用统一后台启动器。"""
+    current = _load(task_id)
+    if current is None or current.status != "failed":
+        return current
+    task = prepare_retry(task_id)
+    if task is None or task.status != "planned":
+        return task
     return await run_task(task_id)
 
 
@@ -300,7 +312,7 @@ def _claim_running(task_id: str) -> bool:
     conn = _connect()
     try:
         cur = conn.execute(
-            "UPDATE agent_tasks SET status='running', updated_at=? "
+            "UPDATE agent_tasks SET status='running', scheduled_at=0, updated_at=? "
             "WHERE id=? AND status='planned'",
             (time.time(), task_id),
         )
@@ -321,7 +333,7 @@ def _write_report(task: AgentTask) -> str:
     try:
         _REPORT_DIR.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(task.created_at or time.time()))
-        safe = "".join(ch for ch in task.objective[:20] if ch not in '\/:*?"<>|').strip()
+        safe = "".join(ch for ch in task.objective[:20] if ch not in '\\/:*?"<>|').strip()
         path = _REPORT_DIR / f"{stamp}-{task.id}-{safe or 'task'}.md"
         lines = [
             f"# {task.objective}", "",
@@ -371,7 +383,8 @@ def detect_dispatch_request(text: str) -> str | None:
     return None
 
 
-async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentTask:
+async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
+                   already_claimed: bool = False) -> AgentTask:
     """执行任务：在计划上下文里让 LLM 自主调用工具逐步完成。
 
     所有工具调用经全局确认钩子（confirm_hook），用户逐条批准。
@@ -380,12 +393,22 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
     task = _load(task_id)
     if task is None:
         raise ValueError(f"任务不存在: {task_id}")
-    if task.status in ("running", "done", "cancelled"):
+    if task.status in ("done", "cancelled"):
         return task
     # 原子抢占执行权：两次并发 /run 只会有一个 rowcount==1 成功，另一个读到
     # 最新状态（已被置 running / 或已 done / cancelled）直接返回，不重复执行。
-    if not _claim_running(task_id):
-        return _load(task_id)
+    if already_claimed:
+        if task.status != "running":
+            return task
+    else:
+        if task.status == "running" or not _claim_running(task_id):
+            return _load(task_id)
+
+    # 所有入口（HTTP、定时器、重试、测试/内部直接调用）都必须绑定任务创建时的
+    # 用户命名空间。不能只依赖 HTTP 层设置，否则后台入口会回落到 assistant-main。
+    from ..core.current_user import current_user_id
+
+    user_token = current_user_id.set(task.user_id)
 
     try:
         # 组装任务上下文：人格 + 目标 + 计划 + 当前进度
@@ -474,11 +497,52 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS) -> AgentT
         task.updated_at = time.time()
         _save(task)
         return task
+    finally:
+        current_user_id.reset(user_token)
 
 
 
-# 调度循环持有的后台任务强引用（防 GC 静默取消）
-_scheduled_running: set = set()
+def recover_stale_tasks(*, now: float | None = None,
+                        stale_after: float = TASK_TIMEOUT + 30) -> int:
+    """把超过任务总时限仍为 running 的中断任务转成可重试的 failed。
+
+    只回收超过 TASK_TIMEOUT+缓冲期的行，避免第二个只读进程导入模块时误伤
+    正在执行的任务；调度循环每轮调用，因此崩溃后无需再次重启即可恢复。
+    """
+    moment = time.time() if now is None else float(now)
+    cutoff = moment - max(float(stale_after), float(TASK_TIMEOUT))
+    conn = _connect()
+    recovered = 0
+    try:
+        rows = conn.execute(
+            "SELECT id, log FROM agent_tasks WHERE status='running' AND updated_at<=?",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            try:
+                logs = json.loads(row["log"] or "[]")
+                if not isinstance(logs, list):
+                    logs = []
+            except (TypeError, json.JSONDecodeError):
+                logs = []
+            logs.append({
+                "ts": moment,
+                "type": "interrupted",
+                "content": "服务中断，任务已转为失败，可手动重试",
+            })
+            cur = conn.execute(
+                "UPDATE agent_tasks SET status='failed', scheduled_at=0, result=?, log=?, updated_at=? "
+                "WHERE id=? AND status='running' AND updated_at<=?",
+                ("（上次执行因服务中断而停止，可重试）",
+                 json.dumps(logs, ensure_ascii=False), moment, row["id"], cutoff),
+            )
+            recovered += max(0, int(cur.rowcount or 0))
+        conn.commit()
+    finally:
+        conn.close()
+    if recovered:
+        logger.warning("[Agent] 已恢复 {} 个服务中断遗留任务为 failed", recovered)
+    return recovered
 
 
 async def agent_scheduler_loop(interval: int = 60) -> None:
@@ -491,14 +555,17 @@ async def agent_scheduler_loop(interval: int = 60) -> None:
     while True:
         try:
             if not reset_in_progress():
+                recover_stale_tasks()
+                # 复用 HTTP 层的统一启动器：身份、确认通道、取消句柄、reset epoch
+                # 和完成事件必须与手动运行保持同一份契约。
+                from ..api.agent import _start_agent_task
+
                 for task_id in due_tasks():
                     task = _load(task_id)
                     if task is None or task.status != "planned":
                         continue
                     logger.info("[Agent] 定时任务到点，开始执行：{}", task_id)
-                    job = asyncio.create_task(run_task(task_id))
-                    _scheduled_running.add(job)
-                    job.add_done_callback(_scheduled_running.discard)
+                    _start_agent_task(task_id)
         except Exception:
             logger.exception("[Agent] 定时任务调度检查失败")
         await asyncio.sleep(max(10, int(interval)))
@@ -508,8 +575,9 @@ def cancel_task(task_id: str) -> AgentTask | None:
     task = _load(task_id)
     if task is None:
         return None
-    if task.status == "running":
+    if task.status in ("planned", "running"):
         task.status = "cancelled"
+        task.scheduled_at = 0.0
         task.updated_at = time.time()
         _save(task)
         logger.info("[Agent] 任务 {} 已取消（后台执行将不再写入结果）", task_id)
@@ -519,17 +587,23 @@ def cancel_task(task_id: str) -> AgentTask | None:
 def clear_all_tasks() -> int:
     """删除全部持久化 Agent 任务（单用户“彻底失忆”使用）。"""
     conn = _connect()
-    cur = conn.execute("DELETE FROM agent_tasks")
-    conn.commit()
-    return max(0, int(cur.rowcount or 0))
+    try:
+        cur = conn.execute("DELETE FROM agent_tasks")
+        conn.commit()
+        return max(0, int(cur.rowcount or 0))
+    finally:
+        conn.close()
 
 
 def clear_user_tasks(user_id: str) -> int:
     """只删除当前人格命名空间的 Agent 任务。"""
     conn = _connect()
-    cur = conn.execute("DELETE FROM agent_tasks WHERE user_id=?", (user_id,))
-    conn.commit()
-    return max(0, int(cur.rowcount or 0))
+    try:
+        cur = conn.execute("DELETE FROM agent_tasks WHERE user_id=?", (user_id,))
+        conn.commit()
+        return max(0, int(cur.rowcount or 0))
+    finally:
+        conn.close()
 
 
 def confirm_step(task_id: str, step_index: int, allow: bool) -> AgentTask | None:

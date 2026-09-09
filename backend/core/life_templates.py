@@ -409,7 +409,23 @@ def veto_keywords_hit(text: str) -> bool:
 _EXPRESSED_OUTING_KEY = "life_templates:outing_expressed:{day}"
 
 
-def maybe_express_outing(user_id: str) -> str | None:
+def outing_expressed_today(user_id: str) -> bool:
+    """今日外出汇报是否已经真正投递。"""
+    from .userdb import kv_get
+
+    key = _EXPRESSED_OUTING_KEY.format(day=datetime.now().date().isoformat())
+    return bool(kv_get(user_id, key))
+
+
+def mark_outing_expressed(user_id: str) -> None:
+    """仅在主动消息投递成功后登记外出汇报去重键。"""
+    from .userdb import kv_set
+
+    key = _EXPRESSED_OUTING_KEY.format(day=datetime.now().date().isoformat())
+    kv_set(user_id, key, datetime.now().isoformat(timespec="seconds"))
+
+
+def maybe_express_outing(user_id: str, *, mark: bool = True) -> str | None:
     """今日有外出事件且尚未表达过 → 返回一句汇报文案（经主动仲裁投递）。
 
     - 沉默权：这里是「候选」而非必发——仲裁链空闲/额度用尽自然沉默；
@@ -417,13 +433,10 @@ def maybe_express_outing(user_id: str) -> str | None:
     - 每日至多表达一次（kv runtime 去重）。
     """
     from .features import flag
-    from .userdb import kv_get, kv_set
-
     if not flag("life_templates_enabled"):
         return None
     today = datetime.now().date().isoformat()
-    dedup_key = _EXPRESSED_OUTING_KEY.format(day=today)
-    if kv_get(user_id, dedup_key):
+    if outing_expressed_today(user_id):
         return None
 
     outings = latest_outing(user_id, limit=1)
@@ -433,5 +446,7 @@ def maybe_express_outing(user_id: str) -> str | None:
     if not note:
         return None
     text = f"{note}。"
-    kv_set(user_id, dedup_key, datetime.now().isoformat(timespec="seconds"))
+    if mark:
+        # 兼容直接调用方；主动仲裁链使用 mark=False，并在投递成功回调里登记。
+        mark_outing_expressed(user_id)
     return text

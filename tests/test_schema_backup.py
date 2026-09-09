@@ -68,7 +68,7 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        versions = {"bot.db": 40, "sessions.db": 1, "agent_tasks.db": 3}
+        versions = {"bot.db": 41, "sessions.db": 1, "agent_tasks.db": 3}
         for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")

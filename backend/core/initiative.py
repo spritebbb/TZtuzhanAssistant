@@ -748,12 +748,29 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     async def _maybe_outing_note(uid: str) -> str | None:
         """L06 外出归来候选（拍板 #9）：今日有外出事件且未汇报过 → 说一句。
 
-        注意：maybe_express_outing 是同步函数，必须在本协程内直接返回其
-        结果——写成同步包装会让仲裁链 `await None` 抛 TypeError 截断后续源。
+        候选生成不提前写去重键；只有统一仲裁器确认实际投递后才登记。
         """
-        from .life_templates import maybe_express_outing
+        from .life_templates import (
+            mark_outing_expressed,
+            maybe_express_outing,
+            outing_expressed_today,
+        )
 
-        return maybe_express_outing(uid)
+        candidate = maybe_express_outing(uid, mark=False)
+        if not candidate:
+            return None
+
+        async def produce() -> str:
+            return candidate
+
+        return await _arbited_proactive(
+            uid,
+            source="initiative:outing_note",
+            idle_minutes=120,
+            done_today=lambda: outing_expressed_today(uid),
+            produce=produce,
+            on_delivered=lambda: mark_outing_expressed(uid),
+        )
 
     async def _maybe_companion_request(uid: str) -> str | None:
         """G04 她的求助：门槛达标时请对方帮个小忙，投递成功才置 offered。"""
@@ -762,7 +779,7 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     async def _maybe_watch_change(uid: str) -> str | None:
         """监控 Agent：盯着的页面有变化 → 说一句（消耗共享主动额度）。"""
         try:
-            from .watchers import check_due_watches
+            from .watchers import acknowledge_changes, check_due_watches
 
             changes = await asyncio.to_thread(check_due_watches, uid)
         except Exception:
@@ -772,7 +789,20 @@ async def _arbitrate_secondary(user_id: str) -> bool:
             return None
         names = "、".join((c.get("label") or c["url"]) for c in changes[:2])
         tail = f"等 {len(changes)} 处" if len(changes) > 2 else ""
-        return f"我盯着的「{names}」{tail}有更新了，要我去看看吗？"
+        candidate = f"我盯着的「{names}」{tail}有更新了，要我去看看吗？"
+        watch_ids = [int(c["watch_id"]) for c in changes]
+
+        async def produce() -> str:
+            return candidate
+
+        return await _arbited_proactive(
+            uid,
+            source="initiative:watch_change",
+            idle_minutes=0,
+            done_today=lambda: False,
+            produce=produce,
+            on_delivered=lambda: acknowledge_changes(uid, watch_ids),
+        )
 
     for proposer in (
         _maybe_rhythm_followup,
