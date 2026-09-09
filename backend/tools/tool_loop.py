@@ -75,6 +75,16 @@ def _extract_last_user(work: list[dict]) -> str:
     return ""
 
 
+def _add_final_instruction(work: list[dict], final_instruction: list[dict] | None) -> None:
+    """追加最终轮指令，同时保持纯对话请求的 user 消息位于末尾。"""
+    if not final_instruction:
+        return
+    if work and work[-1].get("role") == "user":
+        work[-1:-1] = list(final_instruction)
+    else:
+        work.extend(list(final_instruction))
+
+
 def _fill_missing_args(call: dict, fallback: str, tool_schema: dict | None) -> dict:
     """工具被调用但参数缺失/为空时，用对话上下文兜底填充。
 
@@ -386,6 +396,7 @@ async def run_tool_loop(
     mock: bool = False,
     final_instruction: list[dict] | None = None,
     call_native: Callable | None = None,
+    call_final_stream: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     tool_filter: Callable[[Any], bool] | None = None,
@@ -400,6 +411,7 @@ async def run_tool_loop(
         final_instruction: 无工具调用时可选追加的 system 消息
         call_native: 原生函数调用回调，接收 (messages, tools) 返回 (text, tool_calls)
                      若不提供则走文本协议回退模式
+        call_final_stream: 最终正文轮异步流回调；工具选择轮仍使用 call_native/call_llm
         on_progress: 可选的阶段进度回调，接收事件 dict，如
                      {"type": "thinking"} / {"type": "tool", "name": "web_search"} /
                      {"type": "tool_done", "name": "web_search"}。用于把工具循环的
@@ -422,6 +434,7 @@ async def run_tool_loop(
         return await _run_native(
             work, call_native, tools,
             max_loops=max_loops, final_instruction=final_instruction,
+            call_final_stream=call_final_stream,
             on_progress=on_progress, is_cancelled=is_cancelled,
             tool_filter=tool_filter,
         )
@@ -430,6 +443,7 @@ async def run_tool_loop(
     return await _run_text(
         work, call_llm,
         max_loops=max_loops, final_instruction=final_instruction,
+        call_final_stream=call_final_stream,
         on_progress=on_progress, is_cancelled=is_cancelled,
         tool_filter=tool_filter,
     )
@@ -442,6 +456,7 @@ async def _run_native(
     *,
     max_loops: int,
     final_instruction: list[dict] | None,
+    call_final_stream: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     tool_filter: Callable[[Any], bool] | None = None,
@@ -488,6 +503,12 @@ async def _run_native(
         logger.info("[工具循环] 第{}轮: {} 个工具调用 {}", loop_count, len(calls),
                     [c["name"] for c in calls])
         if not calls:
+            if call_final_stream is not None:
+                _add_final_instruction(work, final_instruction)
+                parts: list[str] = []
+                async for piece in call_final_stream(work):
+                    parts.append(piece)
+                return "".join(parts) or text or "（模型未返回内容，请重试）"
             return text or "（模型未返回内容，请重试）"
 
         # 为每个调用分配稳定 id（带轮次前缀，避免多轮历史中 id 重复，
@@ -567,8 +588,12 @@ async def _run_native(
     if is_cancelled and is_cancelled():
         return "（操作已取消）"
     await _progress({"type": "thinking"})
-    if final_instruction:
-        work.extend(list(final_instruction))
+    _add_final_instruction(work, final_instruction)
+    if call_final_stream is not None:
+        parts: list[str] = []
+        async for piece in call_final_stream(work):
+            parts.append(piece)
+        return "".join(parts) or "（模型未返回内容，请重试）"
     text, calls = await call_native(work, None)
     return text or "（模型未返回内容，请重试）"
 
@@ -579,6 +604,7 @@ async def _run_text(
     *,
     max_loops: int,
     final_instruction: list[dict] | None,
+    call_final_stream: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     tool_filter: Callable[[Any], bool] | None = None,
@@ -608,7 +634,12 @@ async def _run_text(
         clean, calls = parse_tool_blocks(raw)
         if not calls:
             if final_instruction:
-                work.extend(list(final_instruction))
+                _add_final_instruction(work, final_instruction)
+                if call_final_stream is not None:
+                    parts: list[str] = []
+                    async for piece in call_final_stream(work):
+                        parts.append(piece)
+                    return "".join(parts) or clean or "（我先记一下，回头跟你说）"
                 final_raw = await call_llm(work)
                 final_clean, _ = parse_tool_blocks(final_raw)
                 return final_clean or "（我先记一下，回头跟你说）"
@@ -637,8 +668,12 @@ async def _run_text(
     if is_cancelled and is_cancelled():
         return "（操作已取消）"
     await _progress({"type": "thinking"})
-    if final_instruction:
-        work.extend(list(final_instruction))
+    _add_final_instruction(work, final_instruction)
+    if call_final_stream is not None:
+        parts: list[str] = []
+        async for piece in call_final_stream(work):
+            parts.append(piece)
+        return "".join(parts) or "（我先记一下，回头跟你说）"
     raw = await call_llm(work)
     clean, _ = parse_tool_blocks(raw)
     return clean or raw

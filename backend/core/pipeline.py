@@ -21,10 +21,10 @@ _IDLE_MIN_NEW = 4
 # 流式模式下通过 stream_cb 推送该特殊标记，assistant.py 转发为 {"reset": true}，
 # 前端收到后清空当前气泡重新累积。
 _RESET_MARK = "\x00RESET\x00"
+_STREAM_CHUNK = 6
 # 生图开始标记：流式模式下在发起生图前推送给前端，用于显示"正在画图"占位
 _IMAGE_START_MARK = "\x00IMAGESTART\x00"
 # 工具循环整段返回后切片推送的粒度（模拟打字机，与前端逐字累积一致）
-_STREAM_CHUNK = 6
 _DUP_MIN_LEN = 8      # 短于该长度的回复不判重复（避免"嗯""好"误伤）
 _DUP_RATIO = 0.75     # 字符级相似度阈值
 _DUP_RECENT_N = 3     # 与最近几条菟菚回复比对
@@ -233,7 +233,7 @@ def _apply_reply_plugins(reply: str, *, ephemeral: bool) -> str:
 
 
 async def _emit_final_reply(stream_cb, reply: str, *, mock: bool) -> None:
-    """在整条候选通过检查后，才以既有 chunk 形状交给前端。"""
+    """以稳定的小块形状发送已定稿正文，供非增量出口复用。"""
     if stream_cb is None or mock or not reply:
         return
     try:
@@ -1915,6 +1915,21 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         hygiene_enabled = False
 
+    hygiene_ctx = None
+    hygiene_stream = None
+    if hygiene_enabled:
+        from .output_hygiene import HygieneContext
+        from .stream_hygiene import IncrementalHygieneStream
+
+        hygiene_ctx = HygieneContext(
+            kind="chat",
+            user_requested_explanation=_requested_internal_explanation(text),
+            persona_id=user_id,
+        )
+        hygiene_stream = IncrementalHygieneStream(
+            stream_cb, context=hygiene_ctx, enabled=not mock
+        )
+
     if use_tool_loop:
         from ..tools.service import run_tool_round
         from .llm import chat_native
@@ -1926,32 +1941,38 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             final_instruction.append({"role": "system", "content": topic_block})
         if drawn_note:
             final_instruction.append({"role": "system", "content": drawn_note})
+
+        async def _tool_final_stream(ms):
+            async for piece in chat_stream(ms, model=reply_model, task=reply_task):
+                if hygiene_stream is not None:
+                    await hygiene_stream.feed(piece)
+                elif stream_cb is not None and not mock:
+                    try:
+                        await stream_cb(piece)
+                    except Exception:
+                        pass
+                yield piece
+
         raw = await run_tool_round(
             messages,
             chat=lambda ms: chat(ms, mock=mock),
             chat_native=lambda ms, tools: chat_native(ms, tools, mock=mock),
+            chat_final_stream=_tool_final_stream if stream_cb is not None and not mock else None,
             max_loops=2,
             final_instruction=final_instruction,
             on_progress=progress_cb,
             tool_filter=_mcp_tool_filter(text, skill_texts),
         )
-        # 卫生开关关闭时保持旧流式契约；开启后 raw 必须先经过完整候选检查，
-        # 工具进度仍由 progress_cb 实时发送，正文在最终定稿后统一切片。
-        if not hygiene_enabled and stream_cb is not None and not mock and raw:
-            try:
-                for i in range(0, len(raw), _STREAM_CHUNK):
-                    await stream_cb(raw[i:i + _STREAM_CHUNK])
-            except Exception:
-                pass
     else:
         if stream_cb is not None and not mock:
-            # 开启卫生检查时仍从 provider 流式读取，但先在后端缓冲完整候选；
-            # 关闭时保持旧的逐块回调行为。
+            # 卫生开启时按完整安全句段增量放行；关闭时保持 provider 原始逐块回调。
 
             parts: list[str] = []
             async for piece in chat_stream(messages, model=reply_model, task=reply_task):
                 parts.append(piece)
-                if not hygiene_enabled:
+                if hygiene_stream is not None:
+                    await hygiene_stream.feed(piece)
+                else:
                     try:
                         await stream_cb(piece)
                     except Exception:
@@ -2016,13 +2037,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     reply = _apply_reply_plugins(reply, ephemeral=ephemeral)
 
     if hygiene_enabled:
-        from .output_hygiene import HygieneContext, inspect_reply
+        from .output_hygiene import inspect_reply
 
-        hygiene_ctx = HygieneContext(
-            kind="chat",
-            user_requested_explanation=_requested_internal_explanation(text),
-            persona_id=user_id,
-        )
+        assert hygiene_ctx is not None
         checked = inspect_reply(reply, context=hygiene_ctx)
         if checked.action == "rewrite":
             # P3-05B 统计：规则失败计数（只记规则名，不记正文）
@@ -2057,8 +2074,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         else:
             reply = "嗯……刚才那句没整理好，我重新听你说。"
 
-        # 这是受保护正文的唯一 stream 出口；之后的持久化、TTS/解释等都消费 reply。
-        await _emit_final_reply(stream_cb, reply, mock=mock)
+        # 最终候选用于对齐已显示正文；之后的持久化、TTS/解释等都消费同一个 reply。
+        if hygiene_stream is not None:
+            await hygiene_stream.finish(reply)
 
     # 5.10) 自制表情包：只在明显情绪场景下低频触发，优先复用收藏。
     # 用户明确要求画图时已有 drawn_image_path，不再叠第二张图片。

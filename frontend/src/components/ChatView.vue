@@ -384,6 +384,11 @@ async function handleImageFile(f: File | null) {
         b.content = '⚠️ ' + err
         streaming.value = false
       },
+      onReset: () => {
+        const b = bubble()
+        if (!b) return
+        b.content = ''
+      },
       onExplanation: (value) => {
         const b = bubble()
         if (b) b.explanation = value
