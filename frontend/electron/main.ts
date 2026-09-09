@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
 import { dirname, join, resolve } from 'path'
 import { existsSync } from 'fs'
@@ -89,6 +89,13 @@ function checkBackend(): Promise<boolean> {
     req.on('error', () => resolve_(false))
     req.setTimeout(3000, () => { req.destroy(); resolve_(false) })
   })
+}
+
+/** 是否是应用自身的页面（后端同源页 / 开发服务器 / data: 兜底页）。 */
+function isInternalUrl(url: string): boolean {
+  if (url.startsWith(BACKEND_HOST) || url.startsWith('data:')) return true
+  const dev = process.env.VITE_DEV_SERVER_URL
+  return !!dev && url.startsWith(dev)
 }
 
 /** 启动后端 Python 进程 */
@@ -195,6 +202,18 @@ function createWindow(backendReady = true): void {
   // 阻止深色模式下白色闪烁
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+  })
+
+  // 外链一律交给系统浏览器：既不把聊天界面顶掉（窗口内导航没有后退入口，
+  // 用户会卡在外部页面），也不在应用里另开一个无地址栏的窗口。
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!isInternalUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isInternalUrl(url)) return
+    event.preventDefault()
+    void shell.openExternal(url)
   })
 
   // 关闭按钮 = 隐藏到托盘（任务栏常驻）；只有托盘菜单"退出"才真正退出。
