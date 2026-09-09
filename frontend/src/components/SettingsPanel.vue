@@ -23,6 +23,11 @@ interface ConfigData {
   vision_api_key_masked?: string
   mood_city?: string
   memory_semantic?: boolean
+  proactive_new_user_days?: number
+  proactive_new_user_idle_hours?: number
+  proactive_surprise_min_gap_days?: number
+  proactive_surprise_chance_percent?: number
+  proactive_surprise_idle_minutes?: number
 }
 
 const config = ref<ConfigData>({})
@@ -304,6 +309,11 @@ async function open() {
         vision_api_key: '',
         mood_city: c.mood_city || '',
         memory_semantic: c.memory_semantic !== false,
+        proactive_new_user_days: String(c.proactive_new_user_days ?? 3),
+        proactive_new_user_idle_hours: String(c.proactive_new_user_idle_hours ?? 2),
+        proactive_surprise_min_gap_days: String(c.proactive_surprise_min_gap_days ?? 7),
+        proactive_surprise_chance_percent: String(c.proactive_surprise_chance_percent ?? 50),
+        proactive_surprise_idle_minutes: String(c.proactive_surprise_idle_minutes ?? 120),
       }
     }
   } catch { /* ignore */ }
@@ -329,6 +339,11 @@ async function save() {
     ['image_model', false], ['image_api_key', true],
     ['vision_base_url', false], ['vision_model', false],
     ['vision_api_key', true], ['mood_city', false],
+    ['proactive_new_user_days', false],
+    ['proactive_new_user_idle_hours', false],
+    ['proactive_surprise_min_gap_days', false],
+    ['proactive_surprise_chance_percent', false],
+    ['proactive_surprise_idle_minutes', false],
   ]
   for (const [field, isSecret] of strFields) {
     const v = String(f[field] ?? '').trim()
@@ -448,6 +463,17 @@ function confirmLabel(c: string): string {
           </div>
           <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" :placeholder="config.mood_city || '留空不查天气'" /></div>
           <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" /></div>
+
+          <div class="sgroup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+            主动互动
+          </div>
+          <div class="setting-hint">初识阶段仍不会主动发消息；以下数值保存后立即生效</div>
+          <div class="srow"><label>新用户适应期（天）</label><input v-model="form.proactive_new_user_days" type="number" min="1" max="30" step="1" /></div>
+          <div class="srow"><label>新用户静默（小时）</label><input v-model="form.proactive_new_user_idle_hours" type="number" min="1" max="24" step="1" /></div>
+          <div class="srow"><label>惊喜间隔（天）</label><input v-model="form.proactive_surprise_min_gap_days" type="number" min="1" max="365" step="1" /></div>
+          <div class="srow"><label>惊喜概率（%）</label><input v-model="form.proactive_surprise_chance_percent" type="number" min="0" max="100" step="1" /></div>
+          <div class="srow"><label>惊喜静默（分钟）</label><input v-model="form.proactive_surprise_idle_minutes" type="number" min="15" max="10080" step="15" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>

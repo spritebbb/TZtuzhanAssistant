@@ -97,6 +97,38 @@
       "skeleton": "一个字或一个符号级的开场，把球完全给对方",
       "example": "嗯？",
       "min_stage": "初识"
+    },
+    {
+      "id": "A4",
+      "category": "busy_return",
+      "name": "先让人落地",
+      "skeleton": "确认对方回来，先给一句休息空间，不追问去向或进度",
+      "example": "先缓一缓，不急着交代\n等你想说了再说",
+      "min_stage": "熟悉"
+    },
+    {
+      "id": "B4",
+      "category": "plain_return",
+      "name": "轻量选择",
+      "skeleton": "给两个都没有压力的选择，让对方决定聊或安静待着",
+      "example": "想说点什么，还是先安静待会儿\n都行",
+      "min_stage": "初识"
+    },
+    {
+      "id": "C4",
+      "category": "activity_done",
+      "name": "收尾留白",
+      "skeleton": "确认事情已经结束，允许对方直接休息，不追加任务",
+      "example": "这件事收住了\n接下来可以什么都不做",
+      "min_stage": "初识"
+    },
+    {
+      "id": "D4",
+      "category": "no_material",
+      "name": "直接在场",
+      "skeleton": "只表达此刻可以陪伴，不虚构状态或共同经历",
+      "example": "我在\n想从哪里开始都行",
+      "min_stage": "初识"
     }
   ]
 }

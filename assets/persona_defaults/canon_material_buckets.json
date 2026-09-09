@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "source": "docs/persona/世界正典.md",
+  "description": "正典条目可投放的行程素材桶。新增正典条目时先在此声明允许的活动桶，再补充 schedule.MATERIALS。",
+  "entries": {
+    "P-00": ["weekend_stay"],
+    "P-01": ["research_reading", "afternoon_stay", "evening_work", "evening_stay", "weekend_evening"],
+    "P-02": ["rest_break", "late_night", "weekend_slow", "weekend_stay", "weekend_evening"],
+    "O-01": ["research_reading", "afternoon_stay", "evening_work"],
+    "O-02": ["research_reading", "evening_work"],
+    "O-03": ["rest_break", "weekend_slow", "weekend_evening"],
+    "O-04": ["weekend_slow"],
+    "O-05": ["afternoon_stay"],
+    "O-06": ["evening_work", "late_night"],
+    "C-01": ["afternoon_stay", "late_night"],
+    "C-02": ["afternoon_stay"]
+  }
+}

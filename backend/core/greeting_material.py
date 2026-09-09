@@ -10,7 +10,7 @@
 - 没有素材就返回空列表——问候走「无素材」类，绝不编「你今天做了 X」。
 
 **变体（人格切片资源，四类 × 3 方向模板）**
-- 资源 ``greeting_variants.json``：忙碌后 / 普通归来 / 完成活动 / 无素材；
+- 资源 ``greeting_variants.json``：忙碌后 / 普通归来 / 完成活动 / 无素材，每类至少 4 个方向；
 - ``choose_greeting_variant(user_id, context)``：阶段门控（min_stage）＋
   同 variant 7 天冷却（``greeting_variant_usage``，runtime 不导出）；
 - 措辞由模型基于「骨架 + 素材」现场生成，模板本身不预存假事实。

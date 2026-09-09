@@ -18,6 +18,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .userdb import db
 from .log import logger
@@ -180,6 +181,38 @@ MATERIALS: tuple[dict, ...] = (
      "text": "烧了壶温水窝在图书室翻闲书，周末的晚间就该这么度过"},
 )
 _MATERIALS_BY_ID = {m["id"]: m for m in MATERIALS}
+
+_CANON_BUCKET_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "assets" / "persona_defaults" / "canon_material_buckets.json"
+)
+
+
+def load_canon_material_buckets(path: Path | None = None) -> dict[str, tuple[str, ...]]:
+    """加载正典条目到活动素材桶的映射；资源损坏时安全返回空映射。"""
+    target = path or _CANON_BUCKET_PATH
+    valid_activities = {block.activity for block in WEEKLY_TEMPLATE}
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8-sig"))
+        if payload.get("format_version") != 1 or not isinstance(payload.get("entries"), dict):
+            raise ValueError("unsupported schema")
+        result: dict[str, tuple[str, ...]] = {}
+        for canon_id, raw_buckets in payload["entries"].items():
+            if not isinstance(canon_id, str) or not isinstance(raw_buckets, list) or not raw_buckets:
+                raise ValueError(f"invalid entry: {canon_id!r}")
+            buckets = tuple(str(item) for item in raw_buckets)
+            if any(bucket not in valid_activities for bucket in buckets):
+                raise ValueError(f"unknown activity bucket: {canon_id}")
+            result[canon_id] = buckets
+        return result
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("[行程] 正典素材映射加载失败: {}", exc)
+        return {}
+
+
+def canon_material_buckets(canon_id: str) -> tuple[str, ...]:
+    """查询一条正典允许进入的活动桶，供新增生活素材时复用。"""
+    return load_canon_material_buckets().get(canon_id, ())
 
 
 def pick_material(user_id: str, local_date, recent_ids: list[str]) -> dict | None:

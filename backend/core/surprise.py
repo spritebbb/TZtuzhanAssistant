@@ -4,8 +4,8 @@
 路线约束（TECH-PLAN M5：只基于真实经历、低频、可关闭）：
 - 真实经历：素材只来自 artifacts（共同故事/共同书摘/目标回顾），prompt 里
   如实引用摘录，绝不编造新的共同经历；
-- 低频：距上次惊喜 >= PROACTIVE_SURPRISE_MIN_GAP_DAYS（默认 14 天），到点
-  后每次检查再过一道概率门（默认 35%）；
+- 低频：距上次惊喜 >= PROACTIVE_SURPRISE_MIN_GAP_DAYS（默认 7 天），到点
+  后每次检查再过一道概率门（默认 50%）；
 - 可关闭：PROACTIVE_SURPRISE_ENABLED=0 全局关闭；
 - 出牌走统一仲裁器（initiative._arbited_proactive），消耗共享每日额度。
 """

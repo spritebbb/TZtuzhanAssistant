@@ -36,12 +36,12 @@ def _ensure(uid: str) -> None:
 
 def test_resource_load_and_validation() -> int:
     variants = gm.load_variants()
-    assert len(variants) == 12, len(variants)
+    assert len(variants) == 16, len(variants)
     by_cat: dict[str, list] = {}
     for v in variants:
         by_cat.setdefault(v.category, []).append(v)
     for category in gm._CATEGORIES:
-        assert len(by_cat.get(category, [])) >= 3, (category, by_cat.get(category))
+        assert len(by_cat.get(category, [])) >= 4, (category, by_cat.get(category))
     # 非法资源回退内置最小池，不抛异常
     with tempfile.TemporaryDirectory(prefix="f01-bad-") as raw:
         bad = Path(raw) / "greeting_variants.json"
@@ -51,7 +51,7 @@ def test_resource_load_and_validation() -> int:
             fallback = gm.load_variants("bad-persona")
             assert len(fallback) == 1 and fallback[0].category == gm.CATEGORY_NO_MATERIAL
         gm._VARIANT_CACHE.clear()
-    print("[OK] 资源加载：四类各 ≥3 个变体；坏资源回退内置最小池")
+    print("[OK] 资源加载：四类各 ≥4 个变体；坏资源回退内置最小池")
     return 0
 
 
