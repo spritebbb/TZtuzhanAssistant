@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 
 from ..core.log import logger
@@ -27,11 +26,6 @@ MAX_TOOL_CALLS = 8                 # 单轮调用上限
 SAME_SIGNATURE_LIMIT = 2           # 同签名第 2 次熔断
 TOTAL_RESULT_BUDGET = 32 * 1024    # 单轮工具结果总预算（字节）
 
-_SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9]{8,}|Bearer\s+\S+|api[_-]?key\s*[=:]\s*\S+|"
-    r"Authorization\s*[:=]\s*\S+|[A-Za-z0-9_]*TOKEN[A-Za-z0-9_]*\s*[=:]\s*\S+)",
-    re.IGNORECASE,
-)
 _STACK_MARKERS = ("Traceback (most recent call last):", 'File "', "raise ", "  ^^^")
 
 
@@ -49,7 +43,9 @@ def sanitize_error_text(text: str, *, limit: int = 200) -> str:
         text = lines[-1] if lines else ""
     else:
         text = lines[0] if lines else str(text)
-    text = _SECRET_RE.sub("[已隐去]", text)
+    from ..core.privacy import redact_sensitive
+
+    text = redact_sensitive(text)
     text = " ".join(text.split())
     if len(text) > limit:
         text = text[: limit - 3] + "..."

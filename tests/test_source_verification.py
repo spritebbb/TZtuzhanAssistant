@@ -51,7 +51,7 @@ def test_two_independent_sources_and_repost_dedup() -> None:
     assert report["status"] == "supported" and len(report["evidence"]) == 2
     assert report["agreement"] == "not_comparable"
     context = format_verification_context(report)
-    assert "https://" in context and "untrusted_source" in context
+    assert "https://" in context and 'untrusted_external kind="web"' in context
     assert "来自缓存" in context and "不要宣称它们数值一致" in context
 
 

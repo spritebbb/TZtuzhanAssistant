@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -63,6 +64,24 @@ from .core.log import logger
 
 def create_app() -> FastAPI:
     app = FastAPI(title="菟菚 桌面助手")
+
+    @app.middleware("http")
+    async def _request_id(request: Request, call_next):
+        """为响应和异常分配服务端 request_id，不信任外部传入值。"""
+        request.state.request_id = uuid.uuid4().hex
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.state.request_id
+        return response
+
+    @app.exception_handler(Exception)
+    async def _safe_unhandled_error(request: Request, exc: Exception):
+        request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+        logger.exception("[HTTP] 未处理异常 request_id={} path={}", request_id, request.url.path)
+        return JSONResponse(
+            {"ok": False, "error": "内部错误", "request_id": request_id},
+            status_code=500,
+            headers={"X-Request-ID": request_id},
+        )
 
     # CORS：只允许本机可信来源。不包含 "null"——file:// / data: / sandboxed iframe
     # 的 Origin 均为 null，放行它等于给恶意本地 HTML/嵌 iframe 的网页开 CORS 读取。

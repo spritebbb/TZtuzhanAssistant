@@ -576,10 +576,17 @@ async def _run_native(
                     seen[fingerprint] = body
                     call_count += 1
             await _progress({"type": "tool_done", "name": real_name})
+            from ..core.external_content import EXTERNAL_DATA_POLICY, wrap_untrusted
+
             work.append({
                 "role": "tool",
                 "tool_call_id": c["_id"],
-                "content": f"[{c['name']}] {body}",
+                "content": (
+                    f"[{c['name']}]\n"
+                    + wrap_untrusted("tool_result", body, source=real_name)
+                    + "\n"
+                    + EXTERNAL_DATA_POLICY
+                ),
             })
         if loop_count >= max_loops:
             break
@@ -657,10 +664,13 @@ async def _run_text(
         for c in calls:
             await _progress({"type": "tool_done", "name": c.get("name", "")})
         work.append({"role": "assistant", "content": clean or "（我查一下）"})
+        from ..core.external_content import EXTERNAL_DATA_POLICY, wrap_untrusted
+
         work.append({
             "role": "system",
             "content": "你刚调用的工具返回了这些结果（可能有误，只作为参考）：\n"
-            + result_block
+            + wrap_untrusted("tool_result", result_block, source="text-tool-protocol")
+            + "\n" + EXTERNAL_DATA_POLICY
             + "\n请根据结果组织你的回复（保持干脆利落、口语化，别报告腔、别列清单）。"
             "如果还需要更多信息，可以再调用工具；否则直接给出最终回复。",
         })
