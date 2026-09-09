@@ -359,9 +359,9 @@ def health() -> dict:
     extra: dict = {}
     # 1) LLM_API_KEY 是否已配置（非空）
     try:
-        from .config import config as _cfg
-
-        extra["llm_configured"] = bool(_cfg.llm_api_key and _cfg.llm_api_key.strip())
+        # 用模块级 import 的 config：此前写成 from .config（backend.maintenance.config
+        # 并不存在），ImportError 被吞掉，健康检查长期误报 llm_configured=false。
+        extra["llm_configured"] = bool(config.llm_api_key and config.llm_api_key.strip())
     except Exception:
         extra["llm_configured"] = False
     # 2) persona 人格源文件是否存在

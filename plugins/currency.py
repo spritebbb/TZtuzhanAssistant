@@ -10,6 +10,7 @@ import json
 import time
 import urllib.request
 
+from backend.core.log import logger
 from backend.tools.base import ToolRegistry, tool_failure
 
 # 插件元信息（可选；管理界面/API 展示用）
@@ -37,14 +38,18 @@ def _fetch_rate() -> float | None:
         req = urllib.request.Request(
             "https://open.er-api.com/v6/latest/USD",
             headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-            timeout=15,
         )
-        with urllib.request.urlopen(req) as resp:
+        # timeout 必须给 urlopen：Request.__init__ 不接受该参数，写进 Request 会
+        # 每次抛 TypeError 并被下面吞掉——汇率换算曾因此永远返回「获取失败」。
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             rate = float(data["rates"]["CNY"])
             _rate_cache.update(rate=rate, ts=now)
             return rate
-    except Exception:
+    except Exception as exc:
+        # 失败原因必须可见：此前静默 return None，用户只看到「汇率获取失败」，
+        # 无从判断是网络、代理还是代码问题。
+        logger.warning("[汇率] 取汇率失败: {}: {}", type(exc).__name__, exc)
         return None
 
 

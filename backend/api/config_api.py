@@ -120,7 +120,17 @@ async def api_config_set(request: Request):
     # 重置依赖配置的缓存，让新配置立即生效
     try:
         from ..core import llm as _llm
-        old_clients = [_llm._client, getattr(_llm.get_perception_client, "_client", None)]
+        # 必须先清空按路由缓存的 client 表：下面 close() 掉的实例若仍留在
+        # _client_cache 里，_client_for_route 会按同一 cache key 命中并复用，
+        # 之后每次调用都抛「Cannot send a request, as the client has been
+        # closed」，直到重启后端（2026-09-09 实证）。
+        cached_clients = list(_llm._client_cache.values())
+        _llm._client_cache.clear()
+        old_clients = [
+            _llm._client,
+            getattr(_llm.get_perception_client, "_client", None),
+            *cached_clients,
+        ]
         _llm._client = None
         # 感知层独立 client 也缓存于 get_perception_client._client，改了
         # LLM_PERCEPTION_* 端点/模型后必须一并清掉，否则仍用旧端点。
