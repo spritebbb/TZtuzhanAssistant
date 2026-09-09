@@ -1423,3 +1423,39 @@ VERIFY_TIMEOUT: 600
 **评估后的验证结果（2026-09-09 补记）**：全量 `pytest tests/` 已跑通 **141 passed / 0 failed（6m34s）**，前端 vue-tsc 零错误、vitest 90/90；后端已重启，定时器/监视/重试与 MCP 两服务器（playwright 24 工具、context7 2 工具）均生效。评估过程中另有 6 处缺陷/契约联动被全量回归暴露并修复（读路径副作用、MCP 工具名非法、启动恢复写盘丢条目、测试污染真实配置等），均已单独提交。
 
 **Codex 独立审查与修复（2026-09-09）**：复现并修复四组运行时缺陷：外出/监控候选返回文本却未进入真实投递；监控哈希在投递前推进导致提醒永久丢失；定时与重试入口绕过任务人格、SSE 确认、取消及 reset 契约；并发 `/run` 的失败者伪发 `task_done` 并覆盖取消句柄。另补计划任务真实取消和服务崩溃遗留 `running` 任务恢复。监控投递确认迁移至 schema v41，旧 v40 哈希回填为已通知，避免升级误报。针对性测试、HTTP 9 项、前端 vitest 90/90、vue-tsc/Vite 构建均通过；隔离临时目录的后端全量回归为 **141 passed / 0 failed（10m39s）**。
+
+## 25. 流式输出改造：增量卫生与工具轮正文流式（2026-09-09 立项，待开工）
+
+**执行：ZCode；审查：Codex。本节为立项设计，尚未实现；排期见 [EXPERIENCE-UPGRADE-PLAN-2026-09-08.md](EXPERIENCE-UPGRADE-PLAN-2026-09-08.md) 批次 16。**
+
+### 25.1 背景（2026-09-09 实测）
+
+1. **打字机效果被卫生检查全量吞掉**。`output_hygiene_enabled` 默认开（`backend/core/features.py` 的 `FLAG_DEFAULTS`，且 `data/feature_flags.json` 已显式为 true）。普通流式分支（`backend/core/pipeline.py` 中 `_process_locked` 的 `else:` 分支）虽从 provider 逐块读取，但只累积不推送，全文定稿后才由 `_emit_final_reply` 按 `_STREAM_CHUNK=6` 一次性回放。探针实测（假 `chat_stream` 每 200ms 一块、共 1.0s）：卫生开——首片 1.12s，四片同帧到达；卫生关——首片 0.22s，逐块到达。工具循环分支（`use_tool_loop`）即使关卫生也是整段切片回放，因为 `run_tool_round` 本身非流式。
+2. **关闭卫生不是逃生口**。用户实测「关闭输出卫生后 LLM 崩溃」，根因与开关无关：`POST /api/config` 关闭旧 client 却未清 `llm._client_cache`，此后 `_client_for_route` 按同一 cache key 复用已关闭实例，每次调用抛 `RuntimeError: Cannot send a request, as the client has been closed`，只能重启后端恢复（`data/bot.log` 2026-09-09 10:31:47–10:33:30 连续 APIConnectionError 实证）。**已修复并提交（c0c783d）**：`backend/api/config_api.py` 热重载段先清缓存、再把缓存内全部实例纳入统一关闭；回归测试 `tests/test_llm_client_cache.py`（已用 `git stash` 回退验证过该测试确实抓得住旧缺陷）。
+
+### 25.2 目标与非目标
+
+- 目标：在保留输出卫生检查的前提下恢复逐字流式（首字延迟 ≈ 首个安全单元的生成时间）；工具循环最终答复同样逐块到达；不新增「显示 ≠ 入库」缺口。
+- 非目标：不改 `output_hygiene` 的规则集与判定语义；不引入新依赖；不动 TTS / 落库 / 解释快照的消费契约（这些仍以最终 `reply` 为准）。
+
+### 25.3 实现路线
+
+- **新增 `backend/core/stream_hygiene.py`**：分句器 + 增量检查器。
+  - 分句：句末标点（`。！？；…` 与英文 `.!?`）及空行切分，分隔符随前句保留；代码围栏内不切分（复用 `output_hygiene` 已有的围栏判定，避免把示例文本当正文）。
+  - 增量判定：把 `inspect_reply` 的纯规则部分抽为可复用函数 `scan_rules(text) -> tuple[str, ...]`（只搬位置、不改判定语义），增量与全量共用同一套规则。
+  - 开放标记：`<think>` 未闭合、工具协议前缀等「可能跨块」的形态一律滞留在 pending 缓冲，只有闭合且规则通过才推送，杜绝半截标记外泄。
+- **改 `backend/core/pipeline.py` 的两处推流点**：普通流式分支改为「累积 + 逐安全单元推送」；工具循环分支在 `hygiene_enabled` 时也走同一增量出口，替代现在的整段切片。
+- **重写 / RESET 契约**：仅当已推送内容命中规则时才允许 RESET 重发，预算仍为 1（沿用现有 `rewrite_used` 语义）；未推送过内容的重写不得产生 RESET（现状已如此）。
+- **工具轮正文流式（本切片最大风险点）**：`backend/tools/tool_loop.py` 的最终答复轮次从 `chat` 改 `chat_stream`，工具调用轮保持非流式；熔断、预算、结构化错误契约不得改变。
+- **前端补缺**：`frontend/src/components/ChatView.vue` 的 `handleImageFile` 回调表缺 `onReset`，卫生关闭 + 触发重写时会把两版文本拼接起来，需补齐。
+
+### 25.4 验收
+
+- 新增 `tests/test_stream_incremental.py`：分句边界、跨块未闭合标记不外泄、已推送序列拼接等于最终 `reply`（含 RESET 分支）、工具轮正文逐块到达（假 `chat_stream` + 时间戳断言首字远早于生成结束）。
+- 回归：`tests/test_output_hygiene.py` 的五条契约在增量模式下等价改写并全绿；`tests/test_llm_client_cache.py` 保持通过。
+- 手工：真模型下首字延迟显著下降；`<think>` 与工具协议不外泄；「关卫生换流式」不再是推荐做法。
+
+### 25.5 禁区
+
+- 不得以「关闭 hygiene」作为实现手段；不得删改 `_emit_final_reply` 的既有调用契约（其他出口仍在用）。
+- 不得扩大插件 `apply_reply` 的「显示 ≠ 入库」缺口；若插件改写落在推流之后，本切片需一并把改写移到推流之前。
