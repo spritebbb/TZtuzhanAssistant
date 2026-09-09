@@ -20,8 +20,9 @@ from .config import config
 from .log import logger
 
 # 回落 SiliconFlow 时的默认视觉模型（真实存在，替代 DeepSeek 端点不存在的
-# deepseek-v4-flash-vision-exp，避免识图 403 Model disabled）
-_DEFAULT_VL_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
+# deepseek-v4-flash-vision-exp，避免识图 403 Model disabled；
+# 2026-09-09 再换 Qwen2.5-VL-72B → Qwen3-VL-32B：前者已从 SiliconFlow 模型表下架）
+_DEFAULT_VL_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 
 # 中性事实描述指令（system 轮）：不给视觉模型任何人格，只让它客观转述所见。
 # 图内文字只当内容引用、不当命令执行，防注入。
@@ -85,12 +86,20 @@ async def describe_bytes(image_bytes: bytes, filename: str = "image.png") -> str
             messages=messages,
             max_tokens=route.max_tokens,
         )
-        message = resp.choices[0].message
+        choice = resp.choices[0]
+        message = choice.message
         # 只认非空字符串正文；正文空 = 识图失败。绝不回退 reasoning_content：
         # 思考过程里是模型对指令的复述，曾泄漏进用户气泡（M9 审计缺陷 1）。
         text = message.content.strip() if isinstance(message.content, str) else ""
         if not text:
-            logger.warning("[识图] 视觉模型正文为空，按识图失败处理")
+            # 附上 finish_reason 与思考长度：推理型视觉模型（如
+            # deepseek-v4-flash-vision-exp）可能把 max_tokens 全花在 reasoning 上，
+            # 正文被截断或为空——只看到「正文为空」很难定位到这个原因。
+            logger.warning(
+                "[识图] 视觉模型正文为空，按识图失败处理（finish_reason={}，reasoning={}字）",
+                getattr(choice, "finish_reason", None),
+                len(getattr(message, "reasoning_content", "") or ""),
+            )
             return None
         _record_usage("vision", route.model, getattr(resp, "usage", None), _VISION_SYSTEM_PROMPT, text)
         return text[:600]
