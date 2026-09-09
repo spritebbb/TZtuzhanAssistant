@@ -118,7 +118,7 @@ async function cancelTask() {
       current.value = d.task
       running.value = false
       cancelStream()
-      msg.value = '⏹ 已请求取消任务'
+      msg.value = '⏹ 任务已取消'
       await loadTasks()
     }
   } catch {
@@ -379,7 +379,7 @@ function dangerLabel(d: string): string {
               <button v-if="current.status === 'planned'" class="a-btn ghost" @click="confirmAll(false)">全部拒绝</button>
               <button v-if="current.status === 'planned'" class="a-btn ghost" @click="confirmAll(true)">全部允许</button>
               <button v-if="current.status === 'planned'" class="a-btn run" :disabled="running" @click="runTask">▶ 开始执行</button>
-              <button v-if="running" class="a-btn ghost cancel" @click="cancelTask">⏹ 取消任务</button>
+              <button v-if="running || (current.status === 'planned' && !!current.scheduled_at)" class="a-btn ghost cancel" @click="cancelTask">⏹ 取消任务</button>
               <button v-if="current.status === 'failed'" class="a-btn run" @click="retryTask">↻ 重试</button>
               <button v-if="current.status === 'planned' && !current.scheduled_at" class="a-btn ghost" @click="scheduleTask(30)">⏰ 30 分钟后</button>
               <span v-if="current.scheduled_at" class="a-hint">⏰ 已定时，到点自动执行</span>

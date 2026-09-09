@@ -140,6 +140,86 @@ def test_schedule_and_retry() -> int:
     return 0
 
 
+def test_unified_start_context_claim_and_recovery() -> int:
+    """所有后台入口共享用户身份、原子抢占、完成事件与崩溃恢复契约。"""
+    import contextlib
+    import time as _time
+
+    from backend.api import agent as api_agent
+    from backend.core.current_user import current_user_id
+
+    tmp = Path(tempfile.mkdtemp(prefix="tztuzhan_unified_reports_"))
+    old_dir = ag._REPORT_DIR
+    old_chat = ag.chat
+    old_round = ag.run_tool_round
+    ag._REPORT_DIR = tmp
+
+    async def fake_plan(messages, **kwargs):
+        return '[{"title":"执行","detail":"检查身份"}]'
+
+    async def scenario() -> None:
+        task = await ag.create_task("persona-unified-run", "检查后台任务身份")
+        ag.confirm_all(task.id, True)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        seen_users: list[str] = []
+
+        async def blocked_round(messages, **kwargs):
+            seen_users.append(current_user_id.get())
+            started.set()
+            await release.wait()
+            return "完成"
+
+        ag.run_tool_round = blocked_round
+        token = current_user_id.set("caller-persona")
+        try:
+            first = api_agent._start_agent_task(task.id)
+            second = api_agent._start_agent_task(task.id)
+            assert first is not None and second is None, (first, second)
+            await asyncio.wait_for(started.wait(), timeout=2)
+            queue = api_agent._channel(task.id)
+            assert queue.empty(), "真实任务完成前不能出现伪 task_done"
+            assert api_agent._agent_bg_by_id.get(task.id) is first
+            release.set()
+            await asyncio.wait_for(first, timeout=2)
+            assert seen_users == ["persona-unified-run"], seen_users
+            assert current_user_id.get() == "caller-persona"
+            event = queue.get_nowait()
+            assert event == {"type": "task_done", "task_id": task.id}, event
+            assert task.id not in api_agent._agent_bg_by_id
+        finally:
+            current_user_id.reset(token)
+            cleanup = api_agent._channel_cleanup_by_id.pop(task.id, None)
+            if cleanup is not None:
+                cleanup.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await cleanup
+            api_agent._task_channels.pop(task.id, None)
+
+        stale = await ag.create_task("persona-stale-run", "恢复中断任务")
+        ag.confirm_all(stale.id, True)
+        assert ag._claim_running(stale.id)
+        moment = _time.time()
+        stale_row = ag._load(stale.id)
+        assert stale_row is not None
+        stale_row.updated_at = moment - ag.TASK_TIMEOUT - 1
+        ag._save(stale_row)
+        assert ag.recover_stale_tasks(now=moment, stale_after=ag.TASK_TIMEOUT) == 1
+        recovered = ag._load(stale.id)
+        assert recovered is not None and recovered.status == "failed"
+        assert any(item.get("type") == "interrupted" for item in recovered.log)
+
+    ag.chat = fake_plan
+    try:
+        asyncio.run(scenario())
+    finally:
+        ag.chat = old_chat
+        ag.run_tool_round = old_round
+        ag._REPORT_DIR = old_dir
+    print("[OK] 统一启动器：任务身份 / 原子抢占 / 完成事件 / 中断恢复")
+    return 0
+
+
 def test_prepare_then_remind() -> int:
     """主动 Agent：需要准备的约定先备料再汇报；不需要的交给普通跟进；备料失败降级。"""
     import datetime as _dt
@@ -210,6 +290,7 @@ def main() -> int:
         + test_report_written_on_success()
         + test_report_failure_does_not_break_task()
         + test_schedule_and_retry()
+        + test_unified_start_context_claim_and_recovery()
         + test_prepare_then_remind()
     )
     if failed:

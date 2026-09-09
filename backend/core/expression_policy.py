@@ -52,6 +52,7 @@ _SOURCE_PROFILE: dict[str, tuple[float, float]] = {
     "initiative:pending_thought": (0.28, 0.30),
     "initiative:archive_suggest": (0.22, 0.30),
     "initiative:outing_note": (0.24, 0.30),
+    "initiative:watch_change": (0.35, 0.32),
     "initiative:companion_request": (0.30, 0.30),
     "initiative:surprise": (0.26, 0.28),
     "initiative-loop": (0.24, 0.28),

@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 
-_SCHEMA_VERSION = 40  # v40: watch subscriptions for the monitoring agent
+_SCHEMA_VERSION = 41  # v41: durable acknowledgement for monitoring notifications
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS watches (
     interval_minutes INTEGER NOT NULL DEFAULT 360,
     last_checked_at TEXT,
     last_hash       TEXT NOT NULL DEFAULT '',
+    last_notified_hash TEXT NOT NULL DEFAULT '',
     last_changed_at TEXT,
     status          TEXT NOT NULL DEFAULT 'active',   -- active / paused
     created_at      TEXT NOT NULL,
@@ -1068,6 +1069,16 @@ class UserDB:
         ):
             if column not in policy_columns:
                 self.conn.execute(f"ALTER TABLE memory_policy ADD COLUMN {column} {definition}")
+        # v41：页面变化与“已通知”分离。旧库已有 last_hash 视为已建立且已通知的
+        # 基线，避免升级后把历史页面误报为一次新变化。
+        watch_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(watches)")}
+        if "last_notified_hash" not in watch_columns:
+            self.conn.execute(
+                "ALTER TABLE watches ADD COLUMN last_notified_hash TEXT NOT NULL DEFAULT ''"
+            )
+            self.conn.execute(
+                "UPDATE watches SET last_notified_hash=last_hash WHERE last_hash<>''"
+            )
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")

@@ -146,15 +146,23 @@ async def _test_secondary_chain_awaitable() -> None:
     # 无任何待办来源时，整条链必须干净返回 False（不抛异常）
     assert await initiative._arbitrate_secondary(uid) is False
 
+    sent: list[str] = []
+    marked: list[str] = []
+
     async def fake_enqueue(user_id, text, image=None, epoch=None):
+        sent.append(text)
         return True
 
     with patch("backend.core.life_templates.maybe_express_outing",
-               new=lambda u: "刚爬完山回来，腿有点酸"), \
+               new=lambda u, **k: "刚爬完山回来，腿有点酸"), \
+         patch("backend.core.life_templates.outing_expressed_today", new=lambda u: False), \
+         patch("backend.core.life_templates.mark_outing_expressed", new=marked.append), \
          patch("backend.core.initiative.enqueue_proactive", new=fake_enqueue):
         assert await initiative._arbitrate_secondary(uid) is True, \
             "外出候选必须能被 await 并作为本轮出牌"
-    print("[OK] 次级链可 await（同步包装不再截断后续来源）")
+    assert sent == ["刚爬完山回来，腿有点酸"], sent
+    assert marked == [uid], marked
+    print("[OK] 次级链可 await，外出候选投递后才写去重键")
 
 
 async def main() -> None:
