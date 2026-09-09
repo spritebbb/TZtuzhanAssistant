@@ -52,7 +52,7 @@ def _legacy(task: str) -> Route:
             key_ref = "IMAGE_API_KEY"
         else:
             key_ref = "LLM_API_KEY"
-        return Route(task, base, key_ref, config.vision_model or "Qwen/Qwen2.5-VL-72B-Instruct",
+        return Route(task, base, key_ref, config.vision_model or "Qwen/Qwen3-VL-32B-Instruct",
                      60, 1000)
     return main
 
