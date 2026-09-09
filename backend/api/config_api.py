@@ -60,6 +60,11 @@ async def api_config_get():
             "vision_api_key_masked": _mask_key(config.vision_api_key),
             "mood_city": config.mood_city,
             "memory_semantic": config.memory_semantic,
+            "proactive_new_user_days": config.proactive_new_user_days,
+            "proactive_new_user_idle_hours": config.proactive_new_user_idle_hours,
+            "proactive_surprise_min_gap_days": config.proactive_surprise_min_gap_days,
+            "proactive_surprise_chance_percent": config.proactive_surprise_chance_percent,
+            "proactive_surprise_idle_minutes": config.proactive_surprise_idle_minutes,
         },
     }
 
@@ -81,6 +86,11 @@ async def api_config_set(request: Request):
         "image_base_url": False, "image_model": False, "image_api_key": True,
         "vision_base_url": False, "vision_model": False, "vision_api_key": True,
         "mood_city": False, "memory_semantic": False,
+        "proactive_new_user_days": False,
+        "proactive_new_user_idle_hours": False,
+        "proactive_surprise_min_gap_days": False,
+        "proactive_surprise_chance_percent": False,
+        "proactive_surprise_idle_minutes": False,
     }
     clear_fields = body.get("clear_fields", [])
     clear_fields = set(clear_fields) if isinstance(clear_fields, list) else set()
@@ -108,6 +118,19 @@ async def api_config_set(request: Request):
             max_tokens = int(updates["LLM_MAX_TOKENS"])
             if not 1 <= max_tokens <= 32768:
                 raise ValueError("LLM_MAX_TOKENS 必须在 1 到 32768 之间")
+        integer_ranges = {
+            "PROACTIVE_NEW_USER_DAYS": (1, 30),
+            "PROACTIVE_NEW_USER_IDLE_HOURS": (1, 24),
+            "PROACTIVE_SURPRISE_MIN_GAP_DAYS": (1, 365),
+            "PROACTIVE_SURPRISE_CHANCE_PERCENT": (0, 100),
+            "PROACTIVE_SURPRISE_IDLE_MINUTES": (15, 10080),
+        }
+        for name, (minimum, maximum) in integer_ranges.items():
+            if name not in updates:
+                continue
+            value = int(updates[name])
+            if not minimum <= value <= maximum:
+                raise ValueError(f"{name} 必须在 {minimum} 到 {maximum} 之间")
     except (TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 

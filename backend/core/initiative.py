@@ -2,7 +2,7 @@
 """主动性引擎：让菟菚在合适的时候主动发起对话，而不是永远被动等。
 
 设计原则（轻量主动、不骚扰）：
-- 只在「用户久未聊天」时考虑主动（默认 6 小时没说话才进入候选）；
+- 只在「用户久未聊天」时考虑主动（默认 6 小时；首次发言后 3 天内为 2 小时）；
 - 只对「关系足够近」的用户主动（熟悉及以上，初识阶段不主动找——那会像骚扰）；
 - 按状态决定主动内容：情绪好想分享 / 记挂着对方的事（特殊日子、上次话题）/ 单纯关心；
 - 严格频率限制：每个用户每天最多主动 1 次，全局有冷却，避免刷屏。
@@ -31,7 +31,6 @@ from .state import load_state, stage_of
 from .userdb import db, kv_del, kv_get, kv_set
 
 # ---- 阈值（可调）----
-_IDLE_HOURS = 6            # 多久没聊才进入主动候选
 _MIN_STAGE = "熟悉"        # 最低关系阶段（初识不主动）
 _DAILY_MAX_PER_USER = 1    # 每用户每天最多主动 1 次
 _GLOBAL_COOLDOWN_SEC = 900  # 全局冷却 15 分钟（避免集中轰炸）
@@ -86,6 +85,37 @@ def _last_chat_ts(user_id: str) -> float | None:
         return None
 
 
+def _first_user_chat_ts(user_id: str) -> float | None:
+    """返回用户首次发言时间；无用户消息或旧数据时间损坏时返回 None。"""
+    try:
+        with db._lock:
+            row = db.conn.execute(
+                "SELECT ts FROM messages WHERE user_id = ? AND role = 'user' "
+                "ORDER BY id ASC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+    except Exception:
+        return None
+    if not row or not row["ts"]:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(row["ts"]).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _idle_hours_for_user(user_id: str, *, now_ts: float | None = None) -> int:
+    """按首次发言时间选择主动候选阈值，且不放宽全局配置。"""
+    default_hours = config.proactive_idle_hours
+    first_chat = _first_user_chat_ts(user_id)
+    if first_chat is None:
+        return default_hours
+    age_seconds = (time.time() if now_ts is None else now_ts) - first_chat
+    if 0 <= age_seconds < config.proactive_new_user_days * 86400:
+        return min(default_hours, config.proactive_new_user_idle_hours)
+    return default_hours
+
+
 def _eligible_users() -> list[dict]:
     """找出「值得主动找」的用户：久未聊 + 关系够近 + 今天还没主动过。"""
     eligible = []
@@ -121,7 +151,8 @@ def _eligible_users() -> list[dict]:
             pass
         # 没聊过或最近在聊 → 跳过（不骚扰正在聊天的人）
         last = _last_chat_ts(uid)
-        if last is not None and now - last < config.proactive_idle_hours * 3600:
+        idle_hours = _idle_hours_for_user(uid, now_ts=now)
+        if last is not None and now - last < idle_hours * 3600:
             continue
         eligible.append({"user_id": uid, "last_chat_ts": last})
     # 按「越久没聊越优先」排序，最多取 3 个（一次别主动找太多人）

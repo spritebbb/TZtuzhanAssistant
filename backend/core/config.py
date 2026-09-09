@@ -116,6 +116,10 @@ class Config:
         # 主动消息：问候与 initiative 共用每日额度；全部运行时读取，热重载即生效。
         self.proactive_greeting_idle_hours: int = max(1, _env_int("PROACTIVE_GREETING_IDLE_HOURS", 8))
         self.proactive_idle_hours: int = max(1, _env_int("PROACTIVE_IDLE_HOURS", 6))
+        # 新用户适应期：首次发言后的前 N 天采用更短的主动候选阈值；
+        # 关系阶段门槛仍由 initiative 控制，初识阶段不会因此被主动打扰。
+        self.proactive_new_user_days: int = max(1, _env_int("PROACTIVE_NEW_USER_DAYS", 3))
+        self.proactive_new_user_idle_hours: int = max(1, _env_int("PROACTIVE_NEW_USER_IDLE_HOURS", 2))
         self.proactive_daily_max: int = max(1, _env_int("PROACTIVE_DAILY_MAX", 1))
         self.proactive_global_cooldown_sec: int = max(30, _env_int("PROACTIVE_GLOBAL_COOLDOWN_SEC", 900))
         self.proactive_check_interval_sec: int = max(30, _env_int("PROACTIVE_CHECK_INTERVAL_SEC", 300))
@@ -127,9 +131,9 @@ class Config:
         # M5 惊喜编排：隔一阵子基于真实共同产物（共同故事/书摘/目标回顾）低频送惊喜。
         # 只基于真实经历、低频、可关闭；出牌经统一仲裁器，消耗共享每日额度。
         self.proactive_surprise_enabled: bool = os.getenv("PROACTIVE_SURPRISE_ENABLED", "1") != "0"
-        self.proactive_surprise_min_gap_days: int = max(1, _env_int("PROACTIVE_SURPRISE_MIN_GAP_DAYS", 14))
-        self.proactive_surprise_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_SURPRISE_CHANCE_PERCENT", 35)))
-        self.proactive_surprise_idle_minutes: int = max(15, _env_int("PROACTIVE_SURPRISE_IDLE_MINUTES", 240))
+        self.proactive_surprise_min_gap_days: int = max(1, _env_int("PROACTIVE_SURPRISE_MIN_GAP_DAYS", 7))
+        self.proactive_surprise_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_SURPRISE_CHANCE_PERCENT", 50)))
+        self.proactive_surprise_idle_minutes: int = max(15, _env_int("PROACTIVE_SURPRISE_IDLE_MINUTES", 120))
         self.proactive_surprise_material_days: int = max(7, _env_int("PROACTIVE_SURPRISE_MATERIAL_DAYS", 60))
 
         # 自制表情包：仅在有明确情绪场景时低频附带，优先复用收藏。
