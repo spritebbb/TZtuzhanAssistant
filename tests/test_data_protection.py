@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from sqlcipher3 import dbapi2 as sqlcipher
@@ -74,6 +75,20 @@ def test_export_refuses_bad_keys_and_existing_targets(root: Path) -> None:
     assert target.read_bytes() == b"do-not-overwrite"
 
 
+def test_export_removes_its_target_when_final_verification_fails(root: Path) -> None:
+    source = root / "plain.db"
+    target = root / "encrypted.db"
+    _plaintext_fixture(source)
+
+    with patch(
+        "backend.storage.connect.verify_encrypted_database",
+        side_effect=ValueError("simulated verification failure"),
+    ), pytest.raises(ValueError, match="verification failure"):
+        create_encrypted_copy(source, target, b"k" * 32)
+
+    assert not target.exists()
+
+
 def test_backend_database_opens_use_the_central_connector() -> None:
     backend = Path(__file__).resolve().parents[1] / "backend"
     violations: list[str] = []
@@ -124,6 +139,9 @@ def main() -> None:
         guard_root = root / "guards"
         guard_root.mkdir()
         test_export_refuses_bad_keys_and_existing_targets(guard_root)
+        cleanup_root = root / "cleanup"
+        cleanup_root.mkdir()
+        test_export_removes_its_target_when_final_verification_fails(cleanup_root)
         test_backend_database_opens_use_the_central_connector()
     finally:
         shutil.rmtree(root, ignore_errors=True)

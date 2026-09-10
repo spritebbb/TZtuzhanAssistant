@@ -161,55 +161,62 @@ def create_encrypted_copy(source: str | Path, target: str | Path, key: bytes) ->
     source, target = Path(source), Path(target)
     if not source.is_file():
         raise FileNotFoundError(source)
-    if target.exists():
-        raise FileExistsError(target)
     _raw_key_literal(key)
     target.parent.mkdir(parents=True, exist_ok=True)
-
-    plain = connect_database(source)
     try:
-        source_manifest = database_manifest(plain)
-    finally:
-        plain.close()
+        # 独占创建既消除 exists()→ATTACH 的竞态，也明确了失败时只删除本函数
+        # 自己保留的目标文件。SQLCipher 可以在这个空文件上初始化加密数据库。
+        with target.open("xb"):
+            pass
+    except FileExistsError:
+        raise FileExistsError(target) from None
 
-    driver = _sqlcipher_driver()
-    conn = driver.connect(str(source), timeout=10)
-    attached = False
     try:
-        cipher_version = conn.execute("PRAGMA cipher_version").fetchone()
-        if not cipher_version or not cipher_version[0]:
-            raise SQLCipherUnavailable("sqlcipher_export is unavailable")
-        conn.execute(
-            f"ATTACH DATABASE {_path_literal(target)} AS encrypted "
-            f"KEY {_raw_key_literal(key)}"
-        )
-        attached = True
-        conn.execute("SELECT sqlcipher_export('encrypted')")
-        conn.execute(f"PRAGMA encrypted.user_version = {source_manifest['user_version']}")
-        conn.commit()
-        conn.execute("DETACH DATABASE encrypted")
+        plain = connect_database(source)
+        try:
+            source_manifest = database_manifest(plain)
+        finally:
+            plain.close()
+
+        driver = _sqlcipher_driver()
+        conn = driver.connect(str(source), timeout=10)
         attached = False
+        try:
+            cipher_version = conn.execute("PRAGMA cipher_version").fetchone()
+            if not cipher_version or not cipher_version[0]:
+                raise SQLCipherUnavailable("sqlcipher_export is unavailable")
+            conn.execute(
+                f"ATTACH DATABASE {_path_literal(target)} AS encrypted "
+                f"KEY {_raw_key_literal(key)}"
+            )
+            attached = True
+            conn.execute("SELECT sqlcipher_export('encrypted')")
+            conn.execute(f"PRAGMA encrypted.user_version = {source_manifest['user_version']}")
+            conn.commit()
+            conn.execute("DETACH DATABASE encrypted")
+            attached = False
+        except Exception:
+            if attached:
+                try:
+                    conn.execute("DETACH DATABASE encrypted")
+                except Exception:
+                    pass
+            raise
+        finally:
+            conn.close()
+
+        with target.open("rb") as handle:
+            header = handle.read(len(SQLITE_HEADER))
+        if header == SQLITE_HEADER:
+            raise ValueError("SQLCipher export produced a plaintext SQLite header")
+        verified = verify_encrypted_database(target, key)
+        if verified["manifest"] != source_manifest:
+            raise ValueError("encrypted copy does not match the source manifest")
     except Exception:
-        if attached:
-            try:
-                conn.execute("DETACH DATABASE encrypted")
-            except Exception:
-                pass
-        conn.close()
+        # 包括导出后的 HMAC/SQLite 完整性检查失败；不得留下看似可用的残件。
         target.unlink(missing_ok=True)
         raise
-    else:
-        conn.close()
 
-    with target.open("rb") as handle:
-        header = handle.read(len(SQLITE_HEADER))
-    if header == SQLITE_HEADER:
-        target.unlink(missing_ok=True)
-        raise ValueError("SQLCipher export produced a plaintext SQLite header")
-    verified = verify_encrypted_database(target, key)
-    if verified["manifest"] != source_manifest:
-        target.unlink(missing_ok=True)
-        raise ValueError("encrypted copy does not match the source manifest")
     return {
         "cipher_version": verified["cipher_version"],
         "source_manifest": source_manifest,
