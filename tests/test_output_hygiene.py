@@ -60,9 +60,18 @@ async def _empty_date_extract(*args, **kwargs):
     return []
 
 
-def _pipeline_patches(*, plugin_reply=None, tool_loop: bool = False):
+def _pipeline_patches(
+    *, plugin_reply=None, tool_loop: bool = False, hygiene_enabled: bool = True
+):
     stack = ExitStack()
-    stack.enter_context(patch("backend.core.features.flag", return_value=True))
+    stack.enter_context(
+        patch(
+            "backend.core.features.flag",
+            side_effect=lambda name: hygiene_enabled
+            if name == "output_hygiene_enabled"
+            else True,
+        )
+    )
     stack.enter_context(patch("backend.core.pipeline._spawn_memory_task", new=_close_background))
     stack.enter_context(
         patch("backend.core.pipeline._needs_tool_loop", return_value=tool_loop)
@@ -98,6 +107,29 @@ async def _test_cross_chunk_reasoning_never_streams_or_persists() -> None:
     rows = db.recent_messages(uid, 4)
     assert rows[-1]["role"] == "assistant"
     assert rows[-1]["content"] == reply
+
+
+async def _test_disabled_hygiene_does_not_abort_on_stream_callback_error() -> None:
+    uid = "hygiene-disabled-stream"
+    chunks: list[str] = []
+
+    async def fake_stream(messages, **kwargs):
+        yield "关闭卫生后"
+        yield "仍完成生成"
+
+    async def flaky_collect(piece: str) -> None:
+        chunks.append(piece)
+        if len(chunks) == 1:
+            raise RuntimeError("模拟前端流式连接瞬时失败")
+
+    with _pipeline_patches(hygiene_enabled=False), patch(
+        "backend.core.pipeline.chat_stream", new=fake_stream
+    ):
+        reply = await pipeline.process(uid, "测试关闭输出卫生", stream_cb=flaky_collect)
+
+    assert chunks == ["关闭卫生后", "仍完成生成"]
+    assert reply == "关闭卫生后仍完成生成"
+    assert db.last_assistant_message(uid) == reply
 
 
 async def _test_plugin_reintroduction_is_rewritten_before_stream() -> None:
@@ -215,6 +247,7 @@ async def _test_duplicate_rewrite_consumes_shared_budget() -> None:
 async def main() -> None:
     test_pure_hard_rules_and_code_fence_exception()
     await _test_cross_chunk_reasoning_never_streams_or_persists()
+    await _test_disabled_hygiene_does_not_abort_on_stream_callback_error()
     await _test_plugin_reintroduction_is_rewritten_before_stream()
     await _test_tool_loop_final_text_uses_same_protected_exit()
     await _test_ephemeral_unsafe_reply_uses_fallback_without_persistence()
