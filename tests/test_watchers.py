@@ -27,6 +27,15 @@ from backend.core.userdb import db
 UID = "watch-user"
 
 
+def _add_public_watch(*args, **kwargs):
+    """添加公网样例监视，不让单元测试依赖机器的 DNS/代理策略。"""
+    with patch(
+        "backend.tools.safety.resolve_public_url",
+        return_value=(True, "", "93.184.216.34"),
+    ):
+        return w.add_watch(*args, **kwargs)
+
+
 def test_add_list_remove_and_ssrf() -> int:
     db.ensure_user(UID)
     # 本机/内网地址必须拒绝
@@ -36,9 +45,9 @@ def test_add_list_remove_and_ssrf() -> int:
             raise AssertionError(f"应拒绝内网地址：{bad}")
         except w.WatchError:
             pass
-    item = w.add_watch(UID, "https://example.com/notice", label="公告", interval_minutes=10)
+    item = _add_public_watch(UID, "https://example.com/notice", label="公告", interval_minutes=10)
     assert item["interval_minutes"] == 30, "间隔下限应为 30 分钟"
-    again = w.add_watch(UID, "https://example.com/notice", label="公告2", interval_minutes=60)
+    again = _add_public_watch(UID, "https://example.com/notice", label="公告2", interval_minutes=60)
     assert again["id"] == item["id"] and again["label"] == "公告2", "同 URL 幂等更新"
     listed = w.list_watches(UID)
     assert len([x for x in listed if x["id"] == item["id"]]) == 1
@@ -50,7 +59,7 @@ def test_add_list_remove_and_ssrf() -> int:
 
 def test_change_detection_and_interval() -> int:
     db.ensure_user(UID)
-    item = w.add_watch(UID, "https://example.com/a", label="A", interval_minutes=60)
+    item = _add_public_watch(UID, "https://example.com/a", label="A", interval_minutes=60)
     calls: list[str] = []
     content = {"v": "第一版"}
 
@@ -96,7 +105,7 @@ def test_change_detection_and_interval() -> int:
 
 def test_fetch_failure_keeps_state() -> int:
     db.ensure_user(UID)
-    item = w.add_watch(UID, "https://example.com/b", label="B")
+    item = _add_public_watch(UID, "https://example.com/b", label="B")
     def boom(url: str) -> str:
         raise w.WatchError("抓取失败：HTTP 503")
     old = w._fetch_text

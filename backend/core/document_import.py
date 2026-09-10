@@ -127,12 +127,33 @@ def fetch_html(url: str, *, fetch=None) -> tuple[str, str]:
 
 
 def _default_fetch(url: str, *, timeout: int):
+    import urllib.error
     import urllib.request
 
+    # 连接必须复用本次安全检查得到的 IP，不能让 urllib 在检查后再次解析域名；
+    # 同时关闭自动重定向，交给 fetch_html 对 Location 逐跳重新校验。
+    from ..tools.safety import build_pinned_opener
+
+    parts = urlsplit(url)
+    resolved_ip = _ensure_public_ip(parts.hostname or "")[0]
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = build_pinned_opener(resolved_ip, _NoRedirect())
     req = urllib.request.Request(url, headers={"User-Agent": "TuzhanAssistant/1.0"})
+
+    def _headers(raw) -> dict[str, str]:
+        return {str(key).lower(): str(value) for key, value in raw.items()}
+
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 已逐跳校验
-            return resp.status, dict(resp.headers), resp.read(MAX_URL_BYTES + 1)
+        with opener.open(req, timeout=timeout) as resp:
+            return resp.status, _headers(resp.headers), resp.read(MAX_URL_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308):
+            return exc.code, _headers(exc.headers), b""
+        raise DocumentImportError(f"抓取失败：HTTP {exc.code}") from exc
     except Exception as exc:
         raise DocumentImportError(f"抓取失败：{type(exc).__name__}") from exc
 
