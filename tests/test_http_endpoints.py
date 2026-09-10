@@ -41,13 +41,25 @@ import tempfile
 
 _TEST_TMP = Path(tempfile.mkdtemp(prefix="tz_http_test_"))
 _TEST_TMP.mkdir(parents=True, exist_ok=True)
+# 必须在导入 backend.app/userdb 前设置；只重定向 session DB 会让启动期维护任务
+# 仍然把测试人格事件、主动消息和任务状态写进真实 data/bot.db。
+os.environ["TZTUZHAN_DATA_DIR"] = str(_TEST_TMP)
 
 from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend.core.config import config
+import backend.core.initiative as _initiative
 
-# 双保险：config 单例若已被更早的导入创建，直接压属性保证测试确定性
+
+async def _disabled_initiative_loop() -> None:
+    """端点契约测试不启动会写入当前会话的主动消息循环。"""
+    return
+
+
+_initiative.initiative_loop = _disabled_initiative_loop
+
+# 双保险：其余网络/模型能力继续直接压属性，保证测试确定性
 config.mood_city = ""
 config.search_enabled = False
 config.memory_v2 = False
