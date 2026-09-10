@@ -1256,6 +1256,8 @@ VERIFY: .venv/Scripts/python.exe -m pytest tests/security -q ;; .venv/Scripts/py
 
 ### 20.3 Q3 可观测性与来源链
 
+> 实施：Codex，2026-09-10 完成（`4c17339`）。采用独立本地 `telemetry.db`，安装级随机盐 HMAC 隔离用户作用域；真实 `/api/chat` 生命周期已串联 chat→tool→OUT-1→session，原生工具失败按 permission/budget/provider 低基数分类。事件链 7 天、日聚合 30 天、单人格每日 500 条事件上限；动态开关关闭即停止新增，设置页和 reset 均可按人格清理，临时轮与 mock 不落盘。审查另修复 HTTP 测试真实库污染（`151f1c2`）和生活模板补跑同日多触发（`b10ce32`）。
+
 新建 `backend/core/telemetry.py`、`tests/test_observability.py`。事件字段仅 `event_name,request_id,user_scope_hash,persona_id,logical_message_id,source_ids,rule_version,duration_bucket,outcome,error_code`；禁止 raw prompt/reply、事实文本、恢复材料和外部账号。一次请求的 chat→tool→OUT-1→session/outbox 用 request/logical_message id 串联，跨进程 job 用 job_run_id；解释接口只展示用户可理解的真实来源和规则，不展示内部推理。
 
 指标采用有界日聚合，默认保留30天；用户关闭统计后停止新记录并允许清理，安全错误计数可保留无内容最小值。临时轮只在内存计时，结束丢弃。日志落盘轮转且纳入加密数据目录策略；错误爆发只提示本机，不自动上传。
