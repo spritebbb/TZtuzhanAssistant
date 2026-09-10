@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { nextTick, ref, watch, onBeforeUnmount } from 'vue'
 import { apiFetch } from '../api'
 
 const props = defineProps<{
@@ -64,6 +64,9 @@ watch(() => props.pending.map(p => p.request_id), (ids) => {
       }
     }, 1000))
   }
+  if (ids.length) {
+    void nextTick(() => Array.from(document.querySelectorAll<HTMLButtonElement>('.confirm-panel .reject')).at(-1)?.focus())
+  }
 }, { immediate: true })
 
 onBeforeUnmount(() => {
@@ -87,11 +90,11 @@ function dangerLabel(d: string): string {
 
 <template>
   <div v-if="props.pending.length > 0" class="confirm-overlay">
-    <div class="confirm-panel glass" v-for="pr in props.pending" :key="pr.request_id">
+    <div class="confirm-panel glass" v-for="pr in props.pending" :key="pr.request_id" role="alertdialog" aria-modal="false" :aria-label="`确认 ${pr.tool} 操作`">
       <div class="confirm-header">
         <span class="danger-badge" :style="{ background: dangerColor(pr.danger) }">{{ dangerLabel(pr.danger) }}</span>
         <span class="confirm-tool"><code>{{ pr.tool }}</code></span>
-        <span class="confirm-countdown" v-if="remain[pr.request_id] !== undefined">⏳ {{ remain[pr.request_id] }}s 后自动拒绝</span>
+        <span class="confirm-countdown" aria-live="polite" v-if="remain[pr.request_id] !== undefined">⏳ {{ remain[pr.request_id] }}s 后自动拒绝</span>
       </div>
       <div class="confirm-msg">{{ pr.message }}</div>
       <div class="confirm-args" v-if="Object.keys(pr.args).length > 0">

@@ -48,12 +48,12 @@ watch(() => props.show, (show) => { if (show) void load() })
           <span class="eyebrow">COST LEDGER</span>
           <h2>{{ props.personaName || '助手' }}的用量账本</h2>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭用量账本" @click="emit('close')">×</button>
       </header>
       <p class="hint">按 tokens 估算的花费（输入 ¥{{ summary?.prices.input_per_mtok ?? 1 }}/百万，输出 ¥{{ summary?.prices.output_per_mtok ?? 2 }}/百万）</p>
       <div class="entries">
         <p v-if="loading" class="empty">正在翻账本…</p>
-        <p v-else-if="error" class="empty">{{ error }}</p>
+        <p v-else-if="error" class="empty" role="alert">{{ error }}</p>
         <template v-else-if="summary">
           <div class="cards">
             <div class="card">

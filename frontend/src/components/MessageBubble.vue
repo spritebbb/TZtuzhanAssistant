@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import type { Message } from '../api/sessions'
 import type { MemoryLifecycle } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
@@ -117,13 +117,18 @@ async function copyText(text: string) {
 // ---- 增强灯箱：预览 + 下载 ----
 const lightboxSrc = ref('')
 const lightboxAlt = ref('')
+const lightboxClose = ref<HTMLButtonElement | null>(null)
+let lightboxTrigger: HTMLElement | null = null
 
 function openLightbox(src: string, alt = '') {
+  lightboxTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   lightboxSrc.value = src
   lightboxAlt.value = alt
+  void nextTick(() => lightboxClose.value?.focus())
 }
 function closeLightbox() {
   lightboxSrc.value = ''
+  void nextTick(() => lightboxTrigger?.focus())
 }
 
 // Esc 关闭灯箱
@@ -156,6 +161,21 @@ const canExplain = () =>
   props.message.role === 'bot' && !!props.message.explanation && !props.isStreamingLast
 
 const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.message.image) : '')
+const whyPanelId = computed(() => `why-${props.ttsKey.replace(/[^A-Za-z0-9_-]/g, '-')}`)
+const energyLabel = computed(() => {
+  const energy = Number(props.message.explanation?.state.energy ?? 50)
+  if (energy < 30) return '精力偏低'
+  if (energy < 70) return '精力平稳'
+  return '精力充足'
+})
+const whySummary = computed(() => {
+  const explanation = props.message.explanation
+  if (!explanation) return '原因与来源'
+  const details = [explanation.state.stage, explanation.state.mood_label]
+  if (explanation.memories.length) details.push(`参考 ${explanation.memories.length} 条记忆`)
+  else if (explanation.behavior.length) details.push('结合当时语境')
+  return `原因与来源 · ${details.slice(0, 3).join(' · ')}`
+})
 </script>
 
 <template>
@@ -190,13 +210,14 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
         </div>
         <template v-else>{{ message.content }}</template>
       </div>
-      <img
+      <button
         v-if="message.image"
-        class="mdimg"
-        :src="imgSrc"
-        :alt="message.content ? message.content.slice(0, 40) : '图片'"
+        class="image-preview"
+        :aria-label="`预览图片：${message.content ? message.content.slice(0, 40) : '图片'}`"
         @click="openLightbox(imgSrc, message.content)"
-      />
+      >
+        <img class="mdimg" :src="imgSrc" :alt="message.content ? message.content.slice(0, 40) : '图片'" />
+      </button>
       <div class="meta" :class="{ pinned: copied || whyOpen }">
         <span class="time">{{ formatTime(message.ts) }}</span>
         <span v-if="message.ephemeral" class="ephemeral-mark" title="刷新后消失，不进入记忆或关系状态">不留痕</span>
@@ -205,9 +226,10 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
           class="whybtn"
           :class="{ active: whyOpen }"
           :aria-expanded="whyOpen"
+          :aria-controls="whyPanelId"
           @click="whyOpen = !whyOpen"
-          title="她为什么这样说"
-        >为什么</button>
+          :title="whySummary"
+        >{{ whySummary }}</button>
         <button
           v-if="canSpeak()"
           class="ttsbtn"
@@ -225,6 +247,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
           :class="{ ok: copied }"
           @click="copyText(message.content)"
           title="复制"
+          :aria-label="copied ? '已复制这条消息' : '复制这条消息'"
         >
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -236,14 +259,14 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
         <span v-if="draftNotice" class="draft-note">{{ draftNotice }}</span>
         <button v-else :disabled="draftBusy" @click="confirmDraft">就这样开始</button>
       </div>
-      <div v-if="whyOpen && message.explanation" class="why-panel">
+      <div v-if="whyOpen && message.explanation" :id="whyPanelId" class="why-panel" role="region" aria-label="原因与来源详情">
         <div class="why-title">她为什么这样说</div>
         <div class="state-chips">
-          <span>{{ message.explanation.state.stage }} · 好感 {{ message.explanation.state.affection }}</span>
-          <span>{{ message.explanation.state.mood_label }} {{ message.explanation.state.mood }}</span>
-          <span>精力 {{ message.explanation.state.energy }}</span>
+          <span>关系阶段：{{ message.explanation.state.stage }}</span>
+          <span>心情：{{ message.explanation.state.mood_label }}</span>
+          <span>{{ energyLabel }}</span>
           <span v-if="message.explanation.state.resting">休息中</span>
-          <span v-if="message.explanation.state.tension">关系张力 {{ message.explanation.state.tension }}</span>
+          <span v-if="message.explanation.state.tension">相处中有些紧绷</span>
         </div>
         <div v-if="message.explanation.behavior.length" class="why-section">
           <div class="why-label">当时的行为帧</div>
@@ -280,11 +303,11 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
     <!-- 增强灯箱 -->
     <Teleport to="body">
       <div v-if="lightboxSrc" class="lb-mask" @click="closeLightbox">
-        <div class="lb-box" @click.stop>
+        <div class="lb-box" role="dialog" aria-modal="true" aria-label="图片预览" @click.stop>
           <img :src="lightboxSrc" :alt="lightboxAlt" class="lb-img" />
           <div class="lb-bar">
             <a class="lb-dl" :href="lightboxSrc" target="_blank" rel="noopener" download>下载原图</a>
-            <button class="lb-x" @click="closeLightbox">✕</button>
+            <button ref="lightboxClose" class="lb-x" aria-label="关闭图片预览" @click="closeLightbox">✕</button>
           </div>
         </div>
       </div>
@@ -467,6 +490,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
   line-height: 1.35;
 }
 .whybtn:hover, .whybtn.active { color: var(--primary-text); background: var(--primary-soft); }
+.whybtn { max-width: min(360px, 62vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .why-panel {
   width: min(520px, 72vw);
   margin-top: 3px;
@@ -508,6 +532,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
 .draft-note { color: var(--text-dim); font-size: 12px; }
 .why-tools { margin-top: 10px; }
 .why-tools span { background: var(--bg-hover); color: var(--text-dim); }
+.image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .mdimg {
   max-width: 340px;
   border-radius: var(--radius-md);
@@ -517,7 +542,7 @@ const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.messag
   box-shadow: var(--shadow-md);
   transition: transform 0.2s ease;
 }
-.mdimg:hover { transform: scale(1.01); }
+.image-preview:hover .mdimg { transform: scale(1.01); }
 
 /* 灯箱 */
 .lb-mask {

@@ -135,7 +135,7 @@
 
   --text: #34412b;
   --text-dim: #5e6d49;
-  --text-faint: #8c9874;
+  --text-faint: #65704e;
   --text-invert: #faf7ef;
 
   --primary: #6e8953;
@@ -177,6 +177,20 @@ body {
   user-select: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Q5：所有键盘可操作元素都必须有清晰且不依赖颜色的焦点标记。 */
+:where(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent-light) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 5px var(--accent-deep) !important;
+}
+
+@media (forced-colors: active) {
+  :where(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid CanvasText !important;
+    box-shadow: none !important;
+  }
 }
 
 #app {

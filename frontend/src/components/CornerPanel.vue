@@ -712,11 +712,11 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
           <h2>我们的角落</h2>
           <p>这里摆的都是我们一起真实做成的事</p>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭我们的角落" @click="emit('close')">×</button>
       </header>
       <div class="body">
         <p v-if="loading" class="empty">正在整理角落…</p>
-        <p v-else-if="error" class="empty">{{ error }}</p>
+        <p v-else-if="error" class="empty" role="alert">{{ error }}</p>
         <template v-else>
           <RoomPanel />
           <section v-if="lettersAvailable" class="letters" aria-label="写给未来的我们">
@@ -754,7 +754,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 <option disabled value="">选一件等它发生的事</option>
                 <option v-for="item in eventTypes" :key="item.type" :value="item.type">{{ item.label }}</option>
               </select>
-              <p v-if="formError" class="form-error">{{ formError }}</p>
+              <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
               <button class="primary" type="submit" :disabled="busy">封存这封信</button>
             </form>
 
@@ -789,7 +789,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
             <div class="section-head">
               <h3>我们的纪念页</h3>
             </div>
-            <p v-if="snapshotError" class="form-error">{{ snapshotError }}</p>
+            <p v-if="snapshotError" class="form-error" role="alert">{{ snapshotError }}</p>
             <article v-for="page in savedPages" :key="`snap-${page.id}`" class="page-card">
               <div class="card-head">
                 <span class="type">第 {{ page.snapshot_days }} 天</span>
@@ -846,7 +846,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 maxlength="2000"
                 placeholder="你记得的版本（现在写或之后补都可以）"
               />
-              <p v-if="dualError" class="form-error">{{ dualError }}</p>
+              <p v-if="dualError" class="form-error" role="alert">{{ dualError }}</p>
               <button class="primary" type="submit" :disabled="dualBusy">留下这一页</button>
             </form>
 
@@ -896,7 +896,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 </button>
               </template>
             </article>
-            <p v-if="dualError" class="form-error">{{ dualError }}</p>
+            <p v-if="dualError" class="form-error" role="alert">{{ dualError }}</p>
           </section>
 
           <section v-if="possibilitiesAvailable" class="possibilities" aria-label="梦境与平行可能">
@@ -920,7 +920,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 maxlength="2000"
                 placeholder="虚构前提：比如「如果那年我们都去了另一个城市……」"
               />
-              <p v-if="possibilityError" class="form-error">{{ possibilityError }}</p>
+              <p v-if="possibilityError" class="form-error" role="alert">{{ possibilityError }}</p>
               <button class="primary" :disabled="possibilityBusy" @click="possibilityGenerate">
                 {{ possibilityBusy ? '她在编…' : '生成草稿' }}
               </button>
@@ -987,7 +987,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                 placeholder="给这个版本起个名字，比如「升级前」"
                 @keyup.enter="captureVersion"
               />
-              <p v-if="versionError" class="form-error">{{ versionError }}</p>
+              <p v-if="versionError" class="form-error" role="alert">{{ versionError }}</p>
               <button class="primary" :disabled="versionBusy" @click="captureVersion">留下这个版本</button>
             </div>
             <article v-for="version in versions" :key="`rv-${version.id}`" class="page-card version-card">
@@ -1015,7 +1015,7 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
                   </option>
                 </select>
               </div>
-              <p v-if="compareError" class="form-error">{{ compareError }}</p>
+              <p v-if="compareError" class="form-error" role="alert">{{ compareError }}</p>
               <button
                 class="primary"
                 :disabled="compareBusy || !compareBeforeId || !compareAfterId || compareBeforeId === compareAfterId"

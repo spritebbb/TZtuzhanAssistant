@@ -44,7 +44,7 @@ function useShortcut(s: Shortcut) {
     <div v-if="shortcutsOpen" class="shortcuts glass">
       <div class="sc-head">
         <span>快捷指令</span>
-        <button class="sc-close" title="收起" @click="shortcutsOpen = false">✕</button>
+        <button class="sc-close" aria-label="收起快捷指令" @click="shortcutsOpen = false">✕</button>
       </div>
       <div class="sc-grid">
         <button v-for="s in shortcuts" :key="s.label" class="sc-item" @click="useShortcut(s)">
@@ -76,8 +76,8 @@ function useShortcut(s: Shortcut) {
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
-      <textarea v-model="input" :disabled="busy" rows="1" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact.prevent="emit('send')"></textarea>
-      <button v-if="streaming" class="btn stop" @click="emit('stop')">
+      <textarea v-model="input" :disabled="busy" rows="1" :aria-label="'给' + (personaName || '助手') + '的消息'" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact.prevent="emit('send')"></textarea>
+      <button v-if="streaming" class="btn stop" aria-label="停止生成" @click="emit('stop')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
       <button class="btn send" :disabled="busy" @click="emit('send')">

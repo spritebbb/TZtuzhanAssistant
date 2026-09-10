@@ -222,7 +222,7 @@ watch(() => props.show, (show) => { if (show) void load() })
           <span class="eyebrow">BOOKSHELF</span>
           <h2>{{ props.personaName || '助手' }}的书架</h2>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭书架" @click="emit('close')">×</button>
       </header>
       <p class="hint">投喂 pdf / txt / md / epub，或粘一个网页链接，她真的会读，聊到相关话题会自然提起</p>
 
@@ -259,7 +259,7 @@ watch(() => props.show, (show) => { if (show) void load() })
       </div>
 
       <p v-if="notice" class="notice">{{ notice }}</p>
-      <p v-if="error" class="error-text">{{ error }}</p>
+      <p v-if="error" class="error-text" role="alert">{{ error }}</p>
 
       <div class="entries">
         <p v-if="loading" class="empty">正在整理书架…</p>

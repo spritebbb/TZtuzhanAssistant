@@ -50,6 +50,12 @@ function toggleOurs() {
   void loadDomainTrust()
 }
 
+function trustDescription(value: number): string {
+  if (value >= 70) return '已经比较可靠'
+  if (value >= 45) return '正在变得稳定'
+  return '还在慢慢积累'
+}
+
 watch(() => props.show, (show) => { if (show) void load() })
 </script>
 
@@ -61,7 +67,7 @@ watch(() => props.show, (show) => { if (show) void load() })
           <span class="eyebrow">PRIVATE FIELD NOTES</span>
           <h2>{{ props.personaName || '助手' }}的抽屉</h2>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭私人记录" @click="emit('close')">×</button>
       </header>
       <nav>
         <button :class="{ active: tab === 'diary' }" @click="tab = 'diary'">私人日记</button>
@@ -70,7 +76,7 @@ watch(() => props.show, (show) => { if (show) void load() })
       </nav>
       <div class="entries">
         <p v-if="loading" class="empty">正在悄悄拉开抽屉…</p>
-        <p v-else-if="error" class="empty">{{ error }}</p>
+        <p v-else-if="error" class="empty" role="alert">{{ error }}</p>
         <template v-else-if="tab === 'diary'">
           <article v-for="entry in diaries" :key="entry.id">
             <div class="meta"><time>{{ entry.date }}</time><span v-if="entry.mood">{{ entry.mood }}</span></div>
@@ -117,13 +123,15 @@ watch(() => props.show, (show) => { if (show) void load() })
             <ul class="domains">
               <li v-for="item in domainTrust" :key="item.domain">
                 <span class="domain-label">{{ item.label }}</span>
-                <span class="domain-bar" role="img" :aria-label="`${item.label}：${item.value} 分`">
-                  <i :style="{ width: item.value + '%' }"></i>
+                <span class="domain-description">{{ trustDescription(item.value) }}</span>
+                <span class="domain-reasons">
+                  <small v-for="reason in item.reasons.slice(0, 2)" :key="reason.event_id">
+                    {{ reason.occurred_at.slice(0, 10) }} 的相处经历
+                  </small>
                 </span>
-                <span class="domain-value">{{ item.value }}</span>
               </li>
             </ul>
-            <p class="hint">这五个方面她各自积累到什么程度；数字来自真实发生的事，随时可以重来</p>
+            <p class="hint">这些描述来自真实发生的事，随时可以重来</p>
           </article>
         </template>
       </div>
@@ -152,12 +160,12 @@ article.unlock.locked { opacity: .55; border-style: dashed; }
 article.unlock.pending { border-color: var(--accent); }
 article.unlock .hint { color: var(--text-muted); font-size: 13px; }
 .domains { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-.domains li { display: grid; grid-template-columns: 72px 1fr 34px; align-items: center; gap: 10px; }
+.domains li { display: grid; grid-template-columns: 72px minmax(112px, .8fr) 1fr; align-items: start; gap: 10px; }
 .domain-label { color: var(--text-muted); font-size: 13px; }
-.domain-bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
-.domain-bar i { display: block; height: 100%; background: var(--accent); }
-.domain-value { text-align: right; font-size: 13px; color: var(--text-muted); }
+.domain-description { color: var(--text); font-size: 13px; }
+.domain-reasons { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); }
 @media (max-width: 480px) {
-  .domains li { grid-template-columns: 64px 1fr 30px; gap: 6px; }
+  .domains li { grid-template-columns: 64px 1fr; gap: 6px; }
+  .domain-reasons { grid-column: 2; }
 }
 </style>

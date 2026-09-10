@@ -114,7 +114,7 @@ onMounted(() => { void load() })
         </div>
       </div>
     </div>
-    <p v-if="error" class="vp-error">{{ error }}</p>
+    <p v-if="error" class="vp-error" role="alert">{{ error }}</p>
   </section>
 </template>
 
