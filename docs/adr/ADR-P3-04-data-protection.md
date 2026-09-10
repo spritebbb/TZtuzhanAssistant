@@ -1,6 +1,6 @@
 # ADR P3-04：数据保护边界与 SQLCipher 接入顺序
 
-- 状态：A/B 离线切片已验证；C–F 待实施
+- 状态：A/B/C 离线切片已验证；D–F 待实施
 - 日期：2026-09-10
 - 执行：Codex
 - 决策依据：`docs/Zcode技术指导.md` P3-04 与 §21.1
@@ -37,9 +37,16 @@
 4. `create_encrypted_copy` 只创建新目标，拒绝覆盖；通过 `sqlcipher_export` 从明文源生成副本，显式复制 `user_version`，随后比较 schema hash、逐表行数和有限样本 hash，并执行 `cipher_integrity_check` 与 `integrity_check`。失败删除不完整目标，源文件始终不改。
 5. `scripts/sqlcipher_poc.py` 自己创建并销毁临时数据库，不接受真实数据路径。它证明加密文件没有 SQLite 明文头、正确 key 可读、错误 key 失败、schema/触发器/索引/行数与样本一致。
 
+## C 切片决策
+
+1. `backend/storage/file_container.py` 提供 format v1 分块 AEAD 容器。MK 仅由调用方以内存参数传入，经 HKDF-SHA256 按 `media/attachment/persona/log/backup/temporary/vector` 分域派生 256-bit data key；容器使用 AES-256-GCM，每块使用独立随机 96-bit nonce。
+2. 全局 header 记录 `format_version/key_id/domain/object_id/chunk_size`，每块 header 记录 `format_version/key_id/nonce/chunk_index/final`，两层 header 都进入 AAD。解密严格检查块序、终块、尾随数据、长度和认证标签，错误 key、篡改、截断、换序都不能产出成功结果。
+3. 文件对象以随机 128-bit id 命名为 `.tzenc`，不在路径或容器中保存原始文件名。加密、解密目标均以独占创建保留；失败删除本次创建的残件，绝不覆盖或删除调用方已有文件。`decrypt_to_bytes` 有默认 32MB 上限，只有整个容器验证完成才返回正文。
+4. `backend/storage/vector_embeddings.py` 建立独立 SQLCipher 向量库，只保存稳定 `source_id/chunk_id/model_id`、向量 blob、内容 hash 和版本，不复制源文本。`vector_models` 锁定每个模型的维度；启动后解包到 `MemoryVectorIndex` 做确定性余弦线性检索，进程退出即丢弃内存索引。
+5. C 仍是离线可组合件：当前运行时继续使用既有明文数据目录与 Chroma。D 提供正式 MK/key broker、E 完成迁移切换后，才允许把真实媒体和向量写入这些入口，并清理可重建的明文 Chroma 目录。
+
 ## 未完成边界
 
-- C：媒体/附件/日志的分块 AEAD 容器，以及替换持久化 Chroma。
 - D：MK、DPAPI 本机槽、Argon2id 恢复槽、应用锁和进程内 key broker。
 - E：全局 persistence gate、迁移状态机、隔离进程校验与原子目录切换。
 - F：同 generation 加密备份、空目录恢复、目标机新建 DPAPI 槽和恢复演练。
@@ -50,6 +57,7 @@
 
 ```text
 .venv/Scripts/python.exe tests/test_data_protection.py
+.venv/Scripts/python.exe tests/test_encrypted_storage.py
 .venv/Scripts/python.exe scripts/sqlcipher_poc.py
 .venv/Scripts/python.exe tests/test_schema_backup.py
 .venv/Scripts/python.exe tests/test_relationship_bundle.py
