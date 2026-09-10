@@ -1313,7 +1313,9 @@ VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/
 VERIFY_TIMEOUT: 600
 ```
 
-执行：Codex，2026-09-10。P3-04 A/B 离线切片由 `94f0593` 落地：新增完整明文面 ADR；全后端 SQLite 打开路径收口到 `backend/storage/connect.py`；固定 `sqlcipher3==0.6.2`，在一次性临时目录以 SQLCipher 4.12.0 Community 完成 `sqlcipher_export`，验证非明文文件头、正确/错误 key、cipher/SQLite 完整性、`user_version`、schema/触发器/索引、逐表行数和样本哈希。真实 `data/` 未迁移、未删除，运行时仍走明文 SQLite；C–F 文件容器、key broker、应用锁、迁移状态机与加密备份仍待后续切片。针对性验证通过：data protection、schema backup、relationship bundle、periodic backup、reset、telemetry、session/agent 与 14 条边界回归。
+执行：Codex，2026-09-10。P3-04 A/B 离线切片由 `94f0593` 落地：新增完整明文面 ADR；全后端 SQLite 打开路径收口到 `backend/storage/connect.py`；固定 `sqlcipher3==0.6.2`，在一次性临时目录以 SQLCipher 4.12.0 Community 完成 `sqlcipher_export`，验证非明文文件头、正确/错误 key、cipher/SQLite 完整性、`user_version`、schema/触发器/索引、逐表行数和样本哈希。真实 `data/` 未迁移、未删除，运行时仍走明文 SQLite。针对性验证通过：data protection、schema backup、relationship bundle、periodic backup、reset、telemetry、session/agent 与 14 条边界回归。
+
+执行：Codex，2026-09-10。P3-04 C 离线切片由 `f43a1d2` 落地：新增 HKDF-SHA256 分域派生与 AES-256-GCM 分块文件容器，header/AAD 覆盖版本、key id、nonce、块序和终块，随机对象名且失败不留残件；新增独立 SQLCipher `vector_embeddings`/`vector_models` 存储和进程内余弦线性索引，不持久化源文本并锁定模型维度。真实媒体、Chroma 与 `data/` 仍未迁移，运行时不强制加载 C 模块；D–F key broker/应用锁、迁移状态机与加密备份仍待后续切片。新增 `tests/test_encrypted_storage.py` 覆盖多块往返、错误 key、篡改、截断、覆盖保护、密文头、维度门与内存检索。
 
 ### 21.2 P3-03 GPT-SoVITS 训练、推理和回退补充
 
