@@ -117,7 +117,8 @@ def test_cooldown_and_veto() -> int:
     db.ensure_user(uid)
     _clear_kv(uid)
     tpl = _tpl(id="lt-only", cooldown_days=7)
-    with patch.object(lt, "load_templates", return_value=(tpl,)):
+    with patch.object(lt, "load_templates", return_value=(tpl,)), \
+         patch.object(lt, "_roll", side_effect=lambda u, d, extra="": 10 if extra == "" else 0):
         # 冷却中不抽
         got = lt.choose_life_event(uid, AT, energy=80, stage="初识")
         assert got is not None  # 无冷却时可用
@@ -143,8 +144,9 @@ def test_commit_idempotent_and_energy() -> int:
     before = json.loads(kv_get(uid, "state:schedule") or "{}").get("energy_delta_today", 0.0)
     payload = lt.commit_life_event(uid, tpl, AT)
     assert payload is not None and payload["template_id"] == "lt-go"
-    # 幂等：同日同模板第二次提交不新增事件
+    # 幂等：同日同模板以及另一模板都不能新增第二条生活事件
     assert lt.commit_life_event(uid, tpl, AT) is None
+    assert lt.commit_life_event(uid, _tpl(id="lt-other", energy_cost=8), AT) is None
     rows = db.conn.execute(
         "SELECT COUNT(*) n FROM character_life_events WHERE user_id=? AND kind='outing'",
         (uid,)).fetchone()["n"]

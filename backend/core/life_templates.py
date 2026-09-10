@@ -272,6 +272,10 @@ def choose_life_event(user_id: str, now: datetime, *, energy: int | None = None,
         stage = _current_stage(user_id)
 
     last_used = dict(data.get("last_used") or {})
+    # 日门禁必须先于逐模板冷却：启动补跑会连续处理多个小时；若这里只
+    # 排除已用模板，同一天会在候选集缩小时依次抽中其它模板。
+    if today in set(last_used.values()):
+        return None
     candidates: list[tuple[int, LifeTemplate]] = []
     for tpl in load_templates():
         if not _stage_allows(tpl, stage):
@@ -298,7 +302,7 @@ def choose_life_event(user_id: str, now: datetime, *, energy: int | None = None,
 def commit_life_event(user_id: str, tpl: LifeTemplate, now: datetime) -> dict | None:
     """把选中的模板落成 character_life_events(kind='outing')，一次性扣能量。
 
-    幂等：同日同模板唯一键；成功返回事件 payload，失败/重复返回 None。
+    幂等：同一用户同日最多一个生活模板；成功返回事件 payload，失败/重复返回 None。
     """
     from . import schedule
     from .userdb import db
@@ -314,6 +318,13 @@ def commit_life_event(user_id: str, tpl: LifeTemplate, now: datetime) -> dict | 
         "output_kind": tpl.output_kind,
         "energy_cost": tpl.energy_cost,
     }
+    already_committed = db.conn.execute(
+        "SELECT 1 FROM character_life_events WHERE user_id=? AND occurrence=? "
+        "AND block_id LIKE 'lt-%' LIMIT 1",
+        (user_id, local_date.isoformat()),
+    ).fetchone()
+    if already_committed:
+        return None
     ok = schedule.record_life_event(
         user_id, tpl.id, local_date.isoformat(), tpl.output_kind, payload,
         occurred, datetime.now().isoformat(timespec="seconds"),
