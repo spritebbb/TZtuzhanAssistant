@@ -2043,10 +2043,21 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     reply = _apply_reply_plugins(reply, ephemeral=ephemeral)
 
     if hygiene_enabled:
-        from .output_hygiene import inspect_reply
+        from .output_hygiene import RULE_VERSION, inspect_reply
 
         assert hygiene_ctx is not None
         checked = inspect_reply(reply, context=hygiene_ctx)
+        try:
+            from .telemetry import record_current
+
+            record_current(
+                "output_checked",
+                source_ids=[f"rule:{rule}" for rule in checked.rule_ids[:3]],
+                rule_version=RULE_VERSION,
+                outcome=checked.action,
+            )
+        except Exception:
+            logger.warning("[telemetry] output_checked 记录失败")
         if checked.action == "rewrite":
             # P3-05B 统计：规则失败计数（只记规则名，不记正文）
             try:

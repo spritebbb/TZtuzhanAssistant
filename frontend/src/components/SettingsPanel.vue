@@ -238,6 +238,7 @@ const flags = ref<Record<string, boolean>>({})
 const flagLabels = ref<Record<string, string>>({})
 const flagBusy = ref('')
 const flagMsg = ref('')
+const telemetryClearBusy = ref(false)
 
 const flagOrder: string[] = ['output_hygiene_enabled', 'context_registry_enabled', 'profile_enabled']
 const flagList = computed<FlagInfo[]>(() =>
@@ -281,6 +282,22 @@ async function toggleFlag(key: string) {
     flagMsg.value = '✗ ' + ((e as Error).message || e)
   } finally {
     flagBusy.value = ''
+  }
+}
+
+async function clearTelemetry() {
+  if (!confirm('清除当前人格的本地诊断统计？')) return
+  telemetryClearBusy.value = true
+  flagMsg.value = ''
+  try {
+    const r = await apiFetch('/api/telemetry', { method: 'DELETE' })
+    const d = await r.json()
+    if (!r.ok || !d.ok) throw new Error(d.error || '清理失败')
+    flagMsg.value = `✓ 已清除 ${d.removed || 0} 条本地诊断记录`
+  } catch (e: unknown) {
+    flagMsg.value = '✗ ' + ((e as Error).message || e)
+  } finally {
+    telemetryClearBusy.value = false
   }
 }
 
@@ -483,6 +500,12 @@ function confirmLabel(c: string): string {
           <div v-for="f in flagList" :key="f.key" class="srow flag-row">
             <label :title="f.key">{{ f.label }}</label>
             <input type="checkbox" :checked="flags[f.key]" :disabled="flagBusy === f.key" @change="toggleFlag(f.key)" />
+          </div>
+          <div class="srow flag-row">
+            <label>本地诊断数据只保存在本机，可随时删除</label>
+            <button class="small-btn" :disabled="telemetryClearBusy" @click="clearTelemetry">
+              {{ telemetryClearBusy ? '清理中…' : '清除统计' }}
+            </button>
           </div>
           <div v-if="flagMsg" class="mcp-msg" :class="{ err: flagMsg.startsWith('✗') }">{{ flagMsg }}</div>
 
@@ -761,6 +784,9 @@ function confirmLabel(c: string): string {
 /* 功能开关：说明文案较长，label 放宽并允许换行 */
 .flag-row label { width: auto; flex: 1; line-height: 1.45; }
 .flag-row input[type=checkbox] { flex: 0 0 auto; }
+.small-btn { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.small-btn:hover { border-color: var(--primary); color: var(--primary-text); }
+.small-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .plug-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; transition: border-color 0.15s; }
 .plug-item:hover { border-color: var(--border-light); }

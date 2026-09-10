@@ -546,36 +546,53 @@ async def _run_native(
             await _progress({"type": "tool", "name": real_name})
             fingerprint = _call_fingerprint(real_name, filled)
             tool_spec = specs.get(real_name)
+            tool_ok: bool | None = None
+            tool_error_code = ""
             if tool_filter is not None and tool_spec is not None and not tool_filter(tool_spec):
                 # 按需隐藏的工具：模型凭记忆猜名字也不执行（避免绕过可见性）
                 body = structured_tool_error(
                     kind="permission", name=real_name,
                     detail="该工具本轮不可用（未命中触发条件）",
                 )
+                tool_ok = False
+                tool_error_code = "permission"
             elif fingerprint in seen:
                 body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
+                tool_ok = True
             elif call_count >= MAX_TOOL_CALLS:
                 body = "调用上限已用尽，本次未执行"
+                tool_ok = False
+                tool_error_code = "budget_exceeded"
             else:
                 # §17.3 熔断与预算：同签名第 2 次拒执行；总预算超限给结构化错误
                 breaker = guard.check_signature(real_name, filled)
                 budget = None if breaker else guard.check_budget(real_name)
                 if breaker or budget:
                     body = breaker or budget
+                    tool_ok = False
+                    tool_error_code = "budget_exceeded"
                 else:
                     result = await ToolRegistry.execute(real_name, filled)
                     if result.ok:
                         body = result.output or "（工具返回空结果）"
                         guard.record_result(body)
+                        tool_ok = True
                     else:
                         # 结构化错误：不把堆栈/密钥塞回上下文
                         body = structured_tool_error(
                             kind="provider", name=real_name,
                             detail=result.error or "调用失败",
                         )
+                        tool_ok = False
+                        tool_error_code = "provider_error"
                     seen[fingerprint] = body
                     call_count += 1
-            await _progress({"type": "tool_done", "name": real_name})
+            await _progress({
+                "type": "tool_done",
+                "name": real_name,
+                "ok": tool_ok,
+                "error_code": tool_error_code,
+            })
             from ..core.external_content import EXTERNAL_DATA_POLICY, wrap_untrusted
 
             work.append({
