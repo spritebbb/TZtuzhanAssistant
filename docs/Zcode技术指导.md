@@ -1288,6 +1288,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_latency_budgets.py ;; .venv/Scripts/
 VERIFY: npm --prefix frontend test ;; npm --prefix frontend run test:e2e ;; npm --prefix frontend run build
 ```
 
+执行：Codex，2026-09-10。Q5 已由 `c44e151` 落地：统一普通/紧急对话框的初始焦点、Tab 闭环、Escape 关闭与焦点返回；补齐当前设置、任务、聊天、记忆恢复等入口的语义名称与错误播报；原因和关系展示改为一行摘要、最多两条来源且不暴露等级/数字/进度；增加深浅主题对比度、200% 缩放、360px 窄屏和 reduced-motion 自动验收。验证结果：前端单元测试 23 文件 105/105，Playwright 10/10，生产构建通过。设备撤销与多人格房间选择依赖批次15的 D 类功能入口，当前尚不存在，本次不计为已覆盖。
+
 ## 21. 外部条件较重路线的最终工程规格
 
 ### 21.1 P3-04 本机解锁、恢复口令与全数据加密（用户已确认）
