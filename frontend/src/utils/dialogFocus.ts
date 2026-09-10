@@ -9,9 +9,22 @@ const FOCUSABLE = [
 ].join(',')
 
 function isAvailable(element: HTMLElement): boolean {
-  if (element.hidden || element.getAttribute('aria-hidden') === 'true') return false
+  if (element.matches(':disabled') || element.closest('[hidden], [inert], [aria-hidden="true"]')) {
+    return false
+  }
   const overlay = element.closest<HTMLElement>('.overlay')
-  return !overlay || overlay.classList.contains('show')
+  if (overlay && !overlay.classList.contains('show')) return false
+  if (typeof window === 'undefined') return true
+
+  let current: HTMLElement | null = element
+  while (current) {
+    const style = window.getComputedStyle(current)
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+      return false
+    }
+    current = current.parentElement
+  }
+  return true
 }
 
 export function activeDialog(root: ParentNode = document): HTMLElement | null {
