@@ -76,7 +76,7 @@ watch(() => props.show, (show) => { if (show) void load() })
           <span class="eyebrow">AGENT TOUR</span>
           <h2>{{ tour?.title || '能力演示' }}</h2>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭能力演示" @click="emit('close')">×</button>
       </header>
       <p class="intro">{{ tour?.intro || '想看我会什么？一步步做给你看。' }}</p>
       <p class="hint">点「发这句」会把原话填进输入框，按 Enter 发送即可；标注「界面操作」的步骤按说明点对应按钮。每步都会真实执行。</p>

@@ -97,13 +97,13 @@ watch(() => props.show, show => { if (show) void load() })
           <div class="ranges" aria-label="统计范围">
             <button v-for="value in ([7, 30, 90] as const)" :key="value" :class="{ active: range === value }" @click="setRange(value)">{{ value }}天</button>
           </div>
-          <button class="close" title="关闭" @click="emit('close')">×</button>
+          <button class="close" aria-label="关闭成长总览" @click="emit('close')">×</button>
         </div>
       </header>
 
       <div class="content">
         <p v-if="loading && !dashboard" class="empty">正在把散落的日子捡起来…</p>
-        <p v-else-if="error" class="empty error">{{ error }}</p>
+        <p v-else-if="error" class="empty error" role="alert">{{ error }}</p>
         <template v-else-if="dashboard">
           <div class="current-grid">
             <article class="current-card affection-card">

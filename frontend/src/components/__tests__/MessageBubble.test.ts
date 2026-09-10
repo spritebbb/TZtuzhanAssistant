@@ -29,6 +29,26 @@ function baseExplanation(memories: NonNullable<Message['explanation']>['memories
 }
 
 describe('MessageBubble 记忆生命周期露出（G01/F07）', () => {
+  it('默认只显示克制摘要，展开后仍不显示关系和状态数字', async () => {
+    const wrapper = mount(MessageBubble, {
+      props: {
+        message: botMessage(baseExplanation([{ kind: '长期事实', text: '用户喜欢猫' }])),
+        isStreamingLast: false,
+        ttsKey: 'summary-1',
+      },
+    })
+    const toggle = wrapper.get('.whybtn')
+    expect(toggle.text()).toContain('原因与来源 · 熟悉 · 平静 · 参考 1 条记忆')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[role="region"][aria-label="原因与来源详情"]').exists()).toBe(false)
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get(`#${toggle.attributes('aria-controls')}`).attributes('role')).toBe('region')
+    expect(wrapper.text()).not.toContain('好感 40')
+    expect(wrapper.text()).not.toContain('平静 60')
+    expect(wrapper.text()).not.toContain('精力 80')
+  })
+
   it('展示保留说明与「你确认过」标记，且不出现评分', async () => {
     const wrapper = mount(MessageBubble, {
       props: {

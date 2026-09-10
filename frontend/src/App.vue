@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, onUnmounted, computed } from 'vue'
+import { onMounted, ref, watch, onUnmounted, computed, nextTick } from 'vue'
 import SessionList from './components/SessionList.vue'
 import ChatView from './components/ChatView.vue'
 import Portrait from './components/Portrait.vue'
@@ -19,6 +19,7 @@ import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
 import { useFocusMode } from './utils/focusMode'
 import { refreshVisualState, startVisualState, stopVisualState, switchVisualPersona, visualRecentEvents, visualState, visualQuiet } from './state/visualState'
+import { activeDialog, focusFirst, trapDialogTab } from './utils/dialogFocus'
 
 // M3.2 专注陪伴：全局计时与安静模式（body.focus-mode），应用存活期内持续对表
 const focusMode = useFocusMode()
@@ -155,24 +156,58 @@ function toggleTheme() {
 watch(theme, (t) => applyTheme(t, false), { immediate: false })
 
 // === 键盘快捷键 ===
+const dialogFlags = () => [
+  settingsOpen.value, agentOpen.value, diaryOpen.value, knowledgeOpen.value,
+  memoryOpen.value, cornerOpen.value, usageOpen.value, dashboardOpen.value,
+  activityOpen.value, personaOpen.value, moreOpen.value, tourOpen.value,
+  resetOpen.value,
+]
+let focusBeforeDialog: HTMLElement | null = null
+
+watch(dialogFlags, async (next, previous) => {
+  const hasDialog = next.some(Boolean)
+  const hadDialog = previous.some(Boolean)
+  if (hasDialog && !hadDialog) {
+    focusBeforeDialog = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  }
+  if (hasDialog) {
+    await nextTick()
+    focusFirst(activeDialog())
+  } else if (hadDialog) {
+    await nextTick()
+    focusBeforeDialog?.focus()
+    focusBeforeDialog = null
+  }
+}, { flush: 'post' })
+
+function closeDialogs() {
+  settingsOpen.value = false
+  agentOpen.value = false
+  diaryOpen.value = false
+  memoryOpen.value = false
+  usageOpen.value = false
+  dashboardOpen.value = false
+  activityOpen.value = false
+  cornerOpen.value = false
+  knowledgeOpen.value = false
+  personaOpen.value = false
+  moreOpen.value = false
+  tourOpen.value = false
+  closeResetConfirm()
+}
+
 function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Tab' && trapDialogTab(e, activeDialog())) return
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
     e.preventDefault()
     toggleTheme()
   }
-  if (e.key === 'Escape') {
-    settingsOpen.value = false
-    agentOpen.value = false
-    diaryOpen.value = false
-    memoryOpen.value = false
-    usageOpen.value = false
-    dashboardOpen.value = false
-    activityOpen.value = false
-    cornerOpen.value = false
-    knowledgeOpen.value = false
+  if (e.key === 'Escape' && dialogFlags().some(Boolean)) {
+    e.preventDefault()
+    closeDialogs()
     sidebarOpen.value = false
-    personaOpen.value = false
-    moreOpen.value = false
   }
 }
 
@@ -394,10 +429,10 @@ onUnmounted(() => {
         </div>
         <div v-else class="header-right compact-actions">
           <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">活动</button>
-          <button class="icon-btn" aria-haspopup="dialog" :aria-expanded="moreOpen" title="更多功能" @click="moreOpen = !moreOpen">更多</button>
+          <button class="icon-btn" aria-haspopup="dialog" aria-controls="more-panel" :aria-expanded="moreOpen" title="更多功能" @click="moreOpen = !moreOpen">更多</button>
         </div>
       </header>
-      <div v-if="compactUi && moreOpen" class="more-panel glass" role="dialog" aria-label="更多功能">
+      <div v-if="compactUi && moreOpen" id="more-panel" class="more-panel glass" role="dialog" aria-label="更多功能">
         <label>查找功能<input v-model="moreQuery" autofocus placeholder="日记、书架、设置…" /></label>
         <div class="more-grid">
           <button v-for="tool in filteredTools" :key="tool.id" @click="useMoreTool(tool.id)">
@@ -428,8 +463,8 @@ onUnmounted(() => {
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">
-      <div class="modal reset-modal">
-        <div class="modal-title">重新开始？</div>
+      <div class="modal reset-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+        <div id="reset-title" class="modal-title">重新开始？</div>
         <div class="modal-body">
           <p>这会让{{ activePersona.name }}<b>忘记你积累的一切</b>：</p>
           <ul>
@@ -449,7 +484,7 @@ onUnmounted(() => {
           </p>
         </div>
         <div class="modal-actions">
-          <button class="btn ghost" :disabled="resetting" @click="closeResetConfirm">取消</button>
+          <button class="btn ghost" data-autofocus :disabled="resetting" @click="closeResetConfirm">取消</button>
           <button class="btn danger" :disabled="resetting" @click="doReset">{{ resetting ? '重置中…' : '确认重置' }}</button>
         </div>
       </div>

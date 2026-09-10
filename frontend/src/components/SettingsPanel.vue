@@ -408,8 +408,8 @@ function confirmLabel(c: string): string {
 
 <template>
   <Teleport to="body">
-    <div class="overlay" :class="{ show }" @click.self="emit('close')">
-      <div class="settings glass-strong">
+    <div class="overlay" :class="{ show }" :aria-hidden="!show" @click.self="emit('close')">
+      <section class="settings glass-strong" role="dialog" aria-modal="true" aria-label="设置">
         <div class="s-head">
           <div class="s-head-left">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -418,7 +418,7 @@ function confirmLabel(c: string): string {
             </svg>
             <span>设置</span>
           </div>
-          <button class="s-x" @click="emit('close')">
+          <button class="s-x" aria-label="关闭设置" @click="emit('close')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -430,67 +430,67 @@ function confirmLabel(c: string): string {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M8 12h8"/><path d="M10 16h4"/><path d="M3 20h18"/><path d="M12 22v-6"/></svg>
             LLM（对话模型）
           </div>
-          <div class="srow"><label>API 地址</label><input v-model="form.llm_base_url" type="text" :placeholder="config.llm_base_url || ''" /></div>
-          <div class="srow"><label>模型</label><input v-model="form.llm_model" type="text" :placeholder="config.llm_model || 'deepseek-chat'" /></div>
-          <div class="srow"><label>温度</label><input v-model="form.llm_temperature" type="number" step="0.1" min="0" max="2" :placeholder="String(config.llm_temperature ?? 0.8)" /></div>
-          <div class="srow"><label>最大 tokens</label><input v-model="form.llm_max_tokens" type="number" min="1" step="50" :placeholder="String(config.llm_max_tokens ?? 500)" /></div>
-          <div class="srow"><label>API Key</label><input v-model="form.llm_api_key" type="password" :placeholder="config.llm_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
+          <div class="srow"><label>API 地址</label><input v-model="form.llm_base_url" type="text" aria-label="对话模型 API 地址" :placeholder="config.llm_base_url || ''" /></div>
+          <div class="srow"><label>模型</label><input v-model="form.llm_model" type="text" aria-label="对话模型名称" :placeholder="config.llm_model || 'deepseek-chat'" /></div>
+          <div class="srow"><label>温度</label><input v-model="form.llm_temperature" type="number" aria-label="对话模型温度" step="0.1" min="0" max="2" :placeholder="String(config.llm_temperature ?? 0.8)" /></div>
+          <div class="srow"><label>最大 tokens</label><input v-model="form.llm_max_tokens" type="number" aria-label="对话模型最大 tokens" min="1" step="50" :placeholder="String(config.llm_max_tokens ?? 500)" /></div>
+          <div class="srow"><label>API Key</label><input v-model="form.llm_api_key" type="password" aria-label="对话模型 API Key" :placeholder="config.llm_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
             联网搜索
           </div>
-          <div class="srow"><label>启用搜索</label><input v-model="form.search_enabled" type="checkbox" /></div>
+          <div class="srow"><label>启用搜索</label><input v-model="form.search_enabled" type="checkbox" aria-label="启用联网搜索" /></div>
           <div class="srow">
             <label>引擎</label>
-            <select v-model="form.search_engine">
+            <select v-model="form.search_engine" aria-label="搜索引擎">
               <option value="bing">Bing</option>
               <option value="ddg">DuckDuckGo</option>
               <option value="bocha">博查</option>
             </select>
           </div>
-          <div class="srow"><label>搜索 API Key</label><input v-model="form.search_api_key" type="password" :placeholder="config.search_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
+          <div class="srow"><label>搜索 API Key</label><input v-model="form.search_api_key" type="password" aria-label="搜索 API Key" :placeholder="config.search_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
             图像生成
           </div>
-          <div class="srow"><label>API 地址</label><input v-model="form.image_base_url" type="text" :placeholder="config.image_base_url || ''" /></div>
-          <div class="srow"><label>模型</label><input v-model="form.image_model" type="text" :placeholder="config.image_model || 'Qwen/Qwen-Image'" /></div>
-          <div class="srow"><label>API Key</label><input v-model="form.image_api_key" type="password" :placeholder="config.image_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
+          <div class="srow"><label>API 地址</label><input v-model="form.image_base_url" type="text" aria-label="图像生成 API 地址" :placeholder="config.image_base_url || ''" /></div>
+          <div class="srow"><label>模型</label><input v-model="form.image_model" type="text" aria-label="图像生成模型名称" :placeholder="config.image_model || 'Qwen/Qwen-Image'" /></div>
+          <div class="srow"><label>API Key</label><input v-model="form.image_api_key" type="password" aria-label="图像生成 API Key" :placeholder="config.image_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             识图（视觉模型）
           </div>
-          <div class="srow"><label>API 地址</label><input v-model="form.vision_base_url" type="text" :placeholder="config.vision_base_url || '留空则用 LLM 端点'" /></div>
-          <div class="srow"><label>模型</label><input v-model="form.vision_model" type="text" :placeholder="config.vision_model || 'Qwen/Qwen2.5-VL-72B-Instruct'" /></div>
-          <div class="srow"><label>API Key</label><input v-model="form.vision_api_key" type="password" :placeholder="config.vision_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
+          <div class="srow"><label>API 地址</label><input v-model="form.vision_base_url" type="text" aria-label="视觉模型 API 地址" :placeholder="config.vision_base_url || '留空则用 LLM 端点'" /></div>
+          <div class="srow"><label>模型</label><input v-model="form.vision_model" type="text" aria-label="视觉模型名称" :placeholder="config.vision_model || 'Qwen/Qwen2.5-VL-72B-Instruct'" /></div>
+          <div class="srow"><label>API Key</label><input v-model="form.vision_api_key" type="password" aria-label="视觉模型 API Key" :placeholder="config.vision_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
             语音
           </div>
-          <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" @change="onTtsAutoPlayChange" /></div>
+          <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" aria-label="自动朗读回复" @change="onTtsAutoPlayChange" /></div>
           <div class="setting-hint">手动朗读按钮始终显示在{{ props.personaName || '助手' }}的消息下方；自动朗读只对新回复生效</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             其他
           </div>
-          <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" :placeholder="config.mood_city || '留空不查天气'" /></div>
-          <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" /></div>
+          <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" aria-label="心情城市" :placeholder="config.mood_city || '留空不查天气'" /></div>
+          <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" aria-label="启用语义检索" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
             主动互动
           </div>
           <div class="setting-hint">初识阶段仍不会主动发消息；以下数值保存后立即生效</div>
-          <div class="srow"><label>新用户适应期（天）</label><input v-model="form.proactive_new_user_days" type="number" min="1" max="30" step="1" /></div>
-          <div class="srow"><label>新用户静默（小时）</label><input v-model="form.proactive_new_user_idle_hours" type="number" min="1" max="24" step="1" /></div>
-          <div class="srow"><label>惊喜间隔（天）</label><input v-model="form.proactive_surprise_min_gap_days" type="number" min="1" max="365" step="1" /></div>
-          <div class="srow"><label>惊喜概率（%）</label><input v-model="form.proactive_surprise_chance_percent" type="number" min="0" max="100" step="1" /></div>
-          <div class="srow"><label>惊喜静默（分钟）</label><input v-model="form.proactive_surprise_idle_minutes" type="number" min="15" max="10080" step="15" /></div>
+          <div class="srow"><label>新用户适应期（天）</label><input v-model="form.proactive_new_user_days" type="number" aria-label="新用户适应期天数" min="1" max="30" step="1" /></div>
+          <div class="srow"><label>新用户静默（小时）</label><input v-model="form.proactive_new_user_idle_hours" type="number" aria-label="新用户静默小时数" min="1" max="24" step="1" /></div>
+          <div class="srow"><label>惊喜间隔（天）</label><input v-model="form.proactive_surprise_min_gap_days" type="number" aria-label="惊喜最短间隔天数" min="1" max="365" step="1" /></div>
+          <div class="srow"><label>惊喜概率（%）</label><input v-model="form.proactive_surprise_chance_percent" type="number" aria-label="惊喜概率百分比" min="0" max="100" step="1" /></div>
+          <div class="srow"><label>惊喜静默（分钟）</label><input v-model="form.proactive_surprise_idle_minutes" type="number" aria-label="惊喜前静默分钟数" min="15" max="10080" step="15" /></div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
@@ -499,7 +499,7 @@ function confirmLabel(c: string): string {
           <div class="setting-hint" style="margin-left: 0;">改动立即生效并落盘，无需点「保存」</div>
           <div v-for="f in flagList" :key="f.key" class="srow flag-row">
             <label :title="f.key">{{ f.label }}</label>
-            <input type="checkbox" :checked="flags[f.key]" :disabled="flagBusy === f.key" @change="toggleFlag(f.key)" />
+            <input type="checkbox" :aria-label="f.label" :checked="flags[f.key]" :disabled="flagBusy === f.key" @change="toggleFlag(f.key)" />
           </div>
           <div class="srow flag-row">
             <label>本地诊断数据只保存在本机，可随时删除</label>
@@ -507,7 +507,7 @@ function confirmLabel(c: string): string {
               {{ telemetryClearBusy ? '清理中…' : '清除统计' }}
             </button>
           </div>
-          <div v-if="flagMsg" class="mcp-msg" :class="{ err: flagMsg.startsWith('✗') }">{{ flagMsg }}</div>
+          <div v-if="flagMsg" class="mcp-msg" :class="{ err: flagMsg.startsWith('✗') }" :role="flagMsg.startsWith('✗') ? 'alert' : 'status'">{{ flagMsg }}</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/></svg>
@@ -535,14 +535,14 @@ function confirmLabel(c: string): string {
               <span v-for="t in p.tasks" :key="t" class="arg-chip" title="定时任务">⏱ {{ t }}</span>
               <span v-for="(n, k) in p.hooks" :key="k" class="arg-chip" title="钩子">🪝 {{ k }}×{{ n }}</span>
             </div>
-            <div v-if="p.error" class="plug-err">{{ p.error }}</div>
+            <div v-if="p.error" class="plug-err" role="alert">{{ p.error }}</div>
           </div>
-          <div v-if="pluginMsg" class="mcp-msg" :class="{ err: pluginMsg.startsWith('✗') }">{{ pluginMsg }}</div>
+          <div v-if="pluginMsg" class="mcp-msg" :class="{ err: pluginMsg.startsWith('✗') }" :role="pluginMsg.startsWith('✗') ? 'alert' : 'status'">{{ pluginMsg }}</div>
           <div v-if="pluginSource" class="psrc-mask" @click.self="closeSource">
-            <div class="psrc-box glass-strong">
+            <div class="psrc-box glass-strong" role="dialog" aria-modal="true" :aria-label="`插件源码：${pluginSourceName}`">
               <div class="psrc-head">
                 <span>插件源码 · {{ pluginSourceName }}</span>
-                <button class="plug-btn" @click="closeSource">关闭</button>
+                <button class="plug-btn" autofocus @click="closeSource">关闭</button>
               </div>
               <pre class="psrc-body">{{ pluginSource }}</pre>
             </div>
@@ -564,18 +564,18 @@ function confirmLabel(c: string): string {
             </div>
           </div>
           <div class="mcp-add">
-            <input v-model="mcpName" type="text" placeholder="服务器名称" class="mcp-input" />
-            <input v-model="mcpUrl" type="text" placeholder="https://example.com/mcp（仅支持公网 http/https）" class="mcp-input" />
+            <input v-model="mcpName" type="text" aria-label="MCP 服务器名称" placeholder="服务器名称" class="mcp-input" />
+            <input v-model="mcpUrl" type="text" aria-label="MCP 服务器地址" placeholder="https://example.com/mcp（仅支持公网 http/https）" class="mcp-input" />
             <button class="mcp-btn" :disabled="mcpBusy" @click="addMcpServer">连接</button>
           </div>
-          <div v-if="mcpMsg" class="mcp-msg" :class="{ err: mcpMsg.startsWith('✗') }">{{ mcpMsg }}</div>
+          <div v-if="mcpMsg" class="mcp-msg" :class="{ err: mcpMsg.startsWith('✗') }" :role="mcpMsg.startsWith('✗') ? 'alert' : 'status'">{{ mcpMsg }}</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
             工具审计日志
           </div>
           <div class="audit-bar">
-            <input v-model="auditFilter" type="text" placeholder="按工具/结果关键词过滤…" class="audit-input" @keyup.enter="loadAuditLog" />
+            <input v-model="auditFilter" type="text" aria-label="操作审计筛选" placeholder="按工具/结果关键词过滤…" class="audit-input" @keyup.enter="loadAuditLog" />
             <button class="audit-btn" :disabled="auditBusy" @click="loadAuditLog">刷新</button>
           </div>
           <div v-if="auditBusy" class="audit-empty">加载中…</div>
@@ -605,7 +605,7 @@ function confirmLabel(c: string): string {
           <button class="btn ghost" :disabled="saving" @click="emit('close')">取消</button>
           <button class="btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
         </div>
-      </div>
+      </section>
     </div>
   </Teleport>
 </template>

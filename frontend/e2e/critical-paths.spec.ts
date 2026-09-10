@@ -17,8 +17,16 @@ async function restoreDefault(request: APIRequestContext) {
 }
 
 async function openApp(page: Page) {
+  await page.route(/\/api\/greeting(?:\?.*)?$/, route => route.fulfill({ json: { ok: true, greeting: null } }))
   await page.goto('/')
-  await expect(page.getByRole('button', { name: /菟菚.*PERSONA/ })).toBeVisible()
+  await expect(page.getByTitle('切换人格')).toBeVisible()
+}
+
+async function openMoreTool(page: Page, name: string | RegExp) {
+  await page.getByTitle('更多功能').click()
+  const menu = page.getByRole('dialog', { name: '更多功能' })
+  await expect(menu).toBeVisible()
+  await menu.getByRole('button', { name }).click()
 }
 
 test.afterEach(async ({ request }) => {
@@ -31,14 +39,20 @@ test('opens the application and exposes the companion controls', async ({ page }
   await page.route('**/api/presence', route => route.fulfill({
     json: {
       ok: true,
-      activity: { activity: 'reading', activity_label: '读书', location_label: '小屋' },
+      visual_state: {
+        persona_id: 'default', revision: 1, mood_label: '平静', bond_label: '熟悉',
+        energy_band: 'high', activity_kind: 'reading', presence: 'home', quiet: false,
+        reduced_motion: false, source_time: '2026-09-10T06:00:00+00:00',
+      },
       recent_events: [],
     },
   }))
   await openApp(page)
   await expect(page.getByTitle('一起做点什么')).toBeVisible()
-  await expect(page.getByTitle('成长总览')).toBeVisible()
-  await expect(page.locator('.presence').filter({ hasText: '在小屋读书' })).toBeVisible()
+  await page.getByTitle('更多功能').click()
+  await expect(page.getByRole('dialog', { name: '更多功能' }).getByRole('button', { name: /成长总览/ })).toBeVisible()
+  await expect(page.locator('.presence').filter({ hasText: '陪伴中' })).toBeVisible()
+  await expect(page.locator('.portrait-wrap[data-presence="home"]').first()).toBeVisible()
 })
 
 test('renders a streamed chat reply without calling a real model', async ({ page }) => {
@@ -66,6 +80,76 @@ test('opens and closes the shared-activity panel', async ({ page }) => {
   await expect(page.getByRole('dialog', { name: '一起做点什么' })).toBeHidden()
 })
 
+test('keeps keyboard focus inside dialogs and returns it to the opener', async ({ page }) => {
+  await openApp(page)
+  const more = page.getByTitle('更多功能')
+  await more.focus()
+  await page.keyboard.press('Enter')
+  const menu = page.getByRole('dialog', { name: '更多功能' })
+  await expect(menu).toBeVisible()
+  await expect(menu.getByLabel('查找功能')).toBeFocused()
+  const focusStyle = await menu.getByLabel('查找功能').evaluate(element => {
+    const style = getComputedStyle(element)
+    return { outline: style.outlineStyle, width: Number.parseFloat(style.outlineWidth) }
+  })
+  expect(focusStyle.outline).not.toBe('none')
+  expect(focusStyle.width).toBeGreaterThanOrEqual(2)
+
+  await page.keyboard.press('Shift+Tab')
+  await expect(menu.getByRole('button', { name: /重新开始/ })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(menu.getByLabel('查找功能')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(more).toBeFocused()
+
+  await more.press('Enter')
+  await menu.getByRole('button', { name: /设置/ }).click()
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await expect(settings).toBeVisible()
+  await expect(settings.getByRole('button', { name: '关闭设置' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(settings).toBeHidden()
+  await expect(more).toBeFocused()
+})
+
+test('honors reduced motion and keeps the settings dialog usable at 200 percent scale', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 640, height: 450 })
+  await openApp(page)
+  await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
+
+  await openMoreTool(page, /设置/)
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await expect(settings).toBeVisible()
+  const bounds = await settings.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(640)
+  expect(bounds!.y).toBeGreaterThanOrEqual(0)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(450)
+  await expect(settings.getByLabel('对话模型 API 地址')).toBeVisible()
+  const duration = await settings.evaluate(element => getComputedStyle(element).animationDuration)
+  expect(Number.parseFloat(duration)).toBeLessThanOrEqual(0.00001)
+})
+
+test('keeps the settings dialog usable on a narrow screen', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 640 })
+  await openApp(page)
+  await openMoreTool(page, /设置/)
+
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await expect(settings).toBeVisible()
+  const bounds = await settings.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(360)
+  expect(bounds!.y).toBeGreaterThanOrEqual(0)
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(640)
+  await expect(settings.getByLabel('对话模型 API 地址')).toBeVisible()
+  expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
 test('shows a sealed future letter without exposing its body', async ({ page, request }) => {
   const secret = 'E2E 密封正文：在未来到来前不该出现在页面里'
   const created = await request.post('/api/future-letters', {
@@ -80,7 +164,7 @@ test('shows a sealed future letter without exposing its body', async ({ page, re
   const letterId = (await created.json()).letter.id as number
 
   await openApp(page)
-  await page.getByTitle('我们的角落（一起留下的东西）').click()
+  await openMoreTool(page, /我们的角落/)
   const dialog = page.getByRole('dialog', { name: '我们的角落' })
   await expect(dialog.getByText('给 2099 年的我们')).toBeVisible()
   await expect(dialog.getByText('封存中')).toBeVisible()
@@ -103,7 +187,7 @@ test('shows a dual perspective page with both sides visible', async ({ page, req
   const pageId = (await created.json()).item.id as number
 
   await openApp(page)
-  await page.getByTitle('我们的角落（一起留下的东西）').click()
+  await openMoreTool(page, /我们的角落/)
   const dialog = page.getByRole('dialog', { name: '我们的角落' })
   await expect(dialog.getByText('E2E 双视角：那场雨')).toBeVisible()
   await expect(dialog.getByText('E2E 用户版本：雨里我们只走了五十米。')).toBeVisible()
@@ -127,7 +211,7 @@ test('imports and activates an isolated persona through the real API', async ({ 
   expect(body.persona.name).toBe('Luna E2E')
   expect(body.persona.id).not.toBe('default')
 
-  await page.goto('/')
+  await openApp(page)
   await expect(page.getByRole('button', { name: /Luna E2E.*PERSONA/ })).toBeVisible()
 })
 

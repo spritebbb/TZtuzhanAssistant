@@ -610,7 +610,7 @@ function isActive(i: number): boolean {
     <div v-if="showArchiveHint" class="archive-hint">
       <span class="ah-text">这段对话已经挺长了，要不要先归档存档？</span>
       <button class="ah-btn" :disabled="isGenerating" :title="isGenerating ? '正在生成回复，暂不能归档' : ''" @click="emit('request-archive')">归档当前对话</button>
-      <button class="ah-x" title="关闭" @click="dismissArchiveHint = true" v-if="!dismissArchiveHint">✕</button>
+      <button class="ah-x" aria-label="关闭归档提示" @click="dismissArchiveHint = true" v-if="!dismissArchiveHint">✕</button>
     </div>
     <!-- 对话内搜索工具条 -->
     <div v-if="searchOpen" class="searchbar glass">
@@ -627,7 +627,7 @@ function isActive(i: number): boolean {
       <span class="match-sum">{{ matchSummary }}</span>
       <button class="search-nav" title="上一个 (Shift+Enter)" @click="jumpMatch(-1)">↑</button>
       <button class="search-nav" title="下一个 (Enter)" @click="jumpMatch(1)">↓</button>
-      <button class="search-x" title="关闭 (Esc)" @click="closeSearch">✕</button>
+      <button class="search-x" aria-label="关闭会话搜索" @click="closeSearch">✕</button>
     </div>
 
     <div class="chat" ref="chatEl">
@@ -650,9 +650,9 @@ function isActive(i: number): boolean {
           <div class="t">{{ props.personaName || '人格助手' }}</div>
           <div class="t-sub">我是{{ props.personaName || '你的助手' }}。说说看？</div>
           <div class="chips">
-            <span class="hint-chip" @click="input = '帮我查一下今天襄阳的天气'">查天气</span>
-            <span class="hint-chip" @click="input = '帮我画一张好看的图'">画张图</span>
-            <span class="hint-chip" @click="input = '聊聊菟丝子吧'">聊菟丝子</span>
+            <button class="hint-chip" @click="input = '帮我查一下今天襄阳的天气'">查天气</button>
+            <button class="hint-chip" @click="input = '帮我画一张好看的图'">画张图</button>
+            <button class="hint-chip" @click="input = '聊聊菟丝子吧'">聊菟丝子</button>
           </div>
         </div>
       </div>

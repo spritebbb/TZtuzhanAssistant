@@ -301,19 +301,19 @@ function dangerLabel(d: string): string {
 
 <template>
   <Teleport to="body">
-    <div class="overlay" :class="{ show }" @click.self="emit('close')">
-      <div class="agent-panel glass-strong">
+    <div class="overlay" :class="{ show }" :aria-hidden="!show" @click.self="emit('close')">
+      <section class="agent-panel glass-strong" role="dialog" aria-modal="true" aria-label="任务代理">
         <div class="a-head">
           <div class="a-head-left">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
             <span>任务代理</span>
           </div>
-          <button class="a-x" @click="emit('close')">✕</button>
+          <button class="a-x" aria-label="关闭任务代理" @click="emit('close')">✕</button>
         </div>
         <div class="a-body">
           <!-- 新建任务 -->
           <div class="a-create">
-            <input v-model="objective" type="text" placeholder="输入任务目标，例如：帮我打开记事本写个文件并截图" class="a-input" @keyup.enter="createTask" />
+            <input v-model="objective" type="text" aria-label="任务目标" placeholder="输入任务目标，例如：帮我打开记事本写个文件并截图" class="a-input" @keyup.enter="createTask" />
             <button class="a-btn" :disabled="busy || !objective.trim()" @click="createTask">生成计划</button>
           </div>
 
@@ -387,9 +387,9 @@ function dangerLabel(d: string): string {
             </div>
             <div v-if="current.result" class="a-result">{{ current.result }}</div>
           </div>
-          <div v-if="msg" class="a-msg" :class="{ err: msg.startsWith('✗') }">{{ msg }}</div>
+          <div v-if="msg" class="a-msg" :class="{ err: msg.startsWith('✗') }" :role="msg.startsWith('✗') ? 'alert' : 'status'">{{ msg }}</div>
         </div>
-      </div>
+      </section>
     </div>
   </Teleport>
 </template>

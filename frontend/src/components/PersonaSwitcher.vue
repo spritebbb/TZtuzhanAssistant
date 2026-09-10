@@ -153,7 +153,7 @@ watch(() => props.show, value => { if (value) void load() })
             <button class="save" :disabled="!!busy" @click="saveSettings">{{ busy === 'save' ? '保存中…' : '保存当前人格设置' }}</button>
           </div>
           <p v-if="disabled" class="warning">正在生成回复，结束后才能安全切换人格。</p>
-          <p v-if="error" class="error">{{ error }}</p>
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
           <p class="footnote">人格卡及设置保存在 data/personas；聊天、记忆和知识库使用独立命名空间，不会互相串用。</p>
         </div>
       </section>

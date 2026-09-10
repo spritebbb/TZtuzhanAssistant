@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, computed } from 'vue'
 import { apiFetch } from '../api'
 import { listArchives, getArchive, searchArchives as apiSearchArchives, type ArchiveInfo, type Message, type ArchiveDetail, type ArchiveSearchResult } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
@@ -17,6 +17,8 @@ const props = defineProps<{
 
 const archives = ref<ArchiveInfo[]>([])
 const viewing = ref<ArchiveInfo | null>(null)
+const viewerClose = ref<HTMLButtonElement | null>(null)
+let viewerTrigger: HTMLElement | null = null
 const viewingMessages = ref<Message[]>([])
 const mood = ref({ value: 60, label: '平淡', emoji: '🌱' })
 
@@ -93,14 +95,22 @@ async function refreshMood() {
 }
 
 async function viewArchive(a: ArchiveInfo) {
+  viewerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   viewing.value = a
   const detail = await getArchive(a.id)
   viewingMessages.value = detail?.messages ?? []
+  await nextTick()
+  viewerClose.value?.focus()
 }
 
 function closeView() {
   viewing.value = null
   viewingMessages.value = []
+  void nextTick(() => viewerTrigger?.focus())
+}
+
+function onViewerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && viewing.value) closeView()
 }
 
 function fmtTime(ts: number): string {
@@ -113,10 +123,12 @@ onMounted(() => {
   load()
   // 设置保存后（mood_city 等会影响心情）刷新侧栏心情，避免状态灯与能力脱节
   window.addEventListener('tztuzhan:config-saved', refreshMood)
+  document.addEventListener('keydown', onViewerKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('tztuzhan:config-saved', refreshMood)
+  document.removeEventListener('keydown', onViewerKeydown)
 })
 
 defineExpose({ load })
@@ -211,23 +223,23 @@ defineExpose({ load })
     <!-- 底部 -->
     <div class="foot">
       <span class="foot-text">归档 · 本机 SQLite</span>
-      <span class="settings-link" @click="emit('open-settings')">
+      <button class="settings-link" @click="emit('open-settings')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
         设置
-      </span>
+      </button>
     </div>
 
     <!-- 归档详情浮层 -->
     <div v-if="viewing" class="viewer-mask" @click.self="closeView">
-      <div class="viewer glass">
+      <div class="viewer glass" role="dialog" aria-modal="true" :aria-label="`归档对话：${viewing.title}`">
         <div class="viewer-head">
           <span class="viewer-title">{{ viewing.title }}</span>
           <span class="viewer-time">{{ fmtTime(viewing.created_at) }}</span>
           <a class="viewer-export" :href="`/api/keepsake/${viewing.id}`" target="_blank" rel="noopener" title="导出纪念册（可打印为 PDF）">纪念册</a>
-          <button class="viewer-close" @click="closeView">✕</button>
+          <button ref="viewerClose" class="viewer-close" aria-label="关闭归档对话" @click="closeView">✕</button>
         </div>
         <div class="viewer-body">
           <div v-if="!viewingMessages.length" class="viewer-empty">（无内容）</div>
@@ -519,6 +531,9 @@ defineExpose({ load })
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   transition: all 0.15s ease;
+  border: 0;
+  background: transparent;
+  font: inherit;
 }
 .settings-link:hover { background: var(--primary-soft); }
 

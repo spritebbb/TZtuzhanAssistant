@@ -736,7 +736,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           <h2>一起做点什么</h2>
           <p>共读、专注、写故事，也把想做成的事一步步留在这里</p>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭活动面板" @click="emit('close')">×</button>
       </header>
 
       <div class="body">

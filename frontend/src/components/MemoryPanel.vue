@@ -357,7 +357,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
           <span class="eyebrow">WHAT SHE REMEMBERS</span>
           <h2>{{ props.personaName || '助手' }}记住的事</h2>
         </div>
-        <button class="close" title="关闭" @click="emit('close')">×</button>
+        <button class="close" aria-label="关闭记忆面板" @click="emit('close')">×</button>
       </header>
       <p class="hint">她记错的可以改、可以删——改动立刻生效，下次聊天她就按新的记。</p>
       <div class="tab-row">
@@ -386,7 +386,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
           </div>
           <label class="seal-choice"><input v-model="sealLetter" type="checkbox">请{{ props.personaName || '她' }}写一封告别信</label>
           <p v-if="sealTotal !== null" class="restore-summary">将收藏 {{ sealTotal }} 条真实记录</p>
-          <p v-if="sealError" class="restore-error">{{ sealError }}</p>
+          <p v-if="sealError" class="restore-error" role="alert">{{ sealError }}</p>
           <p v-if="sealNotice" class="restore-notice">{{ sealNotice }}</p>
           <div class="seal-actions">
             <button class="reset-btn" :disabled="!sealSelected.length" @click="runSealPreview">看看会收藏什么</button>
@@ -411,7 +411,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
               <template v-if="restorePreview.source_user_id">，来自「{{ restorePreview.source_user_id }}」</template>
             </p>
           </template>
-          <p v-for="message in restoreErrors" :key="message" class="restore-error">{{ message }}</p>
+          <p v-for="message in restoreErrors" :key="message" class="restore-error" role="alert">{{ message }}</p>
           <p v-if="restoreNotice" class="restore-notice">{{ restoreNotice }}</p>
           <button
             v-if="restorePreview?.ok"
@@ -456,7 +456,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
       </div>
       <div v-else class="entries">
         <p v-if="loading" class="empty">正在翻看{{ props.personaName || '助手' }}的记忆…</p>
-        <p v-else-if="error" class="empty">{{ error }}</p>
+        <p v-else-if="error" class="empty" role="alert">{{ error }}</p>
         <template v-else>
           <article v-for="fact in facts" :key="fact.id" :class="{ conflict: fact.status === 'pending_confirmation' }">
             <template v-if="fact.status === 'pending_confirmation'">
