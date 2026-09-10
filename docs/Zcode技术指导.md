@@ -1263,10 +1263,12 @@ VERIFY: .venv/Scripts/python.exe -m pytest tests/security -q ;; .venv/Scripts/py
 指标采用有界日聚合，默认保留30天；用户关闭统计后停止新记录并允许清理，安全错误计数可保留无内容最小值。临时轮只在内存计时，结束丢弃。日志落盘轮转且纳入加密数据目录策略；错误爆发只提示本机，不自动上传。
 
 ```text
-VERIFY: .venv/Scripts/python.exe tests/test_observability.py ;; .venv/Scripts/python.exe tests/test_experience_metrics.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
+VERIFY: .venv/Scripts/python.exe tests/test_observability.py ;; .venv/Scripts/python.exe tests/test_persona_evolution.py ;; .venv/Scripts/python.exe tests/test_ephemeral_privacy.py
 ```
 
 ### 20.4 Q4 性能、迁移与故障恢复
+
+> 实施：Codex，2026-09-10 完成（`7844213`、`a6c8c21`、`b8a3134`）。修复 `time_tick` 认领 SQL 的作用域条件优先级和后台任务迟到 worker 覆盖新租约的问题，开放问题任务同步采用 owner 校验；跨进程 tick 以合法稳定的 `job_run_id` 记录开始/结束。仓库保留 v40 去敏 fixture，验证 v40→v41 数据回填、幂等升级、升级前快照、截断目标恢复及升级后 reset。固定本地压测实测编译/输出过滤 p95 约 0.21ms、1000 条 registry 候选约 0.80ms、2 万行索引查询约 0.03ms；这些数字只代表本机自身开销，不代表真实模型或网络延迟。
 
 新增 `tests/test_latency_budgets.py`、`test_old_database_upgrade.py`、`test_job_recovery.py`。延迟测试用固定 fake provider 测自身开销：普通非工具回复增加的编译/过滤 p95≤100ms，registry 1000条检索 p95≤80ms，UI 状态切换无阻塞网络；真实模型延迟另报，不混进本地预算。数据库查询用真实规模合成数据和 query plan 检查必要索引。
 
