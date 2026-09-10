@@ -10,6 +10,8 @@ import time
 import uuid
 from pathlib import Path
 
+from ..storage.connect import connect_database
+
 FORMAT_VERSION = 1
 DB_NAMES = ("bot.db", "sessions.db", "agent_tasks.db")
 RESOURCE_DIRS = ("imgs", "screenshots", "personas", "documents")
@@ -25,7 +27,7 @@ def _sha256(path: Path) -> str:
 
 
 def _integrity(path: Path) -> int:
-    conn = sqlite3.connect(str(path), timeout=10)
+    conn = connect_database(path, timeout=10)
     try:
         row = conn.execute("PRAGMA integrity_check").fetchone()
         if not row or str(row[0]).lower() != "ok":
@@ -37,8 +39,8 @@ def _integrity(path: Path) -> int:
 
 
 def _online_backup(source: Path, target: Path) -> int:
-    source_conn = sqlite3.connect(str(source), timeout=10)
-    target_conn = sqlite3.connect(str(target))
+    source_conn = connect_database(source, timeout=10)
+    target_conn = connect_database(target)
     try:
         source_conn.execute("PRAGMA busy_timeout = 10000")
         source_conn.backup(target_conn)

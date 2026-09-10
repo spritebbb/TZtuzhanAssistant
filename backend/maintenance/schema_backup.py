@@ -7,6 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
+from ..storage.connect import connect_database
+
 
 def schema_version(conn: sqlite3.Connection) -> int:
     """Return ``PRAGMA user_version`` as an integer."""
@@ -23,7 +25,7 @@ def mark_schema_current(conn: sqlite3.Connection, target_version: int) -> None:
 
 
 def _integrity_check(path: Path) -> None:
-    conn = sqlite3.connect(str(path))
+    conn = connect_database(path)
     try:
         row = conn.execute("PRAGMA integrity_check").fetchone()
         if not row or str(row[0]).lower() != "ok":
@@ -49,7 +51,7 @@ def create_pre_upgrade_backup(
     if not database.is_file() or database.stat().st_size == 0:
         return None
 
-    source = sqlite3.connect(str(database), timeout=5)
+    source = connect_database(database, timeout=5)
     try:
         current = schema_version(source)
         if current >= target:
@@ -64,7 +66,7 @@ def create_pre_upgrade_backup(
         folder.mkdir(parents=False, exist_ok=False)
         snapshot = folder / database.name
 
-        target_conn = sqlite3.connect(str(snapshot))
+        target_conn = connect_database(snapshot)
         try:
             source.backup(target_conn)
         finally:
@@ -87,8 +89,8 @@ def restore_sqlite_backup(snapshot: Path, destination: Path) -> Path:
 
     _integrity_check(snapshot)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    source = sqlite3.connect(str(snapshot), timeout=5)
-    target = sqlite3.connect(str(destination))
+    source = connect_database(snapshot, timeout=5)
+    target = connect_database(destination)
     try:
         source.backup(target)
     except Exception:

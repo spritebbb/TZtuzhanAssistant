@@ -22,6 +22,7 @@ from ..core.log import logger
 from ..core.persona import build_system_prompt
 from ..core.llm import chat, chat_native
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
+from ..storage.connect import connect_database
 from ..tools.service import run_tool_round
 
 _DB: Path = config.data_dir / "agent_tasks.db"
@@ -75,8 +76,7 @@ class AgentTask:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB)
-    conn.row_factory = sqlite3.Row
+    conn = connect_database(_DB, row_factory=True)
     conn.execute("PRAGMA journal_mode=WAL")
     # 与 store.py / userdb.py 对齐：设置 busy_timeout，避免 run_task（后台线程）
     # 与 cancel_task / confirm_step（HTTP 请求）独立连接并发读写 WAL 单写者库时

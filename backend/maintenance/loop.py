@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..core.config import config
 from ..core.log import logger
+from ..storage.connect import connect_database
 
 _DATA = config.data_dir
 _SESSIONS_DB = _DATA / "sessions.db"
@@ -47,7 +48,7 @@ AUDIT_LOG_KEEP = 3                   # 轮转保留份数
 def _checkpoint_one(path: Path) -> None:
     """对单个 SQLite 库执行 WAL checkpoint（TRUNCATE 模式）。"""
     try:
-        conn = sqlite3.connect(str(path), timeout=5)
+        conn = connect_database(path, timeout=5)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -98,7 +99,7 @@ def _referenced_image_names() -> set[str]:
             pass
 
     try:
-        conn = sqlite3.connect(str(_SESSIONS_DB), timeout=5)
+        conn = connect_database(_SESSIONS_DB, timeout=5)
         try:
             # 1) 当前会话 messages 表的 image 字段
             rows = conn.execute(
@@ -237,13 +238,12 @@ def clean_old_long_memory(keep: int = LONG_MEMORY_KEEP) -> int:
     只从 unpinned 候选中选；pinned 超过 PINNED_MEMORY_KEEP 仅记计数提示。
     """
     try:
-        conn = sqlite3.connect(str(_BOT_DB), timeout=5)
+        conn = connect_database(_BOT_DB, timeout=5, row_factory=True)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
             # 字典式行访问依赖 Row 工厂（旧实现漏设：rows 非空时 row["user_id"]
             # 直接 TypeError，整个维护周期在清理步骤崩溃，同批的审计日志轮转
             # 也一并被跳过）
-            conn.row_factory = sqlite3.Row
             # pinned 容量观察：超阈值只记不含原文的计数，不改 pinned 状态（B01 契约）
             _report_pinned_overflow(conn)
             # 选出待删行（全局保留最近 keep 条非 pinned 行；pinned 不参与配额）
