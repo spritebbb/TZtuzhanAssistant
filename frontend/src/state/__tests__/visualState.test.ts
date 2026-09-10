@@ -33,3 +33,12 @@ it('drops a late response after persona switch', async () => {
   expect(visualState.value.persona_id).toBe('new')
   expect(visualState.value.revision).toBe(3)
 })
+
+it('switches visible persona synchronously without waiting for the network', () => {
+  vi.mocked(apiFetch).mockImplementation(() => new Promise(() => {}))
+  const pending = switchVisualPersona('instant')
+  expect(visualState.value.persona_id).toBe('instant')
+  expect(visualState.value.revision).toBe(0)
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+  expect(pending).toBeInstanceOf(Promise)
+})
