@@ -25,6 +25,7 @@ from pathlib import Path
 from ..core.config import config
 from ..core.persona_profiles import active_id, session_storage_id
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
+from ..storage.connect import connect_database
 
 _DB: Path = config.data_dir / "sessions.db"
 _SCHEMA_VERSION = 1
@@ -36,8 +37,7 @@ _lock = asyncio.Lock()
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB)
-    conn.row_factory = sqlite3.Row
+    conn = connect_database(_DB, row_factory=True)
     conn.execute("PRAGMA journal_mode=WAL")
     # 与 userdb.py 一致：设置 busy_timeout，避免多连接/未来多进程并发写时
     # 直接撞 "database is locked" 异常而非短暂等待

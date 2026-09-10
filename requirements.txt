@@ -9,6 +9,8 @@ ddgs>=9.0.0
 Pillow>=10.0.0
 python-multipart>=0.0.9
 edge-tts>=7.2.0
+# P3-04：自带 SQLCipher 的 Python 绑定；真实数据库迁移仍由显式状态机控制。
+sqlcipher3==0.6.2
 # 知识库（D2 RAG）：PDF 文档解析
 pypdf>=4.0.0
 # 记忆系统 v2（重构新增）

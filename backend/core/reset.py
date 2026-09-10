@@ -29,6 +29,7 @@ from pathlib import Path
 
 from .config import config
 from .log import logger
+from ..storage.connect import connect_database
 from .userdb import db
 
 # userdb 中需要清空的全部业务表（与 userdb.reset() 降级分支保持一致）
@@ -172,7 +173,7 @@ def _collect_user_media(
         if not path.exists():
             continue
         try:
-            conn = sqlite3.connect(str(path), timeout=10.0)
+            conn = connect_database(path, timeout=10.0)
         except sqlite3.Error:
             logger.warning("[重置] {} 打开失败，图片引用记录不完整", db_name)
             continue
@@ -274,7 +275,7 @@ def _sweep_user_media(user_names: set[str]) -> int:
             if not path.exists():
                 continue
             try:
-                conns.append(sqlite3.connect(str(path), timeout=10.0))
+                conns.append(connect_database(path, timeout=10.0))
             except sqlite3.Error:
                 logger.warning("[重置] {} 打开失败，图片引用只按其余库判定", name)
         if not conns:
@@ -330,7 +331,7 @@ def _compact() -> str:
         if not path.exists():
             continue
         try:
-            conn = sqlite3.connect(str(path), timeout=30)
+            conn = connect_database(path, timeout=30)
             try:
                 conn.execute("PRAGMA busy_timeout=30000")
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

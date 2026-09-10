@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterator, Mapping, Sequence
 
 from .config import config
+from ..storage.connect import connect_database
 
 EVENT_FIELDS = frozenset({
     "event_name", "request_id", "user_scope_hash", "persona_id",
@@ -99,8 +100,9 @@ def _connection() -> sqlite3.Connection:
             _last_prune_day = ""
         if _conn is None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            _conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
-            _conn.row_factory = sqlite3.Row
+            _conn = connect_database(
+                path, timeout=10, check_same_thread=False, row_factory=True
+            )
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.executescript(
                 """

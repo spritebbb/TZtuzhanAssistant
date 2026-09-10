@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
+from ..storage.connect import connect_database
 
 _SCHEMA_VERSION = 41  # v41: durable acknowledgement for monitoring notifications
 
@@ -1019,8 +1020,9 @@ class UserDB:
         config.data_dir.mkdir(parents=True, exist_ok=True)
         path = config.data_dir / "bot.db"
         create_pre_upgrade_backup(path, config.data_dir / "backups", _SCHEMA_VERSION)
-        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30.0)
-        self.conn.row_factory = sqlite3.Row
+        self.conn = connect_database(
+            path, check_same_thread=False, timeout=30.0, row_factory=True
+        )
         self.conn.execute("PRAGMA busy_timeout = 5000")
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
@@ -2051,8 +2053,9 @@ class UserDB:
             except PermissionError:
                 time.sleep(0.3)
 
-        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30.0)
-        self.conn.row_factory = sqlite3.Row
+        self.conn = connect_database(
+            path, check_same_thread=False, timeout=30.0, row_factory=True
+        )
         self.conn.execute("PRAGMA busy_timeout = 5000")
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")

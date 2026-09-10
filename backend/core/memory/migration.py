@@ -15,6 +15,7 @@ import sqlite3
 
 from ..config import config
 from ..log import logger
+from ...storage.connect import connect_database
 
 _BATCH = 64
 
@@ -26,8 +27,7 @@ def _needs_migration() -> bool:
 
         if not vec.enabled():
             return False
-        conn = sqlite3.connect(config.data_dir / "bot.db")
-        conn.row_factory = sqlite3.Row
+        conn = connect_database(config.data_dir / "bot.db", row_factory=True)
         # 各源表行数 → 对应向量分区
         table_kinds = {
             "long_memory": "lm",
@@ -56,8 +56,7 @@ def _needs_migration() -> bool:
 
 
 def _sqlite_rows(table: str) -> list[sqlite3.Row]:
-    conn = sqlite3.connect(config.data_dir / "bot.db", timeout=10)
-    conn.row_factory = sqlite3.Row
+    conn = connect_database(config.data_dir / "bot.db", timeout=10, row_factory=True)
     where = (
         " WHERE status = 'active' AND surface_policy != 'never_surface' "
         "AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))"
@@ -126,7 +125,7 @@ def migrate(progress_cb=None) -> dict:
     )
     # 6) 摘要 → summary（kv_store 的 compact_summary）
     try:
-        conn = sqlite3.connect(config.data_dir / "bot.db")
+        conn = connect_database(config.data_dir / "bot.db")
         rows = conn.execute(
             "SELECT user_id, value FROM kv_store WHERE key='compact_summary'"
         ).fetchall()
