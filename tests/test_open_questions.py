@@ -169,7 +169,7 @@ def test_budget_expiry_and_job_claim() -> int:
     with db._lock:
         assert oq._claim(db.conn, scope, f"q{qid3}:a1", "owner-1", NOW) is True
         assert oq._claim(db.conn, scope, f"q{qid3}:a1", "owner-2", NOW) is False
-        oq._finish(db.conn, scope, f"q{qid3}:a1", True, NOW)
+        oq._finish(db.conn, scope, f"q{qid3}:a1", "owner-1", True, NOW)
     print("[OK] 预算与到期：最多 2 次 / 7 天过期 / JOB-1 认领互斥")
     return 0
 

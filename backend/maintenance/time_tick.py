@@ -63,6 +63,11 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _job_run_id(period: str) -> str:
+    """生成符合遥测标识符白名单的稳定周期 id。"""
+    return f"{JOB_KEY}:{period.replace('+00:00', 'Z')}"
+
+
 def _claim(conn, scope_key: str, period: str, owner: str, now: datetime) -> bool:
     """CAS 认领：pending/到期重试/租约过期的 running 可抢，否则让位。"""
     conn.execute(
@@ -74,9 +79,9 @@ def _claim(conn, scope_key: str, period: str, owner: str, now: datetime) -> bool
         "UPDATE job_runs SET status='running', lease_owner=?, lease_until=?, "
         "attempt=attempt+1, updated_at=? "
         "WHERE scope_key=? AND job_key=? AND period_start=? "
-        "AND (status IN ('pending','failed') "
-        "     AND (next_retry IS NULL OR next_retry<=? OR next_retry='')) "
-        "   OR (status='running' AND lease_until IS NOT NULL AND lease_until<?)",
+        "AND ((status IN ('pending','failed') "
+        "      AND (next_retry IS NULL OR next_retry<=? OR next_retry='')) "
+        "   OR (status='running' AND lease_until IS NOT NULL AND lease_until<?))",
         (owner, _iso(now + timedelta(seconds=LEASE_SECONDS)), _iso(now),
          scope_key, JOB_KEY, period, _iso(now), _iso(now)),
     )
@@ -84,24 +89,31 @@ def _claim(conn, scope_key: str, period: str, owner: str, now: datetime) -> bool
     return cur.rowcount == 1
 
 
-def _finish(conn, scope_key: str, period: str, ok: bool, now: datetime, attempt: int) -> None:
+def _finish(conn, scope_key: str, period: str, owner: str, ok: bool,
+            now: datetime, attempt: int) -> bool:
+    """仅当前租约 owner 可完成；迟到 worker 或 reset 后的完成必须失败。"""
     if ok:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE job_runs SET status='succeeded', lease_owner=NULL, lease_until=NULL, "
-            "finished_at=?, updated_at=? WHERE scope_key=? AND job_key=? AND period_start=?",
-            (_iso(now), _iso(now), scope_key, JOB_KEY, period),
+            "next_retry=NULL, finished_at=?, updated_at=? "
+            "WHERE scope_key=? AND job_key=? AND period_start=? "
+            "AND status='running' AND lease_owner=?",
+            (_iso(now), _iso(now), scope_key, JOB_KEY, period, owner),
         )
     else:
         backoff = _RETRY_BACKOFF_MIN[min(attempt, len(_RETRY_BACKOFF_MIN)) - 1] \
             if attempt <= MAX_ATTEMPTS else _RETRY_BACKOFF_MIN[-1]
         status = "failed" if attempt < MAX_ATTEMPTS else "cancelled"
-        conn.execute(
-            "UPDATE job_runs SET status=?, next_retry=?, finished_at=?, updated_at=? "
-            "WHERE scope_key=? AND job_key=? AND period_start=?",
+        cur = conn.execute(
+            "UPDATE job_runs SET status=?, lease_owner=NULL, lease_until=NULL, "
+            "next_retry=?, finished_at=?, updated_at=? "
+            "WHERE scope_key=? AND job_key=? AND period_start=? "
+            "AND status='running' AND lease_owner=?",
             (status, _iso(now + timedelta(minutes=backoff)), _iso(now), _iso(now),
-             scope_key, JOB_KEY, period),
+             scope_key, JOB_KEY, period, owner),
         )
     conn.commit()
+    return cur.rowcount == 1
 
 
 def _pending_periods(conn, scope_key: str, start: datetime, end: datetime,
@@ -180,21 +192,54 @@ def run(argv: list[str] | None = None) -> int:
         summary = {"scope": scope_key, "user": user_id, "attempted": 0,
                    "succeeded": 0, "skipped": 0, "failed": 0, "events": 0}
         owner = f"tick-{os.getpid()}-{int(now.timestamp())}"
+
+        def _observe(event_name: str, period: str, *, outcome: str,
+                     error_code: str = "") -> None:
+            try:
+                from backend.core.telemetry import record_event
+
+                record_event(user_id, {
+                    "event_name": event_name,
+                    "persona_id": persona_id,
+                    "source_ids": ["job:time_tick"],
+                    "job_run_id": _job_run_id(period),
+                    "outcome": outcome,
+                    "error_code": error_code,
+                })
+            except Exception:
+                pass
+
         for period in periods:
             period_dt = datetime.fromisoformat(period)
             if not _claim(db.conn, scope_key, period, owner, now):
                 summary["skipped"] += 1
                 continue
             summary["attempted"] += 1
+            _observe("job_started", period, outcome="started")
             try:
                 result = advance_schedule(user_id, min(period_dt + timedelta(hours=1), until))
                 summary["events"] += int(result.get("events", 0))
-                _finish(db.conn, scope_key, period, True, now, 1)
-                summary["succeeded"] += 1
+                row = db.conn.execute(
+                    "SELECT attempt FROM job_runs WHERE scope_key=? AND job_key=? AND period_start=?",
+                    (scope_key, JOB_KEY, period),
+                ).fetchone()
+                attempt = int(row["attempt"]) if row else 1
+                if _finish(db.conn, scope_key, period, owner, True, now, attempt):
+                    summary["succeeded"] += 1
+                    _observe("job_finished", period, outcome="success")
+                else:
+                    summary["failed"] += 1
+                    _observe("job_finished", period, outcome="failure", error_code="permission")
             except Exception:
                 # advance_schedule 失败时不得让未提交事务泄漏给失败状态更新。
                 db.conn.rollback()
-                _finish(db.conn, scope_key, period, False, now, 1)
+                row = db.conn.execute(
+                    "SELECT attempt FROM job_runs WHERE scope_key=? AND job_key=? AND period_start=?",
+                    (scope_key, JOB_KEY, period),
+                ).fetchone()
+                attempt = int(row["attempt"]) if row else 1
+                _finish(db.conn, scope_key, period, owner, False, now, attempt)
+                _observe("job_finished", period, outcome="failure", error_code="pipeline_exception")
                 summary["failed"] += 1
 
     if args.json:

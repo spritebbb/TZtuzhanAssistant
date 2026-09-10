@@ -222,14 +222,18 @@ def _claim(conn, scope_key: str, period: str, owner: str, now: datetime) -> bool
     return cur.rowcount == 1
 
 
-def _finish(conn, scope_key: str, period: str, ok: bool, now: datetime) -> None:
-    conn.execute(
+def _finish(conn, scope_key: str, period: str, owner: str, ok: bool,
+            now: datetime) -> bool:
+    """只有仍持有租约的 worker 可提交完成状态。"""
+    cur = conn.execute(
         "UPDATE job_runs SET status=?, lease_owner=NULL, lease_until=NULL, "
-        "finished_at=?, updated_at=? WHERE scope_key=? AND job_key=? AND period_start=?",
+        "finished_at=?, updated_at=? WHERE scope_key=? AND job_key=? AND period_start=? "
+        "AND status='running' AND lease_owner=?",
         ("succeeded" if ok else "failed", _now_iso(now), _now_iso(now),
-         scope_key, JOB_KEY, period),
+         scope_key, JOB_KEY, period, owner),
     )
     conn.commit()
+    return cur.rowcount == 1
 
 
 def _scope_key() -> str:
@@ -350,7 +354,7 @@ def research_question(user_id: str, question_id: int, *, search_fn=None, judge=N
         raise
     finally:
         with db._lock:
-            _finish(db.conn, scope, period, ok, moment)
+            _finish(db.conn, scope, period, owner, ok, moment)
     return result
 
 
