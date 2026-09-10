@@ -1313,6 +1313,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_data_protection.py ;; .venv/Scripts/
 VERIFY_TIMEOUT: 600
 ```
 
+执行：Codex，2026-09-10。P3-04 A/B 离线切片由 `94f0593` 落地：新增完整明文面 ADR；全后端 SQLite 打开路径收口到 `backend/storage/connect.py`；固定 `sqlcipher3==0.6.2`，在一次性临时目录以 SQLCipher 4.12.0 Community 完成 `sqlcipher_export`，验证非明文文件头、正确/错误 key、cipher/SQLite 完整性、`user_version`、schema/触发器/索引、逐表行数和样本哈希。真实 `data/` 未迁移、未删除，运行时仍走明文 SQLite；C–F 文件容器、key broker、应用锁、迁移状态机与加密备份仍待后续切片。针对性验证通过：data protection、schema backup、relationship bundle、periodic backup、reset、telemetry、session/agent 与 14 条边界回归。
+
 ### 21.2 P3-03 GPT-SoVITS 训练、推理和回退补充
 
 Adapter 先执行 `GET /capabilities` 或版本自检，固定实际安装 commit、模型格式、采样率、语言和可用接口；不把某篇教程的参数当稳定合同。新建 `voice_profiles(id,persona_id,provider_version,model_hash,reference_manifest_id,enabled,created_at)` 与加密 `voice_manifests`，原始素材不进入关系导出。
