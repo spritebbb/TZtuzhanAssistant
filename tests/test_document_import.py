@@ -15,8 +15,10 @@ import os
 import sys
 import tempfile
 import time
+import urllib.error
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -43,8 +45,9 @@ def test_url_safety() -> int:
             raise AssertionError(f"应拒绝：{bad}")
         except di.DocumentImportError:
             pass
-    # 正常公网地址通过（只做解析校验，不发请求）
-    checked = di.check_url("HTTPS://Example.com/a//b?x=1#frag")
+    # 正常公网地址通过（固定 DNS，测试不依赖执行环境的解析策略）
+    with patch.object(di, "_resolve_host", return_value=["93.184.216.34"]):
+        checked = di.check_url("HTTPS://Example.com/a//b?x=1#frag")
     assert checked == "https://example.com/a/b?x=1", checked
     print("[OK] URL 边界：协议/内网/元数据/账号密码拒绝；正常地址规范化")
     return 0
@@ -54,21 +57,52 @@ def test_redirect_escape_rejected() -> int:
     def fake_fetch(url: str, *, timeout: int):
         return 302, {"location": "http://169.254.169.254/latest/meta-data/"}, b""
 
-    try:
-        di.fetch_html("https://example.com/start", fetch=fake_fetch)
-        raise AssertionError("重定向到元数据地址应被拒绝")
-    except di.DocumentImportError:
-        pass
+    with patch.object(di, "_resolve_host", return_value=["93.184.216.34"]):
+        try:
+            di.fetch_html("https://example.com/start", fetch=fake_fetch)
+            raise AssertionError("重定向到元数据地址应被拒绝")
+        except di.DocumentImportError:
+            pass
     # 超过跳数上限
     def loop_fetch(url: str, *, timeout: int):
         return 302, {"location": "https://example.com/next"}, b""
 
-    try:
-        di.fetch_html("https://example.com/start", fetch=loop_fetch)
-        raise AssertionError("重定向次数过多应被拒绝")
-    except di.DocumentImportError:
-        pass
+    with patch.object(di, "_resolve_host", return_value=["93.184.216.34"]):
+        try:
+            di.fetch_html("https://example.com/start", fetch=loop_fetch)
+            raise AssertionError("重定向次数过多应被拒绝")
+        except di.DocumentImportError:
+            pass
     print("[OK] 重定向逐跳校验：绕行到内网/元数据被拒；跳数受限")
+    return 0
+
+
+def test_default_fetch_pins_dns_and_surfaces_redirect() -> int:
+    class RedirectResponse:
+        code = 302
+        headers = {"Location": "https://next.example/final"}
+
+    class FakeOpener:
+        def open(self, req, timeout):
+            raise urllib.error.HTTPError(
+                req.full_url, 302, "Found", RedirectResponse.headers, None
+            )
+
+    pinned: list[str] = []
+
+    def fake_builder(ip: str, *handlers):
+        pinned.append(ip)
+        assert handlers, "必须安装禁止自动重定向的 handler"
+        return FakeOpener()
+
+    with patch.object(di, "_ensure_public_ip", return_value=["93.184.216.34"]), patch(
+        "backend.tools.safety.build_pinned_opener", side_effect=fake_builder
+    ):
+        status, headers, body = di._default_fetch("https://example.com/start", timeout=3)
+
+    assert pinned == ["93.184.216.34"]
+    assert status == 302 and headers["location"].endswith("/final") and body == b""
+    print("[OK] 默认抓取：连接固定到已验证 IP，重定向交回逐跳校验")
     return 0
 
 
@@ -165,17 +199,18 @@ def test_segments_dedup_and_forget() -> int:
 def test_job_cancel() -> int:
     uid = "l01-job"
     db.ensure_user(uid)
-    started = di.start_url_import(
-        uid, "https://example.com/page",
-        fetch=lambda url, **kw: (200, {}, "慢".encode("utf-8")),
-    )
-    job_id = started["job_id"]
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        state = di.job_state(job_id) or {}
-        if state.get("status") in {"succeeded", "failed"}:
-            break
-        time.sleep(0.05)
+    with patch.object(di, "_resolve_host", return_value=["93.184.216.34"]):
+        started = di.start_url_import(
+            uid, "https://example.com/page",
+            fetch=lambda url, **kw: (200, {}, "慢".encode("utf-8")),
+        )
+        job_id = started["job_id"]
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            state = di.job_state(job_id) or {}
+            if state.get("status") in {"succeeded", "failed"}:
+                break
+            time.sleep(0.05)
     assert (di.job_state(job_id) or {}).get("status") == "succeeded", di.job_state(job_id)
     row = db.conn.execute(
         "SELECT status, document_id FROM document_import_jobs WHERE job_id=?",
@@ -191,6 +226,7 @@ def main() -> int:
     failed = (
         test_url_safety()
         + test_redirect_escape_rejected()
+        + test_default_fetch_pins_dns_and_surfaces_redirect()
         + test_html_to_text_strips_scripts()
         + test_epub_spine_and_guards()
         + test_segments_dedup_and_forget()
