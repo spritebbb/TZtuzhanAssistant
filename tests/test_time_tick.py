@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -122,11 +123,13 @@ def test_midnight_block_spanning() -> int:
 
 
 def _spawn_tick(data_root: Path, at: datetime, extra: list[str] | None = None) -> dict:
+    env = os.environ.copy()
+    env["FEATURE_TELEMETRY_ENABLED"] = "1"
     proc = subprocess.run(
         [str(PY), "-X", "utf8", "-m", "backend.maintenance.time_tick",
          "--data-root", str(data_root), "--at", at.isoformat(), "--json",
          *(extra or [])],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", timeout=120,
+        cwd=str(ROOT), env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     lines = (proc.stdout or "").strip().splitlines()
     if not lines:
@@ -157,6 +160,18 @@ def test_subprocess_race_single_claim() -> int:
     # 同一小时的稍后时刻再来（时钟回拨到周期内任意点）：仍是同一 period 键，零增量
     back = _spawn_tick(data_root, AT + timedelta(minutes=15), args)
     assert back.get("succeeded", 0) == 0, back
+
+    telemetry = sqlite3.connect(data_root / "telemetry.db")
+    rows = telemetry.execute(
+        "SELECT event_name,job_run_id,outcome FROM telemetry_events "
+        "WHERE event_name IN ('job_started','job_finished') ORDER BY id"
+    ).fetchall()
+    telemetry.close()
+    expected_id = f"time_tick:{AT.isoformat().replace('+00:00', 'Z')}"
+    assert rows == [
+        ("job_started", expected_id, "started"),
+        ("job_finished", expected_id, "success"),
+    ], rows
     print("[OK] 真实双子进程竞争恰好认领一次 / 重复与回拨零增量")
     return 0
 
