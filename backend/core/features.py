@@ -64,6 +64,9 @@ FLAG_DEFAULTS = {
     # 默认本地记录、可关可清；临时轮不写；不属于关系包。
     "experience_metrics_enabled": os.getenv("FEATURE_EXPERIENCE_METRICS_ENABLED", "1").lower()
         not in {"0", "false", "off"},
+    # Q3：本地最小遥测与来源链。关闭后立即停止新记录，已有数据可单独清理。
+    "telemetry_enabled": os.getenv("FEATURE_TELEMETRY_ENABLED", "1").lower()
+        not in {"0", "false", "off"},
     # L16：可选择共享知识。默认全部隔离；只有用户明确「分享给某角色」才生效。
     "shared_resources_enabled": os.getenv("FEATURE_SHARED_RESOURCES_ENABLED", "1").lower()
         not in {"0", "false", "off"},

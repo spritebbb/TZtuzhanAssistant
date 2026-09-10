@@ -41,6 +41,7 @@ from .api import (
     personas,
     shared_resources,
     tour,
+    telemetry,
     possibilities,
     plugins as plugins_api,
     relationship,
@@ -215,6 +216,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
     app.include_router(tour.router)
+    app.include_router(telemetry.router)
     app.include_router(companion_requests.router)
     app.include_router(activity_drafts.router)
     app.include_router(observations.router)

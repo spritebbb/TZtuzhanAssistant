@@ -81,6 +81,13 @@ class Config:
         data_dir = os.getenv("TZTUZHAN_DATA_DIR", "").strip()
         data_path = Path(data_dir) if data_dir else (PROJECT_ROOT / "data")
         self.data_dir: Path = data_path if data_path.is_absolute() else (PROJECT_ROOT / data_path)
+        # Q3 本地可观测性：只保留最小字段事件与日聚合，默认 30 天。
+        self.telemetry_retention_days: int = max(
+            1, min(365, _env_int("TELEMETRY_RETENTION_DAYS", 30))
+        )
+        self.telemetry_event_retention_days: int = max(
+            1, min(30, _env_int("TELEMETRY_EVENT_RETENTION_DAYS", 7))
+        )
         self.search_enabled: bool = os.getenv("SEARCH_ENABLED", "1") != "0"
         self.search_engine: str = os.getenv("SEARCH_ENGINE", "bing").lower()
         self.search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()

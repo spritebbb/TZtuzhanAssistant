@@ -11,6 +11,7 @@ from typing import Literal
 
 
 HygieneAction = Literal["accept", "rewrite", "fallback"]
+RULE_VERSION = "out-1.v1"
 
 
 @dataclass(frozen=True)
