@@ -95,6 +95,37 @@ it('按分组渲染，界面型步骤不给「发这句」而给操作提示', a
   expect(wrapper.text()).toContain('共 2 步')
 })
 
+it('前置条件显示实时就绪徽标：已就绪/未就绪随探测结果变化', async () => {
+  vi.mocked(apiFetch).mockResolvedValue({
+    ok: true,
+    json: async () => JSON.parse(JSON.stringify({ ...groupedScript, ready: { vision: true } })),
+  } as Response)
+  const wrapper = mount(TourPanel, { props: { show: false } })
+  await wrapper.setProps({ show: true })
+  await flushPromises()
+  expect(wrapper.get('.ready-badge').text()).toBe('已就绪')
+
+  vi.mocked(apiFetch).mockResolvedValue({
+    ok: true,
+    json: async () => JSON.parse(JSON.stringify({ ...groupedScript, ready: { vision: false } })),
+  } as Response)
+  const wrapper2 = mount(TourPanel, { props: { show: false } })
+  await wrapper2.setProps({ show: true })
+  await flushPromises()
+  expect(wrapper2.get('.not-ready-badge').text()).toBe('未就绪')
+})
+
+it('后端未给 ready 探测数据时只显示前置条件文案，不出徽标', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(
+    { ok: true, json: async () => JSON.parse(JSON.stringify(groupedScript)) } as Response)
+  const wrapper = mount(TourPanel, { props: { show: false } })
+  await wrapper.setProps({ show: true })
+  await flushPromises()
+  expect(wrapper.find('.ready-badge').exists()).toBe(false)
+  expect(wrapper.find('.not-ready-badge').exists()).toBe(false)
+  expect(wrapper.text()).toContain('前置条件：需要配置视觉模型')
+})
+
 it('后端未给 groups 时按步骤分组回退，不丢步骤', async () => {
   vi.mocked(apiFetch).mockResolvedValue({
     ok: true,

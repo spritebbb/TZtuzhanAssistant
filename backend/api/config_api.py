@@ -28,6 +28,8 @@ _FLAG_LABELS = {
     "activity_drafts_enabled": "意图预填：你说想一起做什么时，她先给一张可确认的草稿",
     "telemetry_enabled": "本地诊断：记录无正文的事件链（7天）与日聚合（30天）",
     "style_map_enabled": "表达习惯观察：她记住你在不同场合的说话调子，回应更合拍（可在记忆管理删除）",
+    "experience_metrics_enabled": "质量统计：本地计数回复延迟、规则失败、重复与你的反馈（不记录正文，可清除）",
+    "shared_resources_enabled": "跨角色共享：允许把你的文档或共同产物明确分享给另一个角色看（默认全部隔离）",
 }
 
 
