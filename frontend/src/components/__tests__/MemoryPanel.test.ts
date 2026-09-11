@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   deleteFact,
+  deleteStyleMapEntry,
   deleteUserTerm,
   getFacts,
   getHerProfile,
@@ -28,6 +29,7 @@ vi.mock('../../api/memory', () => ({
   getInteractionStyle: vi.fn(),
   resetInteractionStyle: vi.fn(),
   deleteUserTerm: vi.fn(),
+  deleteStyleMapEntry: vi.fn(),
 }))
 vi.mock('../../api/relationship', () => ({
   exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
@@ -66,6 +68,7 @@ describe('MemoryPanel', () => {
     vi.mocked(getInteractionStyle).mockReset()
     vi.mocked(resetInteractionStyle).mockReset()
     vi.mocked(deleteUserTerm).mockReset()
+    vi.mocked(deleteStyleMapEntry).mockReset()
     vi.mocked(getFacts).mockResolvedValue([{ ...fact }])
     vi.mocked(updateFact).mockResolvedValue()
     vi.mocked(updateFactPinned).mockResolvedValue()
@@ -77,9 +80,11 @@ describe('MemoryPanel', () => {
     vi.mocked(getInteractionStyle).mockResolvedValue({
       style: '喜欢短句、偶尔用省略号',
       terms: [{ id: 3, term: '菟丝子', category: 'slang', meaning: '我们的黑话', count: 2 }],
+      styleMap: [{ id: 9, situation: '倾诉烦恼时', style: '短句为主，偶尔省略号', count: 2 }],
     })
     vi.mocked(resetInteractionStyle).mockResolvedValue()
     vi.mocked(deleteUserTerm).mockResolvedValue()
+    vi.mocked(deleteStyleMapEntry).mockResolvedValue()
   })
 
   it('shows provenance and persists the proactive-surface preference', async () => {
@@ -204,6 +209,7 @@ describe('MemoryPanel', () => {
     expect(wrapper.text()).toContain('熬夜、咖啡、冷笑话')
     expect(wrapper.text()).toContain('喜欢短句、偶尔用省略号')
     expect(wrapper.text()).toContain('菟丝子')
+    expect(wrapper.text()).toContain('倾诉烦恼时——短句为主，偶尔省略号')
 
     await wrapper.get('.reset-btn').trigger('click')
     await flushPromises()
@@ -214,5 +220,22 @@ describe('MemoryPanel', () => {
     await flushPromises()
     expect(deleteUserTerm).toHaveBeenCalledWith(3)
     vi.unstubAllGlobals()
+  })
+
+  it('lets the user delete an observed expression-habit entry', async () => {
+    const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    await wrapper.get('.tab-row button:nth-child(2)').trigger('click')
+    await flushPromises()
+
+    const card = wrapper.findAll('article.profile-card')
+      .find((c) => c.text().includes('她观察到你说话的习惯'))!
+    expect(card.exists()).toBe(true)
+    await card.get('.style-del').trigger('click')
+    await flushPromises()
+
+    expect(deleteStyleMapEntry).toHaveBeenCalledWith(9)
+    expect(wrapper.text()).not.toContain('倾诉烦恼时——短句为主，偶尔省略号')
   })
 })

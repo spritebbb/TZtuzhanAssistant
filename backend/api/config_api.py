@@ -27,6 +27,7 @@ _FLAG_LABELS = {
     "focus_wrapup_enabled": "专注收尾：结束专注时她按真实情况说一句收尾（不评分）",
     "activity_drafts_enabled": "意图预填：你说想一起做什么时，她先给一张可确认的草稿",
     "telemetry_enabled": "本地诊断：记录无正文的事件链（7天）与日聚合（30天）",
+    "style_map_enabled": "表达习惯观察：她记住你在不同场合的说话调子，回应更合拍（可在记忆管理删除）",
 }
 
 

@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import RoomPanel from './RoomPanel.vue'
 import {
   deleteFact,
+  deleteStyleMapEntry,
   deleteUserTerm,
   dismissPendingThought,
   getFacts,
@@ -17,6 +18,7 @@ import {
   type FactItem,
   type HerProfileSection,
   type PendingThought,
+  type StyleMapEntry,
   type UserTerm,
 } from '../api/memory'
 import {
@@ -41,6 +43,7 @@ const busyId = ref<number | null>(null)
 const profileSections = ref<HerProfileSection[]>([])
 const userStyle = ref('')
 const userTerms = ref<UserTerm[]>([])
+const styleMapEntries = ref<StyleMapEntry[]>([])
 const activeTab = ref<'facts' | 'profile' | 'backup'>('facts')
 
 // ---- 她惦记的事（M5 未完成心事） ----
@@ -169,6 +172,7 @@ async function loadStyle() {
     const data = await getInteractionStyle()
     userStyle.value = data.style
     userTerms.value = data.terms
+    styleMapEntries.value = data.styleMap
   } catch {
     /* 互动偏好读取失败不打扰主列表 */
   }
@@ -197,6 +201,15 @@ async function removeTerm(term: UserTerm) {
   try {
     await deleteUserTerm(term.id)
     userTerms.value = userTerms.value.filter((t) => t.id !== term.id)
+  } catch {
+    error.value = '删除失败，稍后再试'
+  }
+}
+
+async function removeStyleEntry(entry: StyleMapEntry) {
+  try {
+    await deleteStyleMapEntry(entry.id)
+    styleMapEntries.value = styleMapEntries.value.filter((s) => s.id !== entry.id)
   } catch {
     error.value = '删除失败，稍后再试'
   }
@@ -436,6 +449,13 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
             · 共同语言「{{ term.term }}」<template v-if="term.meaning">（{{ term.meaning }}）</template>
             <button class="term-del" @click="removeTerm(term)">删</button>
           </p>
+          <template v-if="styleMapEntries.length">
+            <p class="hint small" style="margin: 6px 0 0;">她观察到你说话的习惯（可以在不同场合不太一样）：</p>
+            <p v-for="entry in styleMapEntries" :key="entry.id">
+              · {{ entry.situation }}——{{ entry.style }}
+              <button class="style-del" title="删掉这条观察，她不再参考" @click="removeStyleEntry(entry)">删</button>
+            </p>
+          </template>
           <button v-if="userStyle || userTerms.length" class="reset-btn" @click="resetStyle">重置互动偏好</button>
         </article>
         <article class="profile-card">
@@ -568,6 +588,8 @@ textarea { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 8px
 .profile-card p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
 .term-del { margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }
 .term-del:hover { color: #e0705a; border-color: #e0705a; }
+.style-del { margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }
+.style-del:hover { color: #e0705a; border-color: #e0705a; }
 .reset-btn { margin-top: 10px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: transparent; font-size: 12px; cursor: pointer; }
 .reset-btn:hover { color: var(--accent); border-color: var(--accent); }
 .export-link { display: inline-block; text-decoration: none; }

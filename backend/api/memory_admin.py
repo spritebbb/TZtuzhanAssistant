@@ -96,6 +96,7 @@ async def api_interaction_style():
         "ok": True,
         "style": await asyncio.to_thread(db.get_style, uid),
         "terms": await asyncio.to_thread(db.get_terms, uid, 30),
+        "style_map": await asyncio.to_thread(db.get_style_map, uid, 30),
     }
 
 
@@ -105,6 +106,16 @@ async def api_reset_interaction_style():
     uid = active_user_id()
     await asyncio.to_thread(db.set_style, uid, "")
     logger.info("[记忆管理] 已重置互动偏好（说话风格）: {}", uid)
+    return {"ok": True}
+
+
+@router.delete("/style-map/{style_id}")
+async def api_delete_style_entry(style_id: int):
+    """删除一条场景化表达观察（用户主权；删除后她不再拿到这条调子）。"""
+    uid = active_user_id()
+    if not await asyncio.to_thread(db.del_style_map, uid, style_id):
+        return JSONResponse({"ok": False, "error": "这条表达观察不存在"}, status_code=404)
+    logger.info("[记忆管理] 删除场景化表达观察 #{}", style_id)
     return {"ok": True}
 
 

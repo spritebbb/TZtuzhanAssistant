@@ -70,6 +70,9 @@ FLAG_DEFAULTS = {
     # L16：可选择共享知识。默认全部隔离；只有用户明确「分享给某角色」才生效。
     "shared_resources_enabled": os.getenv("FEATURE_SHARED_RESOURCES_ENABLED", "1").lower()
         not in {"0", "false", "off"},
+    # D1：场景化表达观察（user_style_map 复活）。关闭后停止注入已观察到的
+    # 表达习惯；提炼与用户主权操作（查看/删除）不受影响。
+    "style_map_enabled": True,
 }
 
 
