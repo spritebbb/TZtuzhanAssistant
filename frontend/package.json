@@ -43,6 +43,57 @@
       "public/**/*",
       "assets/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**",
+          "!**/node_modules/**",
+          "!data/**"
+        ]
+      },
+      {
+        "from": "../plugins",
+        "to": "plugins",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../skills",
+        "to": "skills",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../assets",
+        "to": "assets",
+        "filter": [
+          "**/*",
+          "!__pycache__/**"
+        ]
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "requirements.txt"
+      },
+      {
+        "from": "../.env.example",
+        "to": ".env.example"
+      },
+      {
+        "from": "../persona-菟菚.md",
+        "to": "persona-菟菚.md"
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "public/icon.png"

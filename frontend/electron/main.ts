@@ -98,13 +98,50 @@ function isInternalUrl(url: string): boolean {
   return !!dev && url.startsWith(dev)
 }
 
-/** 启动后端 Python 进程 */
+/** 启动后端 Python 进程。
+ *
+ * 探测链（按序，找到即用）：
+ * 1. 打包版：resources/backend/.venv/Scripts/python.exe（随包 venv）；
+ *    开发版：项目根 .venv/Scripts/python.exe
+ * 2. 系统 PATH 上的 python（与 Start-Tuzhan.bat 同口径）；
+ *    此时若依赖未装，自动 pip install -r requirements.txt（只装一次，成功后留标记）
+ * 后两者对应 web 部署包的「一键启动器」语义：没有随包 venv 也能自行拉起。
+ */
+function resolveBackendLauncher(rootDir: string, isDev: boolean): { exe: string; needsInstall: boolean } | null {
+  const script = join(rootDir, 'backend', 'main.py')
+  if (!existsSync(script)) return null
+  const bundledVenvPython = isDev
+    ? join(rootDir, '.venv', 'Scripts', 'python.exe')
+    : join(rootDir, 'backend', '.venv', 'Scripts', 'python.exe')
+  if (existsSync(bundledVenvPython)) return { exe: bundledVenvPython, needsInstall: false }
+  const pathDirs = (process.env.PATH ?? '').split(';').filter(Boolean)
+  for (const dir of pathDirs) {
+    const candidate = join(dir, 'python.exe')
+    if (existsSync(candidate)) return { exe: candidate, needsInstall: true }
+  }
+  return null
+}
+
+/** 标记文件：系统 Python 路径下依赖已装过（venv 无此问题，依赖随 venv 判定） */
+function depsMarkerPath(rootDir: string): string {
+  return join(rootDir, '.deps-installed')
+}
+
+function pipInstall(exe: string, rootDir: string): Promise<boolean> {
+  return new Promise((resolve_) => {
+    const proc = spawn(exe, ['-m', 'pip', 'install', '-r', join(rootDir, 'requirements.txt')], {
+      cwd: rootDir,
+      stdio: 'pipe',
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    })
+    proc.on('error', () => resolve_(false))
+    proc.on('exit', (code) => resolve_(code === 0))
+  })
+}
 async function startBackend(): Promise<boolean> {
   const isDev = !app.isPackaged
   // 开发模式：_dirname = dist-electron/（或 electron/），需向上两级到项目根
   const rootDir = isDev ? resolve(_dirname, '../..') : process.resourcesPath
-  const python = isDev ? join(rootDir, '.venv', 'Scripts', 'python.exe') : join(process.resourcesPath, 'backend', 'python.exe')
-  const script = join(rootDir, 'backend', 'main.py')
 
   // 先检查后端是否已经在运行
   if (await checkBackend()) {
@@ -112,17 +149,31 @@ async function startBackend(): Promise<boolean> {
     return true
   }
 
-  if (!existsSync(script)) {
-    console.warn('[electron] 后端未随应用打包（backend/main.py 不存在），请先单独启动后端：python backend/main.py')
+  const launcher = resolveBackendLauncher(rootDir, isDev)
+  if (!launcher) {
+    const hasScript = existsSync(join(rootDir, 'backend', 'main.py'))
+    console.warn(
+      hasScript
+        ? '[electron] 未找到可用的 Python（随包 venv 与系统 PATH 均无）。请安装 Python 3.11-3.13（勾选 Add to PATH）后重试，或手动启动后端：python backend/main.py'
+        : '[electron] 后端未随应用打包（backend/main.py 不存在），请先单独启动后端：python backend/main.py',
+    )
     return false
   }
-  if (!existsSync(python)) {
-    console.warn(`[electron] 未找到后端 Python（${python}），请先单独启动后端：python backend/main.py`)
-    return false
+  if (launcher.needsInstall && !existsSync(depsMarkerPath(rootDir))) {
+    console.log('[electron] 首次使用系统 Python：安装后端依赖（可能需要几分钟）...')
+    const ok = await pipInstall(launcher.exe, rootDir)
+    if (!ok) {
+      console.warn('[electron] 依赖安装失败，请检查网络后重试，或手动执行 pip install -r requirements.txt')
+      return false
+    }
+    try {
+      const { writeFileSync } = await import('fs')
+      writeFileSync(depsMarkerPath(rootDir), new Date().toISOString())
+    } catch { /* 标记写失败只是下次多装一次依赖，不致命 */ }
   }
 
   console.log('[electron] 启动后端...')
-  backendProcess = spawn(python, [script, '--host', '127.0.0.1', '--port', String(BACKEND_PORT)], {
+  backendProcess = spawn(launcher.exe, [join(rootDir, 'backend', 'main.py'), '--host', '127.0.0.1', '--port', String(BACKEND_PORT)], {
     cwd: rootDir,
     stdio: 'pipe',
     env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
@@ -228,7 +279,7 @@ function createWindow(backendReady = true): void {
   // 开发模式加载 Vite 开发服务器，生产模式加载后端服务（同源，Origin 可信；
   // file:// 的 Origin 是 null，会被后端 CORS/Origin 守卫拒绝，不可用）
   if (!backendReady) {
-    const html = '<!doctype html><meta charset="utf-8"><style>body{font:16px sans-serif;padding:40px;color:#24342d}code{background:#eee;padding:2px 6px}</style><h2>菟菚后端未能启动</h2><p>请确认部署包完整，并检查 <code>backend/python.exe</code> 与 <code>backend/main.py</code>。</p>'
+    const html = '<!doctype html><meta charset="utf-8"><style>body{font:16px sans-serif;line-height:1.8;padding:40px;color:#24342d}code{background:#eee;padding:2px 6px}</style><h2>菟菚后端未能启动</h2><p>请按顺序检查：</p><ol><li>确认 <code>resources/backend/</code> 目录完整（含 <code>main.py</code> 与 <code>requirements.txt</code>）；</li><li>未随包附带 Python 时，需已安装 Python 3.11–3.13 并勾选「Add to PATH」；</li><li>首次启动会自动安装依赖，如网络受限可手动执行 <code>pip install -r resources/backend/requirements.txt</code>。</li></ol>'
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   } else if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -331,7 +382,7 @@ ipcMain.handle('set-active-session', (_e, sessionId: string | null) => {
 
 app.whenReady().then(async () => {
   const backendReady = await startBackend()
-  if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或后端在 30 秒内未能启动。')
+  if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或可用 Python，或后端在 30 秒内未能启动。详情见主窗口的排查清单。')
   createWindow(backendReady)
   createTray()
 
