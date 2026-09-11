@@ -11,11 +11,13 @@ import Portrait from './Portrait.vue'
 import type { PendingRequest } from './ConfirmPanel.vue'
 import { autoPlayTts, stopTts } from '../utils/tts'
 import { portraitBondFor, portraitMoodFor, type PortraitBond, type PortraitMood } from '../utils/portrait'
+import { refreshVisualState } from '../state/visualState'
 
 const props = defineProps<{
   sessionId: string | null
   reloadKey?: number
   personaName?: string
+  personaId?: string
   externalDraft?: string
   externalDraftKey?: number
 }>()
@@ -219,6 +221,13 @@ async function send() {
       onDone: (done) => {
         const b = bubble()
         if (!b) return
+        if (!done && !b.image && !b.draft) {
+          messages.value.splice(botIndex, 1)
+          currentStream.value = ''
+          streaming.value = false
+          scrollToBottom()
+          return
+        }
         b.content = done
         currentStream.value = done
         streaming.value = false
@@ -275,7 +284,10 @@ async function send() {
     if (controller === ctrl) controller = null
     if (currentRequestId === requestId) currentRequestId = null
     flushPendingProactive()
-    if (!sendEphemeral) schedulePortraitRefresh()
+    if (!sendEphemeral) {
+      schedulePortraitRefresh()
+      void refreshVisualState(props.personaId || '').catch(() => {})
+    }
   }
 }
 
@@ -373,6 +385,12 @@ async function handleImageFile(f: File | null) {
       onDone: (done) => {
         const b = bubble()
         if (!b) return
+        if (!done && !b.image && !b.draft) {
+          messages.value.splice(botIndex, 1)
+          streaming.value = false
+          scrollToBottom()
+          return
+        }
         b.content = done
         streaming.value = false
         autoPlayTts(done, ttsKey(b, botIndex))
@@ -412,6 +430,7 @@ async function handleImageFile(f: File | null) {
     if (currentRequestId === requestId) currentRequestId = null
     flushPendingProactive()
     schedulePortraitRefresh()
+    void refreshVisualState(props.personaId || '').catch(() => {})
   }
 }
 

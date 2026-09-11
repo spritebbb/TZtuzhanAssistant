@@ -228,7 +228,7 @@ async def api_chat(
             if not epoch_is_current(request_epoch):
                 await q.put(("__error__", "请求因重置而取消"))
                 return
-            if not ephemeral:
+            if not ephemeral and reply:
                 # 后台完成：持久化 bot 消息到原会话（即使客户端已断开）
                 bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
                 if _state.get("pending_img"):
@@ -243,7 +243,7 @@ async def api_chat(
             _observe(
                 "chat_completed",
                 duration_bucket=duration_bucket((time.monotonic() - _t0) * 1000),
-                outcome="success",
+                outcome="success" if reply else "silent",
             )
             await q.put(("__done__", reply))
         except ResetSuperseded:
