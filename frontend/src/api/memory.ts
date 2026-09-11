@@ -92,16 +92,28 @@ export interface UserTerm {
   count: number
 }
 
+export interface StyleMapEntry {
+  id: number
+  situation: string
+  style: string
+  count: number
+}
+
 export interface InteractionStyle {
   style: string
   terms: UserTerm[]
+  styleMap: StyleMapEntry[]
 }
 
 export async function getInteractionStyle(): Promise<InteractionStyle> {
   const response = await apiFetch('/api/memory/interaction-style')
   if (!response.ok) throw new Error('互动偏好读取失败')
   const data = await response.json()
-  return { style: String(data.style ?? ''), terms: Array.isArray(data.terms) ? data.terms : [] }
+  return {
+    style: String(data.style ?? ''),
+    terms: Array.isArray(data.terms) ? data.terms : [],
+    styleMap: Array.isArray(data.style_map) ? data.style_map : [],
+  }
 }
 
 export async function resetInteractionStyle(): Promise<void> {
@@ -112,6 +124,11 @@ export async function resetInteractionStyle(): Promise<void> {
 export async function deleteUserTerm(id: number): Promise<void> {
   const response = await apiFetch(`/api/memory/terms/${id}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('删除失败')
+}
+
+export async function deleteStyleMapEntry(id: number): Promise<void> {
+  const response = await apiFetch(`/api/memory/style-map/${id}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error(response.status === 404 ? '这条表达观察不存在' : '删除失败')
 }
 
 export interface PendingThought {

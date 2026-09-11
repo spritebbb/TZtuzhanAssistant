@@ -62,6 +62,13 @@ TERMS_PROMPT = """你是语言观察员。根据对话，找出「两人之间�
 - 一次性的话题词、普通网络流行语、礼貌用语不算；
 - 最多 3 条；没有就输出 {"terms": []}。"""
 
+STYLE_MAP_PROMPT = """你是表达观察员。根据对话，总结「用户在特定场景下的表达方式」，只输出 JSON：
+{"styles": [{"situation": "场景（如「倾诉烦恼时」「开玩笑时」，≤20字）", "style": "该场景下用户的表达方式（如「喜欢用短句+省略号」，≤30字）"}]}
+规则：
+- 只总结「用户」的表达方式，不是助手的；场景要说清是什么情境；
+- 只记有辨识度的特征（短句、省略号、爱用反问、先自嘲等），普通正常表达不算；
+- 最多 2 条；看不出特征就输出 {"styles": []}。"""
+
 
 def _parse_json(resp: str) -> dict:
     """解析 LLM 返回的 JSON，容忍常见噪声；截断时尽力补全。"""
@@ -205,6 +212,7 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     await extract_facts(user_id, day)
     await extract_promises(user_id, day, transcript)
     await extract_terms(user_id, day, transcript)
+    await extract_style_map(user_id, day, transcript)
     await write_daily_diary(user_id, day, transcript)
     try:
         from .reunion import close_after_daily
@@ -460,6 +468,50 @@ async def extract_terms(user_id: str, day: date, transcript: str) -> int:
             category = "catchphrase"
         meaning = str(item.get("meaning") or "").strip()
         if db.add_term(user_id, term, category, meaning):
+            added += 1
+    return added
+
+
+async def extract_style_map(user_id: str, day: date, transcript: str) -> int:
+    """从当天对话提炼「场景化表达方式」进 user_style_map（D1 复活切片）。
+
+    与 extract_terms 同槽位同成本（复用每日批处理已打开的 transcript）；
+    add_style_map 按场景去重累加——同一场景被反复观察到才算数，
+    与共同语言一样走「稳定才演化」的第一道闸。
+    """
+    if not transcript.strip():
+        return 0
+    try:
+        resp = await chat(
+            [
+                {"role": "system", "content": STYLE_MAP_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"对话记录：\n{transcript}",
+                },
+            ],
+            temperature=0.2,
+            max_tokens=240,
+            task="extract",
+        )
+        data = _parse_json(resp)
+    except Exception:
+        logger.warning("[表达观察] {} 的场景化风格提炼失败，次日重试", user_id)
+        return 0
+    items = data.get("styles") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return 0
+    added = 0
+    for item in items:
+        if added >= 2:  # 上限按「有效新增」计，同场景累加不占额度
+            break
+        if not isinstance(item, dict):
+            continue
+        situation = str(item.get("situation") or "").strip()
+        style = str(item.get("style") or "").strip()
+        if not situation or not style:
+            continue
+        if db.add_style_map(user_id, situation, style):
             added += 1
     return added
 

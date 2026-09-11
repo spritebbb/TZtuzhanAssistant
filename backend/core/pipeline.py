@@ -1494,6 +1494,31 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                 }
             )
 
+    # 4.6.1) 场景化表达方式（D1 复活切片）：观察到 ≥2 次的「场景→用户表达方式」，
+    # 帮她接住对方说话的调子——只读不判，初识阶段不用，与共同语言同一阶段门。
+    from .features import flag as _style_flag
+    if stage != "初识" and _style_flag("style_map_enabled"):
+        try:
+            style_entries = [
+                s for s in db.get_style_map(user_id, limit=10) if (s.get("count") or 0) >= 2
+            ][:3]
+            if style_entries:
+                style_lines = "；".join(
+                    f"{s['situation']}：{s['style']}" for s in style_entries
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"你观察到的他的表达习惯：{style_lines}。"
+                            "这帮你听懂他话里的调子、用合拍的节奏回应；"
+                            "是你的私下观察，别原样念出来，也别像在分析他。"
+                        ),
+                    }
+                )
+        except Exception:
+            logger.exception("[pipeline] 场景化表达观察注入失败")
+
     # 4.1) 记忆相关：压缩摘要 + 记忆原文 + 长期事实，合并成一个「记得的过去」块，
     # 减少堆砌：把三条独立 system 消息合成一段，LLM 更容易当背景吸收而不是逐条服从。
     memory_lines: list[str] = []
