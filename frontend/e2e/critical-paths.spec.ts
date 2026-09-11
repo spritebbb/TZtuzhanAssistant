@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 const personaCard = `---
 name: Luna E2E
 theme: light
@@ -10,6 +12,22 @@ subtitle: isolated browser test persona
 
 You are an isolated test persona.
 `
+
+// playwright.config 把本 run 的隔离数据目录写在 .tmp/e2e-datadir（配置文件会被
+// 多次求值，指针文件保证多次求值与 spec 读到同一目录）。facts / user_style_map
+// 没有生产性 POST 端点（它们是提炼链路的产物），由种子脚本直接写入该隔离
+// SQLite；调用时机在 webServer 健康检查之后的用例内，届时表结构已建好。
+const projectRoot = resolve(import.meta.dirname, '../..')
+
+function seedE2EData(): void {
+  const dataDir = readFileSync(join(projectRoot, '.tmp', 'e2e-datadir'), 'utf-8').trim()
+  if (!dataDir) throw new Error('e2e-datadir 为空：种子脚本不知道往哪个隔离目录写入')
+  const python = join(projectRoot, '.venv', 'Scripts', 'python.exe')
+  execSync(
+    `"${python}" "${join(projectRoot, 'scripts', 'e2e_seed.py')}" --data-dir "${dataDir}" --facts 1 --style-map 1`,
+    { stdio: 'pipe', env: process.env },
+  )
+}
 
 async function restoreDefault(request: APIRequestContext) {
   const response = await request.post('/api/personas/default/activate')
@@ -251,4 +269,106 @@ test('starts co-reading, saves a bookmark, and returns discussion text to chat',
   await expect(page.getByPlaceholder(/和.*说点什么/)).toHaveValue(
     /关于《一起读的测试\.txt》第 1 段，你问我：“第一段说“一起读书”/,
   )
+})
+
+test('toggles a feature switch in settings and sees the change persisted', async ({ page }) => {
+  await openApp(page)
+  await openMoreTool(page, /设置/)
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await expect(settings).toBeVisible()
+
+  // 功能开关面板从 /api/flags 拉取，改动即时落盘（无需点保存）。
+  // 选「表达习惯观察」（style_map_enabled）：真实消费方在 pipeline 注入路径。
+  const flagToggle = settings.getByRole('checkbox', { name: /表达习惯观察/ })
+  await expect(flagToggle).toBeVisible()
+  const before = await flagToggle.isChecked()
+  await flagToggle.click()
+  await expect(settings.getByRole('status')).toContainText('已保存并立即生效')
+
+  // 后端确认落盘（切换后与切换前互补）
+  const flags = await (await page.request.get('/api/flags')).json()
+  expect(flags.flags.style_map_enabled).toBe(!before)
+
+  // 还原，避免影响同套件后续用例的注入行为
+  await flagToggle.click()
+  const flagsAfter = await (await page.request.get('/api/flags')).json()
+  expect(flagsAfter.flags.style_map_enabled).toBe(before)
+})
+
+test('edits, pins and forgets a memory through the real API roundtrip', async ({ page }) => {
+  seedE2EData()
+  await openApp(page)
+  await openMoreTool(page, /记忆与了解她/)
+  const memory = page.getByRole('dialog', { name: /记住的事/ })
+  await expect(memory).toBeVisible()
+
+  const original = 'E2E 用户住在江城，喜欢雨天散步。'
+  const edited = 'E2E 用户住在江城，最喜欢下雨天的江滩。'
+  await expect(memory.getByText(original)).toBeVisible()
+  // 定位卡片用「预设事实的容器」——进入编辑态后正文进入 textarea，hasText 不再命中
+  const before = memory.locator('article', { hasText: original })
+  await expect(before).toHaveCount(1)
+
+  // 改写 → 保存后来源变「你已确认」、置信度变 100%
+  await before.getByRole('button', { name: '改写' }).click()
+  await memory.locator('article textarea').fill(edited)
+  await memory.getByRole('button', { name: '保存' }).click()
+  await expect(memory.getByText(edited)).toBeVisible()
+
+  const card = memory.locator('article', { hasText: edited })
+  await expect(card.getByText('你已确认')).toBeVisible()
+  await expect(card.getByText('置信度 100%')).toBeVisible()
+
+  // 固定 → 复选勾上且 provenance 出现「长期保留」
+  const pinToggle = card.getByRole('checkbox', { name: '长期保留' })
+  await pinToggle.click()
+  await expect(pinToggle).toBeChecked()
+  await expect(card.locator('.provenance')).toContainText('长期保留')
+
+  // 忘掉（window.confirm 两段式）→ 条目消失
+  await page.evaluate(() => { window.confirm = () => true })
+  await card.getByRole('button', { name: '忘掉' }).click()
+  await expect(memory.getByText(edited)).toHaveCount(0)
+  await expect(memory.getByText(original)).toHaveCount(0)
+})
+
+test('feeds a document to the bookshelf and removes it again', async ({ page }) => {
+  await openApp(page)
+  await openMoreTool(page, /书架/)
+  const shelf = page.getByRole('dialog', { name: /的书架/ })
+  await expect(shelf).toBeVisible()
+
+  // 走真实上传端点（与共读用例同管道，但这里验证书架面板自身的增删链路）
+  const fileInput = shelf.locator('input[type="file"]')
+  await fileInput.setInputFiles({
+    name: 'E2E 投喂笔记.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# E2E 投喂\n\n这是一段给书架的测试内容，用来验证上传与删除。'),
+  })
+  // 通知文案里也含文件名（《…》读完了），故以 .doc-row 为准，避免 strict 冲突
+  const row = shelf.locator('.doc-row', { hasText: 'E2E 投喂笔记.md' })
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  await expect(row.locator('.sub')).toContainText('段')
+
+  // 拿掉 → 文档行消失（无确认弹窗，删除即生效）
+  await row.getByRole('button', { name: '拿掉' }).click()
+  await expect(row).toHaveCount(0)
+})
+
+test('shows observed expression habits and lets the user delete one', async ({ page }) => {
+  seedE2EData()
+  await openApp(page)
+  await openMoreTool(page, /记忆与了解她/)
+  const memory = page.getByRole('dialog', { name: /记住的事/ })
+  await memory.getByRole('button', { name: /了解/ }).click()
+
+  // 「了解她」tab：场景化表达观察区展示种子数据（≥2 次的场景）
+  const habitsCard = memory.locator('article.profile-card', { hasText: '她观察到你说话的习惯' })
+  await expect(habitsCard.getByText(/倾诉烦恼时——E2E 喜欢用短句加省略号/)).toBeVisible()
+  // 只被观察到 1 次的场景同样展示（主权在用户，不在此处过滤）
+  await expect(habitsCard.getByText(/聊到晚饭时——E2E 会先报菜名再说吃过了/)).toBeVisible()
+
+  // 逐条删除（真实 DELETE /api/memory/style-map/{id}）
+  await habitsCard.getByRole('button', { name: /删掉这条观察/ }).first().click()
+  await expect(habitsCard.getByText(/倾诉烦恼时——E2E 喜欢用短句加省略号/)).toHaveCount(0)
 })

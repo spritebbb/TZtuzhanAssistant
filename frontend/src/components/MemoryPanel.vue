@@ -453,7 +453,12 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
             <p class="hint small" style="margin: 6px 0 0;">她观察到你说话的习惯（可以在不同场合不太一样）：</p>
             <p v-for="entry in styleMapEntries" :key="entry.id">
               · {{ entry.situation }}——{{ entry.style }}
-              <button class="style-del" title="删掉这条观察，她不再参考" @click="removeStyleEntry(entry)">删</button>
+              <button
+                class="style-del"
+                :aria-label="`删掉这条观察：${entry.situation}`"
+                title="删掉这条观察，她不再参考"
+                @click="removeStyleEntry(entry)"
+              >删</button>
             </p>
           </template>
           <button v-if="userStyle || userTerms.length" class="reset-btn" @click="resetStyle">重置互动偏好</button>

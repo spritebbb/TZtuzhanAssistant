@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "npm run build && node -e \"require('node:fs').rmSync('../.tmp/e2e-datadir',{force:true})\" && playwright test",
     "dist:win": "npm run build && electron-builder --win",
     "preview": "vite preview"
   },
