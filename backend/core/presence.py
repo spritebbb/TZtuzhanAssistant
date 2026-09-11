@@ -35,15 +35,32 @@ def _presence(user_id: str, activity: dict, state, *, now: datetime) -> str:
     return schedule.current_presence(user_id)
 
 
-def current_presence(user_id: str, *, now: datetime | None = None) -> str:
+def _with_wake_override(user_id: str, value: str, *, now: datetime) -> str:
+    if value != "rest":
+        return value
+    try:
+        from .sleep_gate import is_awake
+
+        return "home" if is_awake(user_id, now=now) else value
+    except Exception:
+        return value
+
+
+def current_presence(
+    user_id: str,
+    *,
+    now: datetime | None = None,
+    include_wake: bool = True,
+) -> str:
     """返回与 VisualState 完全一致的当前在场状态，供聊天行为约束复用。"""
     instant = now or datetime.now().astimezone()
-    return _presence(
+    value = _presence(
         user_id,
         schedule.current_activity(user_id, now=instant),
         load_state(user_id, create_if_missing=False),
         now=instant,
     )
+    return _with_wake_override(user_id, value, now=instant) if include_wake else value
 
 
 def visual_state(user_id: str, *, now: datetime | None = None,
@@ -55,6 +72,7 @@ def visual_state(user_id: str, *, now: datetime | None = None,
     current_profile = profile or active_profile()
     current_persona = persona_id or str(current_profile.get("id") or active_id())
     presence = _presence(user_id, activity, state, now=instant)
+    presence = _with_wake_override(user_id, presence, now=instant)
     trust, intimacy = dimensions_of(user_id)
     stage = dimensions_stage(trust, intimacy)
     bond_info = bond_level_dimensions(trust, intimacy)

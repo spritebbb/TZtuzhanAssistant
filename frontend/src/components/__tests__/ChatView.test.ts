@@ -100,3 +100,29 @@ describe('ChatView image upload', () => {
     wrapper.unmount()
   })
 })
+
+describe('ChatView silent reply', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('keeps the user message and removes the empty bot placeholder', async () => {
+    mockStream.mockImplementation(async (_text, _session, _signal, callbacks) => {
+      callbacks.onDone?.('')
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const input = wrapper.getComponent(ChatInput)
+    input.vm.$emit('update:input', '在吗')
+    await wrapper.vm.$nextTick()
+    input.vm.$emit('send')
+    await flushPromises()
+
+    expect(mockStream).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('.msg.user')).toHaveLength(1)
+    expect(wrapper.findAll('.msg.bot')).toHaveLength(0)
+    expect(wrapper.text()).toContain('在吗')
+    wrapper.unmount()
+  })
+})

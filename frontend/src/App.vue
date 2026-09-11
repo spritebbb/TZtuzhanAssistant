@@ -445,7 +445,7 @@ onUnmounted(() => {
         <div class="life-now">{{ presenceLabel }}</div>
         <div v-for="(ev, i) in visualRecentEvents.slice(0, 2)" :key="i" class="life-event">{{ ev.date.slice(5) }} · {{ ev.description }}</div>
       </div>
-      <ChatView :session-id="currentId" :reload-key="chatReloadKey" :persona-name="activePersona.name" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
+      <ChatView :session-id="currentId" :reload-key="chatReloadKey" :persona-name="activePersona.name" :persona-id="activePersona.id" :external-draft="chatDraft" :external-draft-key="chatDraftKey" @open-settings="openSettings" @archived="onArchived" @request-archive="archiveNow" @streaming-change="onStreamingChange" />
     </div>
 
     <!-- 面板 -->

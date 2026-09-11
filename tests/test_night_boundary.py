@@ -6,7 +6,7 @@ import asyncio
 import os
 import sys
 import tempfile
-from datetime import datetime as _RealDt
+from datetime import datetime as _RealDt, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,6 +44,10 @@ async def _run_and_capture() -> list[dict]:
         captured.append(messages)
         return "【思考】内部\n【回复】嗯"
 
+    # 本文件验证「被唤醒后的深夜行为边界」；休息门控的三条消息规则由
+    # test_sleep_gate.py 独立覆盖，预置可聊窗口避免这里第一条被正常沉默。
+    from backend.core.userdb import kv_set
+    kv_set(UID, "sleep:wake_until", (_FakeDt._fixed + timedelta(minutes=30)).isoformat())
     with patch("backend.core.pipeline.chat", new=fake_chat), \
          patch("backend.core.pipeline.datetime", _FakeDt):
         await process(UID, "在吗", mock=True)

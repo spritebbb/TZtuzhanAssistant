@@ -209,8 +209,8 @@ def handle_user_turn(
 def presence_line(user_id: str) -> str:
     """行程收尾提示（P1-04 presence 只读）。
 
-    她的「去忙」是角色表达：提示她此刻在忙什么，用户需要时基本可及；
-    绝不锁输入框、绝不以睡觉为由冷处理（输出空串 = 无话可说也不装忙）。
+    她的「去忙」是角色表达：提示她此刻在忙什么，用户需要时基本可及。
+    休息沉默与唤醒由 sleep_gate 处理；这里输出空串表示无需追加行程提示。
     """
     try:
         # 必须复用 VisualState 的统一 owner；只读静态 schedule 会漏掉 L06

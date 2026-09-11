@@ -217,6 +217,32 @@ def test_chat_sse_error_frame() -> None:
         chat_mod.process = orig_process
 
 
+def test_chat_silent_done_does_not_persist_empty_bot() -> None:
+    """休息沉默轮返回空 done，但会话只保留用户消息，不生成空气泡记录。"""
+    import backend.api.chat as chat_mod
+
+    orig_process = chat_mod.process
+
+    async def fake_process(user_id, text, **kw):
+        return ""
+
+    chat_mod.process = fake_process
+    try:
+        with TestClient(app) as client:
+            before = client.get("/api/sessions/current").json()
+            r = client.post("/api/chat", content=form_body(text="还在睡吗"),
+                            headers=FRONTEND_HEADERS)
+            frames = parse_sse(r.text)
+            assert frames[-1] == {"done": ""}, frames
+            after = client.get("/api/sessions/current").json()
+            added = after[len(before):]
+            assert [m["role"] for m in added] == ["user"], added
+            assert added[0]["content"] == "还在睡吗"
+        print("[OK] chat SSE：沉默轮仅保留用户消息，不持久化空 bot")
+    finally:
+        chat_mod.process = orig_process
+
+
 def test_chat_ephemeral_no_session_persistence() -> None:
     """显式开关和自然语言触发都只返回 SSE，不写当前会话。"""
     import backend.api.chat as chat_mod
@@ -510,6 +536,7 @@ def test_origin_guard_matrix() -> None:
 def main() -> None:
     test_chat_sse_frame_contract()
     test_chat_sse_error_frame()
+    test_chat_silent_done_does_not_persist_empty_bot()
     test_chat_ephemeral_no_session_persistence()
     test_chat_validation()
     test_agent_create_form_body()
@@ -518,7 +545,7 @@ def main() -> None:
     test_agent_cancel_and_404()
     test_confirm_frontend_flow()
     test_origin_guard_matrix()
-    print("\n=== HTTP 层端点测试: 9 项全部通过 ===")
+    print("\n=== HTTP 层端点测试: 10 项全部通过 ===")
 
 
 if __name__ == "__main__":

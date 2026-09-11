@@ -751,6 +751,24 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 否则 add_message 后 last_message_ts 恒为 now，_long_gap 恒 False
     prev_ts = db.last_message_ts(user_id)
 
+    # 休息状态下保持输入可用，但前两条消息不调用模型；十分钟内第三条消息
+    # 才把她吵醒。沉默轮只保存用户消息，不制造空助手消息或其它关系副作用。
+    sleep_gate_state = "active"
+    try:
+        from .sleep_gate import before_user_message
+
+        sleep_gate_state = before_user_message(
+            user_id,
+            now=datetime.now().astimezone(),
+            persist=not ephemeral,
+        )
+    except Exception:
+        logger.exception("[pipeline] 休息唤醒门控失败（回退为正常回复）")
+    if sleep_gate_state == "silent":
+        if not ephemeral:
+            db.add_message(user_id, "user", text)
+        return ""
+
     # 1) 好感度即时规则（含跨天回滚）
     if not ephemeral:
         await affection.on_message(user_id, text)
@@ -1699,6 +1717,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             messages.append({"role": "system", "content": presence})
     except Exception:
         logger.exception("[pipeline] 行程可及性提示失败（不影响回复）")
+    if sleep_gate_state == "woke":
+        from .sleep_gate import wake_prompt
+
+        messages.append({"role": "system", "content": wake_prompt()})
     if search_report:
         from .source_verification import format_verification_context
 
