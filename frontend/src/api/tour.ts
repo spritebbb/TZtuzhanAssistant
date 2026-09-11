@@ -23,6 +23,8 @@ export interface TourScript {
   skill: string
   groups: string[]
   steps: TourStep[]
+  /** 各带前置条件步骤的实时就绪探测（id → ready）；旧后端缺省为空 */
+  ready?: Record<string, boolean>
 }
 
 export async function getTour(): Promise<TourScript> {
@@ -40,5 +42,6 @@ export async function getTour(): Promise<TourScript> {
     skill: String(data.skill ?? ''),
     groups,
     steps,
+    ready: (data.ready && typeof data.ready === 'object') ? data.ready as Record<string, boolean> : {},
   }
 }

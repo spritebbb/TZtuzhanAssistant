@@ -42,6 +42,13 @@ const stepNo = computed<Map<string, number>>(() => {
   return map
 })
 
+// 前置条件实时探测：ready=true 显示「已就绪」，false 显示「未就绪」；无探测数据时只留文案
+function readiness(stepId: string): 'ready' | 'not-ready' | 'unknown' {
+  const ready = tour.value?.ready
+  if (!ready || !(stepId in ready)) return 'unknown'
+  return ready[stepId] ? 'ready' : 'not-ready'
+}
+
 async function load() {
   if (tour.value) return
   loading.value = true
@@ -104,7 +111,11 @@ watch(() => props.show, (show) => { if (show) void load() })
                   {{ copied === step.id ? '已复制' : '复制' }}
                 </button>
               </div>
-              <p v-if="step.needs" class="needs">前置条件：{{ step.needs }}</p>
+              <p v-if="step.needs" class="needs">
+                前置条件：{{ step.needs }}
+                <span v-if="readiness(step.id) === 'ready'" class="ready-badge" role="status">已就绪</span>
+                <span v-else-if="readiness(step.id) === 'not-ready'" class="not-ready-badge" role="status">未就绪</span>
+              </p>
               <p class="meta">
                 <span class="tools">{{ step.tools.join(' · ') }}</span>
                 <span class="check">验收：{{ step.check }}</span>
@@ -142,6 +153,9 @@ button.use, button.ghost { padding: 6px 14px; border-radius: 9px; border: 1px so
 button.ghost { background: transparent; color: var(--accent); }
 .ui-badge { padding: 5px 12px; border-radius: 9px; border: 1px dashed var(--border); color: var(--text-muted); font-size: 12px; }
 .needs { margin: 10px 0 0; font-size: 12px; color: var(--text-muted); }
+.ready-badge, .not-ready-badge { margin-left: 6px; padding: 1px 8px; border-radius: 7px; font-size: 11px; }
+.ready-badge { border: 1px solid #5aa06c; color: #5aa06c; }
+.not-ready-badge { border: 1px solid #c08a4a; color: #c08a4a; }
 .meta { display: flex; flex-direction: column; gap: 2px; margin: 10px 0 0; font-size: 12px; color: var(--text-muted); }
 .tools { color: var(--accent); }
 .follow { margin: 8px 0 0; font-size: 13px; color: var(--text-muted); }

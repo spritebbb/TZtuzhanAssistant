@@ -215,6 +215,37 @@ TOUR_STEPS: tuple[dict, ...] = (
 )
 
 
+def probe_capabilities() -> dict[str, bool]:
+    """实时探测各演示步骤的前置条件是否就绪（id → ready）。
+
+    与 ``needs`` 静态文案配套：前端把「前置条件」升级为「可用/未就绪」徽标，
+    演示时一眼看出哪些步当前真能跑。探测全部只读、失败按未就绪处理，
+    不发起网络请求（只查本地配置与注册表）。
+    """
+    ready: dict[str, bool] = {}
+
+    # vision：视觉模型 key 已配置（VISION_* 或回退生图端点）
+    try:
+        from .vision import enabled as _vision_enabled
+
+        ready["vision"] = bool(_vision_enabled())
+    except Exception:
+        ready["vision"] = False
+
+    # browser / docs：对应外部 MCP 服务器已注册且有工具
+    try:
+        from .tools.mcp_server import list_external_servers
+
+        servers = {s.get("name"): int(s.get("tools_count") or 0) for s in list_external_servers()}
+        ready["browser"] = servers.get("playwright", 0) > 0
+        ready["docs"] = servers.get("context7", 0) > 0
+    except Exception:
+        ready["browser"] = False
+        ready["docs"] = False
+
+    return ready
+
+
 def get_tour() -> dict:
     """返回演示脚本（供 API / 前端渲染，供测试校验）。"""
     return {
@@ -223,4 +254,5 @@ def get_tour() -> dict:
         "skill": "agent-tour",
         "groups": list(TOUR_GROUPS),
         "steps": [dict(step) for step in TOUR_STEPS],
+        "ready": probe_capabilities(),
     }
