@@ -92,8 +92,8 @@ async def api_meta(session_id: str = ""):
 async def api_presence():
     """她此刻在做什么（行程只读）+ 最近的生活事件（体验收口状态行）。
 
-    L06 外出事件的消费：active_outing 非空表示她今天外出了（用户可见提醒，
-    拍板 #10「沉默但留提醒」）；recent_events 合并生活流与外出流（新→旧）。
+    L06 外出事件的消费：active_outing 只表示当前仍处于两小时外出窗；
+    recent_events 永久合并外出流，满足拍板 #10「沉默但留提醒」（新→旧）。
     """
     import asyncio
 
@@ -112,14 +112,10 @@ async def api_presence():
 
     active_outing = None
     try:
-        from ..core.life_templates import latest_outing
+        from ..core.life_templates import active_outing as current_outing, latest_outing
 
-        today = datetime.now().astimezone().date().isoformat()
         outings = await asyncio.to_thread(latest_outing, uid)
-        for outing in outings:
-            if outing.get("date") == today:
-                active_outing = outing
-                break
+        active_outing = await asyncio.to_thread(current_outing, uid)
         # 合并外出流进生活流（前端无需区分两种来源）
         events = sorted(
             events + outings, key=lambda e: str(e.get("occurred_at") or ""),

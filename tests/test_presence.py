@@ -37,6 +37,19 @@ def main() -> None:
         focused = presence.visual_state(uid, now=now, persona_id="p-one", profile=profile)
     assert focused["presence"] == "focus" and focused["quiet"]
 
+    with patch("backend.core.life_templates.active_outing", return_value={"description": "去城里转转"}), \
+         patch.object(presence, "focus_in_progress", return_value=False):
+        away = presence.visual_state(uid, now=now, persona_id="p-one", profile=profile)
+        assert away["presence"] == "announced_offline"
+        assert presence.current_presence(uid, now=now) == "announced_offline"
+
+    ephemeral_uid = "presence-readonly-new-user"
+    assert db.get_user(ephemeral_uid) is None
+    with patch("backend.core.life_templates.active_outing", return_value=None), \
+         patch.object(presence, "focus_in_progress", return_value=False):
+        assert presence.current_presence(ephemeral_uid, now=now) == "home"
+    assert db.get_user(ephemeral_uid) is None, "presence 只读不得为临时对话创建用户"
+
     reduced = presence.visual_state(uid, now=now, persona_id="p-one",
                                     profile={"id": "p-one", "motion_enabled": False})
     assert reduced["quiet"] and reduced["reduced_motion"]

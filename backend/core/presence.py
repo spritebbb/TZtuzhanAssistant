@@ -24,10 +24,9 @@ def _presence(user_id: str, activity: dict, state, *, now: datetime) -> str:
     if state.resting or activity.get("activity") == "sleeping":
         return "rest"
     try:
-        from .life_templates import latest_outing
+        from .life_templates import active_outing
 
-        today = now.astimezone().date().isoformat()
-        if any(item.get("date") == today for item in latest_outing(user_id, limit=1)):
+        if active_outing(user_id, now=now) is not None:
             return "announced_offline"
     except Exception:
         pass
@@ -36,12 +35,23 @@ def _presence(user_id: str, activity: dict, state, *, now: datetime) -> str:
     return schedule.current_presence(user_id)
 
 
+def current_presence(user_id: str, *, now: datetime | None = None) -> str:
+    """返回与 VisualState 完全一致的当前在场状态，供聊天行为约束复用。"""
+    instant = now or datetime.now().astimezone()
+    return _presence(
+        user_id,
+        schedule.current_activity(user_id, now=instant),
+        load_state(user_id, create_if_missing=False),
+        now=instant,
+    )
+
+
 def visual_state(user_id: str, *, now: datetime | None = None,
                  persona_id: str | None = None, profile: dict | None = None) -> dict:
     """Build the UI state without creating events or exposing prompt material."""
     instant = now or datetime.now().astimezone()
     activity = schedule.current_activity(user_id, now=instant)
-    state = load_state(user_id)
+    state = load_state(user_id, create_if_missing=False)
     current_profile = profile or active_profile()
     current_persona = persona_id or str(current_profile.get("id") or active_id())
     presence = _presence(user_id, activity, state, now=instant)
