@@ -144,6 +144,10 @@ def test_commit_idempotent_and_energy() -> int:
     before = json.loads(kv_get(uid, "state:schedule") or "{}").get("energy_delta_today", 0.0)
     payload = lt.commit_life_event(uid, tpl, AT)
     assert payload is not None and payload["template_id"] == "lt-go"
+    event = lt.latest_outing(uid, limit=1)[0]
+    assert datetime.fromisoformat(event["occurred_at"]) == AT, "occurred_at 应保留实际触发时刻"
+    assert lt.active_outing(uid, now=AT + timedelta(minutes=119)) is not None
+    assert lt.active_outing(uid, now=AT + timedelta(hours=2)) is None, "外出窗不得超过两小时"
     # 幂等：同日同模板以及另一模板都不能新增第二条生活事件
     assert lt.commit_life_event(uid, tpl, AT) is None
     assert lt.commit_life_event(uid, _tpl(id="lt-other", energy_cost=8), AT) is None
@@ -182,11 +186,13 @@ def test_outing_express_and_presence() -> int:
     db.ensure_user(uid)
     _clear_kv(uid)
     tpl = _tpl(id="lt-note", return_note="从城里回来了")
-    lt.commit_life_event(uid, tpl, AT)
+    event_now = datetime.now().astimezone()
+    lt.commit_life_event(uid, tpl, event_now)
     # 主动候选：今日有外出未表达 → 出文案；第二次 → None（每日一次）
     first = lt.maybe_express_outing(uid)
     assert first is not None and "城里" in first, first
     assert lt.maybe_express_outing(uid) is None
+    assert lt.active_outing(uid, now=event_now) is None, "归来消息送达后应立即结束外出态"
     # 状态行端点消费 active_outing
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -199,10 +205,9 @@ def test_outing_express_and_presence() -> int:
         assert r.status_code == 200, r.text
         d = r.json()
         assert d["ok"] is True
-        assert d["active_outing"] is not None, "今日外出应在 active_outing 可见"
-        assert d["active_outing"]["description"]
+        assert d["active_outing"] is None, "归来后 active_outing 应结束"
         assert any(e.get("description") for e in d["recent_events"]), "外出流并入生活流"
-    print("[OK] 外出主动候选（每日一次）+ /api/presence active_outing 可见提醒")
+    print("[OK] 外出归来结束 active_outing + /api/presence 生活流保留提醒")
     return 0
 
 

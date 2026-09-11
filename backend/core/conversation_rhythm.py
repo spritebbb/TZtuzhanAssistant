@@ -213,13 +213,18 @@ def presence_line(user_id: str) -> str:
     绝不锁输入框、绝不以睡觉为由冷处理（输出空串 = 无话可说也不装忙）。
     """
     try:
-        from .schedule import current_presence
+        # 必须复用 VisualState 的统一 owner；只读静态 schedule 会漏掉 L06
+        # 低频外出事件，造成界面显示外出而模型以为已经在家。
+        from .presence import current_presence
 
         presence = current_presence(user_id)
     except Exception:
         return ""
     if presence == "announced_offline":
-        return "你此刻说了要去忙，简单交代一句就好；对方找你时正常回应，别装消失"
+        return (
+            "你此刻仍在外出。对方主动找你时可以从外面正常、简短地回应；"
+            "保持当前行程连贯，不要说自己已经回家、刚睡醒或已经归来，也不要解释系统状态"
+        )
     return ""
 
 

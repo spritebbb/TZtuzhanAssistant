@@ -36,6 +36,9 @@ _TRIGGER_PERCENT = 25
 # 精力门槛：低于此值只允许 rest/quiet_reading 类模板（设计原文 30）
 _LOW_ENERGY = 30
 _LOW_ENERGY_KINDS = {"rest", "quiet_reading"}
+# 设计约束：特殊行程的 announced_offline 窗口最多两小时。事件本身会永久
+# 保留在生活流中，但不能因此把角色一整天都显示成「外出中」。
+_OUTING_WINDOW = timedelta(hours=2)
 
 
 class LifeTemplateError(ValueError):
@@ -308,7 +311,9 @@ def commit_life_event(user_id: str, tpl: LifeTemplate, now: datetime) -> dict | 
     from .userdb import db
 
     local_date = now.astimezone().date()
-    occurred = datetime.combine(local_date, datetime.min.time()).astimezone()
+    # occurrence 仍按本地日做幂等键；occurred_at 必须保存实际触发时刻，供
+    # 最多两小时的离线窗判断。旧实现写成当天 00:00，导致外出状态失真。
+    occurred = now.astimezone()
     payload = {
         "date": local_date.isoformat(),
         "template_id": tpl.id,
@@ -368,6 +373,29 @@ def latest_outing(user_id: str, *, limit: int = 3) -> list[dict]:
     return events
 
 
+def active_outing(user_id: str, *, now: datetime | None = None) -> dict | None:
+    """返回当前两小时外出窗内的事件；历史事件只留在生活流中。"""
+    instant = (now or datetime.now().astimezone()).astimezone()
+    outings = latest_outing(user_id, limit=1)
+    if not outings:
+        return None
+    outing = outings[0]
+    day = instant.date().isoformat()
+    if outing.get("date") != day or _outing_expressed_on(user_id, day):
+        # return_note 是「外出归来」候选；一旦真正送达，UI 应立即结束外出态。
+        return None
+    try:
+        started = datetime.fromisoformat(str(outing.get("occurred_at") or ""))
+        if started.tzinfo is None:
+            started = started.astimezone()
+    except (TypeError, ValueError):
+        return None
+    age = instant.timestamp() - started.timestamp()
+    if 0 <= age < _OUTING_WINDOW.total_seconds():
+        return outing
+    return None
+
+
 # ---- 内部辅助 ----
 
 def _roll(user_id: str, local_date, extra: str = "") -> int:
@@ -420,12 +448,15 @@ def veto_keywords_hit(text: str) -> bool:
 _EXPRESSED_OUTING_KEY = "life_templates:outing_expressed:{day}"
 
 
-def outing_expressed_today(user_id: str) -> bool:
-    """今日外出汇报是否已经真正投递。"""
+def _outing_expressed_on(user_id: str, day: str) -> bool:
     from .userdb import kv_get
 
-    key = _EXPRESSED_OUTING_KEY.format(day=datetime.now().date().isoformat())
-    return bool(kv_get(user_id, key))
+    return bool(kv_get(user_id, _EXPRESSED_OUTING_KEY.format(day=day)))
+
+
+def outing_expressed_today(user_id: str) -> bool:
+    """今日外出汇报是否已经真正投递。"""
+    return _outing_expressed_on(user_id, datetime.now().date().isoformat())
 
 
 def mark_outing_expressed(user_id: str) -> None:

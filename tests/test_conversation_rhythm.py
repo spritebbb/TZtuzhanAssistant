@@ -2,6 +2,7 @@
 """P2-05 会话节奏回归：A 追发生命周期、B 晚安收尾、C 称呼候选。"""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -135,6 +136,47 @@ def test_address_candidates_and_forbidden() -> int:
     return 0
 
 
+def test_outing_prompt_uses_unified_presence() -> int:
+    from unittest.mock import patch
+
+    from backend.core.conversation_rhythm import presence_line
+
+    with patch("backend.core.presence.current_presence", return_value="announced_offline"):
+        line = presence_line("rhythm-away")
+    assert "仍在外出" in line and "从外面" in line
+    assert "不要说自己已经回家" in line
+    print("[OK] 外出回复复用统一 presence，并保持行程叙事连贯")
+    return 0
+
+
+def test_outing_prompt_reaches_pipeline() -> int:
+    from unittest.mock import patch
+
+    from backend.core import pipeline
+    from backend.core.userdb import db
+
+    uid = "rhythm-away-pipeline"
+    db.ensure_user(uid)
+    db.set_first_chat_done(uid)
+    captured: dict[str, list[dict]] = {}
+
+    async def fake_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return "我还在外面，看到消息了"
+
+    async def run() -> None:
+        with patch("backend.core.pipeline.chat", new=fake_chat), \
+             patch("backend.core.presence.current_presence", return_value="announced_offline"):
+            await pipeline.process(uid, "晚上好", mock=True)
+
+    asyncio.run(run())
+    systems = [m["content"] for m in captured["messages"] if m["role"] == "system"]
+    assert any("你此刻仍在外出" in line for line in systems)
+    assert captured["messages"][-1]["role"] == "user"
+    print("[OK] 外出行为提示进入真实 pipeline，且用户消息仍位于最后")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_followup_lifecycle()
@@ -142,6 +184,8 @@ def main() -> int:
         + test_user_turn_creates_and_cancels_sourced_followup()
         + test_goodnight_cancels_without_penalty()
         + test_address_candidates_and_forbidden()
+        + test_outing_prompt_uses_unified_presence()
+        + test_outing_prompt_reaches_pipeline()
     )
     if failed:
         print(f"\n=== P2-05 会话节奏：{failed} 项失败 ===")
