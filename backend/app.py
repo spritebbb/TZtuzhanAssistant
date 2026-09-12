@@ -213,10 +213,20 @@ def create_app() -> FastAPI:
         b = broker()
         b.engage_if_slots(config.data_dir / "keyslots")
         path = request.url.path
+        # 锁定/迁移只拦数据面（API/插件/MCP/人格图），静态页面必须放行——
+        # 否则 SPA 本身加载不出来，用户连解锁界面都看不到（先有页面才有锁）。
+        protected = (
+            path.startswith("/plugins/")
+            or path.startswith("/mcp/")
+            or path.startswith("/persona")
+            or path.startswith("/api/")
+        )
+        if not protected:
+            return await call_next(request)
         # 白名单：锁面板/加密端点自身必须可达，健康检查留给探针
         if path.startswith("/api/lock") or path.startswith("/api/encryption") or path == "/api/health":
             return await call_next(request)
-        # P3-04 E 迁移门：迁移进行中其余请求一律 503（防写入撞目录切换）
+        # P3-04 E 迁移门：迁移进行中其余数据请求一律 503（防写入撞目录切换）
         from .storage import runtime as _rt
 
         if _rt.migration_gate_engaged():

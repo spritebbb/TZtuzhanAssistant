@@ -321,6 +321,13 @@ function onLockStatus(st: LockStatus): void {
   lockAvailable.value = st.state === 'locked' || st.state === 'unlocked'
 }
 
+function onLockUnlocked(): void {
+  // 锁定期间启动加载（人格/会话/视觉状态）都拿到过 423，解锁后整页重载
+  // 一次，让所有面板按解锁态重新拉数据。
+  lockScreenOpen.value = false
+  window.location.reload()
+}
+
 async function lockAppNow(): Promise<void> {
   try {
     await lockNow()
@@ -517,7 +524,7 @@ onUnmounted(() => {
     <LockScreen
       v-if="lockScreenOpen"
       :persona-name="activePersona.name"
-      @unlocked="lockScreenOpen = false"
+      @unlocked="onLockUnlocked"
       @status="onLockStatus"
     />
 
