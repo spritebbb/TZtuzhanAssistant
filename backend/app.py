@@ -25,6 +25,7 @@ from .api import (
     confirm,
     dashboard,
     diary,
+    encryption,
     dual_perspectives,
     focus,
     future_letters,
@@ -212,8 +213,17 @@ def create_app() -> FastAPI:
         b = broker()
         b.engage_if_slots(config.data_dir / "keyslots")
         path = request.url.path
-        if path.startswith("/api/lock") or path == "/api/health":
+        # 白名单：锁面板/加密端点自身必须可达，健康检查留给探针
+        if path.startswith("/api/lock") or path.startswith("/api/encryption") or path == "/api/health":
             return await call_next(request)
+        # P3-04 E 迁移门：迁移进行中其余请求一律 503（防写入撞目录切换）
+        from .storage import runtime as _rt
+
+        if _rt.migration_gate_engaged():
+            return JSONResponse(
+                {"ok": False, "error": "数据迁移进行中，请稍候", "code": "migration_in_progress"},
+                status_code=503,
+            )
         if b.status()["state"] == "locked":
             return JSONResponse(
                 {"ok": False, "error": "应用已锁定", "code": "app_locked"},
@@ -224,6 +234,7 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(health.router)
     app.include_router(lock.router)
+    app.include_router(encryption.router)
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)

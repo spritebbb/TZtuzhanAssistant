@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, computed, ref, watch } from 'vue'
 import { apiFetch } from '../api'
+import { enableEncryption, cleanupPlaintext, getEncryptionStatus, type EncryptionStatus } from '../api/encryption'
 import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
@@ -232,6 +233,55 @@ function onTtsAutoPlayChange() {
   if (!ttsAutoPlay.value) stopTts()
 }
 
+// ---- P3-04 E：数据保护（启用加密） ----
+const encStatus = ref<EncryptionStatus | null>(null)
+const encBusy = ref(false)
+const encMsg = ref('')
+const encPassphrase = ref('')
+const encRepeat = ref('')
+
+async function loadEncryptionStatus(): Promise<void> {
+  try {
+    encStatus.value = await getEncryptionStatus()
+  } catch { /* 状态读取失败不打扰设置页 */ }
+}
+
+async function runEnableEncryption(): Promise<void> {
+  if (encPassphrase.value !== encRepeat.value) {
+    encMsg.value = '✗ 两次输入的恢复口令不一致'
+    return
+  }
+  if (!window.confirm('启用加密会对整个数据目录做一次迁移：期间应用暂停响应，完成后自动恢复。继续？')) return
+  encBusy.value = true
+  encMsg.value = ''
+  try {
+    await enableEncryption(encPassphrase.value, encRepeat.value)
+    encPassphrase.value = ''
+    encRepeat.value = ''
+    encMsg.value = '✓ 加密已启用。请正常使用，确认无误后再删除明文目录'
+    await loadEncryptionStatus()
+  } catch (e) {
+    encMsg.value = '✗ ' + ((e as Error).message || e)
+  } finally {
+    encBusy.value = false
+  }
+}
+
+async function runCleanup(): Promise<void> {
+  if (!window.confirm('确定删除明文目录？删除后无法恢复（密文数据不受影响）')) return
+  encBusy.value = true
+  encMsg.value = ''
+  try {
+    await cleanupPlaintext()
+    encMsg.value = '✓ 明文目录已删除'
+    await loadEncryptionStatus()
+  } catch (e) {
+    encMsg.value = '✗ ' + ((e as Error).message || e)
+  } finally {
+    encBusy.value = false
+  }
+}
+
 // ---- 功能开关 ----
 interface FlagInfo { key: string; label: string }
 const flags = ref<Record<string, boolean>>({})
@@ -338,6 +388,7 @@ async function open() {
   await loadAuditLog()
   await loadPlugins()
   await loadFlags()
+  await loadEncryptionStatus()
   saveOk.value = false
   saveNote.value = ''
 }
@@ -425,6 +476,32 @@ function confirmLabel(c: string): string {
           </button>
         </div>
         <div class="s-body">
+          <!-- P3-04 E：数据保护（启用加密） -->
+          <div class="sgroup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            数据保护
+          </div>
+          <p v-if="encBusy" class="setting-hint" role="status">正在进行加密迁移，请稍候（期间其他操作会暂停）…</p>
+          <template v-else-if="encStatus?.data_encrypted">
+            <p class="setting-hint" role="status">✓ 数据已加密。明文目录保留在：<code>{{ encStatus.plaintext_keep }}</code></p>
+            <div class="srow">
+              <label>确认一切正常后删除明文目录（不可恢复）</label>
+              <button class="small-btn" :disabled="encBusy" @click="runCleanup">删除明文目录</button>
+            </div>
+          </template>
+          <template v-else>
+            <p class="setting-hint">为整个数据目录启用加密：本机自动解锁，恢复口令用于换机。<b>口令丢失将无法找回</b>，请离线抄写。</p>
+            <div class="srow"><label>恢复口令（至少 8 字符）</label><input v-model="encPassphrase" type="password" autocomplete="new-password" aria-label="加密恢复口令" /></div>
+            <div class="srow"><label>再输入一次确认</label><input v-model="encRepeat" type="password" autocomplete="new-password" aria-label="加密恢复口令确认" /></div>
+            <div class="srow">
+              <label></label>
+              <button class="small-btn" :disabled="encBusy || !encPassphrase" @click="runEnableEncryption">
+                {{ encBusy ? '迁移中…' : '启用加密' }}
+              </button>
+            </div>
+          </template>
+          <p v-if="encMsg" class="mcp-msg" :class="{ err: encMsg.startsWith('✗') }" :role="encMsg.startsWith('✗') ? 'alert' : 'status'">{{ encMsg }}</p>
+
           <!-- LLM -->
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M8 12h8"/><path d="M10 16h4"/><path d="M3 20h18"/><path d="M12 22v-6"/></svg>

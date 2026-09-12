@@ -98,3 +98,25 @@ def close_all_databases() -> None:
         telemetry.close()
     except Exception:
         pass
+
+
+# ---- 迁移持久化门（P3-04 E）：迁移进行中暂停一切后台写入 ----
+_gate_lock = threading.Lock()
+_gate_engaged = False
+
+
+def engage_migration_gate() -> None:
+    """启用加密前落门：后台循环（initiative/维护/agent/tick）据此跳过一轮。"""
+    global _gate_engaged
+    with _gate_lock:
+        globals()["_gate_engaged"] = True
+
+
+def release_migration_gate() -> None:
+    global _gate_engaged
+    with _gate_lock:
+        globals()["_gate_engaged"] = False
+
+
+def migration_gate_engaged() -> bool:
+    return _gate_engaged

@@ -586,9 +586,12 @@ async def initiative_loop() -> None:
     logger.info("[主动性] 引擎启动，轮询间隔 {}s", config.proactive_check_interval_sec)
     while True:
         try:
-            n = await _tick_once()
-            if n:
-                logger.info("[主动性] 本轮主动联系 {} 人", n)
+            from .storage import runtime as _rt
+
+            if not _rt.migration_gate_engaged():
+                n = await _tick_once()
+                if n:
+                    logger.info("[主动性] 本轮主动联系 {} 人", n)
         except Exception as e:
             logger.warning("[主动性] 循环异常: {}", e)
         await asyncio.sleep(config.proactive_check_interval_sec)

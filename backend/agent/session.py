@@ -579,6 +579,11 @@ async def agent_scheduler_loop(interval: int = 60) -> None:
 
     while True:
         try:
+            from ..storage import runtime as _rt
+
+            if _rt.migration_gate_engaged():
+                await asyncio.sleep(max(10, int(interval)))
+                continue
             if not reset_in_progress():
                 recover_stale_tasks()
                 # 复用 HTTP 层的统一启动器：身份、确认通道、取消句柄、reset epoch
