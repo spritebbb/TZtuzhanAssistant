@@ -330,6 +330,11 @@ async def maintenance_loop() -> None:
     next_clean = 0.0
     while True:
         now = time.time()
+        from ..storage import runtime as _rt
+
+        if _rt.migration_gate_engaged():
+            await asyncio.sleep(5)
+            continue
         try:
             if now >= next_ckpt:
                 await asyncio.to_thread(checkpoint_all)

@@ -94,7 +94,10 @@ def test_full_migration_roundtrip_and_cleanup(root: Path) -> None:
 
     # 资产：索引存在且逐个解密往返一致
     index = json.loads((data / "asset-index.json").read_text(encoding="utf-8"))
-    assert set(index) == {"imgs/photo.png", "documents/note.txt", "personas/default/card.md"}
+    # personas 不加密（文件直读），改明文随迁
+    assert set(index) == {"imgs/photo.png", "documents/note.txt"}
+    assert (data / "personas" / "default" / "card.md").read_text(encoding="utf-8") == "# 人格卡"
+    assert "personas/" in journal.get("carried_over", []), journal
     for rel, meta in index.items():
         plain = decrypt_to_bytes(data / "assets" / meta["container"], KEY,
                                  expected_domain=meta["domain"])

@@ -32,6 +32,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from ..core.log import logger
 from .connect import (
     SQLITE_HEADER,
     connect_database,
@@ -47,12 +48,21 @@ STATES = (
 # 三个运行时库（与 maintenance/loop.py 的 checkpoint 集合一致）
 DATABASE_NAMES = ("bot.db", "sessions.db", "agent_tasks.db")
 # 资产目录 → C 片分域；可重建产物（chroma/tts_cache/日志/telemetry）不迁移
+# personas 不在列：人格卡是文件直读（persona_profiles），加密会打断读取——
+# 改为明文随迁（CARRY_OVER），其加密化需先改造读取端，属后续切片。
 ASSET_DOMAINS: dict[str, str] = {
     "imgs": "media",
     "screenshots": "media",
     "documents": "attachment",
-    "personas": "persona",
 }
+# 切换后从明文目录搬回新 data root 的非敏感运行配置（明文保留）与文件库
+CARRY_OVER: tuple[str, ...] = (
+    "feature_flags.json",
+    "mcp_servers.json",
+    "plugins.json",
+    "memes.json",
+    "personas",
+)
 STAGING_SUFFIX = ".encrypted-staging"
 
 
@@ -313,6 +323,21 @@ def migrate_data_root(
             _restore_sink()
             raise fail(f"目录切换失败已回滚：{exc}") from exc
         _restore_sink()
+        # 非敏感运行配置与人格文件库随迁（明文保留；journal 记录清单）
+        carried: list[str] = []
+        for name in CARRY_OVER:
+            src = plaintext_keep / name
+            dst = data_root / name
+            try:
+                if src.is_dir():
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                    carried.append(name + "/")
+                elif src.is_file():
+                    shutil.copy2(src, dst)
+                    carried.append(name)
+            except OSError as exc:
+                logger.warning("[迁移] 随迁失败 %s: %s", name, exc)
+        journal["carried_over"] = carried
         journal["state"] = "switched"
         journal["state"] = "cleanup_pending"
         _write_journal(data_root, journal)
