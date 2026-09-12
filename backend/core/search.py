@@ -86,14 +86,14 @@ def web_search(query: str, max_results: int = 5, *, force_refresh: bool = False)
             return cached[:max_results]
 
     engine = getattr(config, "search_engine", "bing")
-    order = ["bing", "ddg"] if engine != "ddg" else ["ddg", "bing"]
-    if getattr(config, "search_api_key", ""):
-        order.insert(0, "bocha")
+    order = _provider_order(query, engine)
 
     errors = []
     for eng in order:
         if eng == "bocha":
             results, err = _bocha_search(query, max_results)
+        elif eng == "tavily":
+            results, err = _tavily_search(query, max_results)
         elif eng == "bing":
             results, err = _bing_search(query, max_results)
         else:
@@ -111,6 +111,80 @@ def web_search(query: str, max_results: int = 5, *, force_refresh: bool = False)
     web_search_last_error = "；".join(errors)
     logger.warning("[搜索] 全部引擎失败：{}（query={!r}）", web_search_last_error, query[:60])
     return []
+
+
+def _has_cjk(text: str) -> bool:
+    """查询是否含中日韩字符——决定优先走哪条轨（P0-04 C2 实测结论）。"""
+    return bool(re.search(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", text))
+
+
+def _provider_order(query: str, engine: str) -> list[str]:
+    """按「中英文分工」排定引擎顺序（P0-04 C2 双轨实测结论）。
+
+    实测（各 10 条，2026-09-12）：博查平均 0.27s 且中文查询返回中文源；
+    Tavily 平均 2.39s 但英文查询返回英文源，反之博查对英文查询会退化成
+    中文站、Tavily 对中文查询返回英文厂商文档；两者域名重合度约 0.02，
+    候选池互补。故：中文查询博查优先，非中文查询 Tavily 优先，互为回退。
+
+    未配置对应 key 时该轨不进顺序——默认行为与接线前完全一致。
+    """
+    base = ["ddg", "bing"] if engine == "ddg" else ["bing", "ddg"]
+    order: list[str] = []
+    has_bocha = bool(getattr(config, "search_api_key", ""))
+    has_tavily = bool(getattr(config, "tavily_api_key", ""))
+    if has_bocha and has_tavily:
+        order = ["bocha", "tavily"] if _has_cjk(query) else ["tavily", "bocha"]
+    elif has_bocha:
+        order = ["bocha"]
+    elif has_tavily:
+        order = ["tavily"]
+    return order + base
+
+
+def _tavily_search(query: str, max_results: int):
+    """通过 Tavily 搜索（英文源强，需 API key）。返回 (results, error)。"""
+    token = getattr(config, "tavily_api_key", "")
+    if not token:
+        return [], "未配置 TAVILY_API_KEY"
+    url = "https://api.tavily.com/search"
+    payload = json.dumps(
+        {
+            "query": query,
+            "max_results": max(1, min(10, max_results)),
+            "search_depth": "basic",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return [], f"网络错误: {e}"
+
+    if not isinstance(data, dict):
+        return [], "API 返回异常: 非对象"
+    if data.get("error"):
+        return [], f"API 返回异常: {data.get('error')}"
+    results = []
+    for r in data.get("results") or []:
+        if not isinstance(r, dict):
+            continue
+        results.append(
+            {
+                "title": r.get("title") or "",
+                "snippet": r.get("content") or r.get("snippet") or "",
+                "url": r.get("url") or "",
+            }
+        )
+    # 实测见过 status=success 但 results 为空：空结果必须当失败，好让路由继续回退
+    return results, ("" if results else "无结果")
 
 
 def _bocha_search(query: str, max_results: int):

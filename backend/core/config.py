@@ -91,6 +91,9 @@ class Config:
         self.search_enabled: bool = os.getenv("SEARCH_ENABLED", "1") != "0"
         self.search_engine: str = os.getenv("SEARCH_ENGINE", "bing").lower()
         self.search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()
+        # P0-04 C2 双轨实测结论：博查负责中文查询（快、中文源），Tavily 负责
+        # 非中文查询（英文源强），互为回退；只配一个也能用（见 search._provider_order）。
+        self.tavily_api_key: str = os.getenv("TAVILY_API_KEY", "").strip()
 
         # 记忆语义检索：用户疑似回忆（上次/之前/还记得…）时，先用 LLM 把问题
         # 扩展成多个检索词再查长期记忆，提升召回；关闭则退回 v1 关键词检索
