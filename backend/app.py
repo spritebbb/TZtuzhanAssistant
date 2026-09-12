@@ -35,6 +35,7 @@ from .api import (
     initiative,
     keepsake,
     knowledge,
+    lock,
     mcp_servers,
     memory_admin,
     meta,
@@ -193,8 +194,36 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False, "error": "token 无效"}, status_code=403)
         return await call_next(request)
 
+    @app.middleware("http")
+    async def _app_lock_guard(request, call_next):
+        """P3-04 D 应用锁：锁定状态下除解锁/健康端点外全部 423。
+
+        锁定语义 = key broker 已忘掉 MK（不是遮窗口）；解锁前不放行任何
+        会读私人数据或触发动作的路径。/api/lock* 自身必须可达（否则无门），
+        /api/health 保留给探针与 Electron 启动检测。
+
+        三态：未初始化密钥槽 = inactive，不拦任何请求（E 片迁移前的现状，
+        现有部署零行为变化）；初始化过或显式锁定过 = engaged，重启后以
+        锁定态启动，需解锁才能使用。
+        """
+        from .core.config import config
+        from .core.key_broker import broker
+
+        b = broker()
+        b.engage_if_slots(config.data_dir / "keyslots")
+        path = request.url.path
+        if path.startswith("/api/lock") or path == "/api/health":
+            return await call_next(request)
+        if b.status()["state"] == "locked":
+            return JSONResponse(
+                {"ok": False, "error": "应用已锁定", "code": "app_locked"},
+                status_code=423,
+            )
+        return await call_next(request)
+
     # 注册路由
     app.include_router(health.router)
+    app.include_router(lock.router)
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)

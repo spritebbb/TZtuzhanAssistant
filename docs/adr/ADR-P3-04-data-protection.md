@@ -1,6 +1,6 @@
 # ADR P3-04：数据保护边界与 SQLCipher 接入顺序
 
-- 状态：A/B/C 离线切片已验证；D–F 待实施
+- 状态：A/B/C/D 离线切片已验证；E–F 待实施
 - 日期：2026-09-10
 - 执行：Codex
 - 决策依据：`docs/Zcode技术指导.md` P3-04 与 §21.1
@@ -45,13 +45,21 @@
 4. `backend/storage/vector_embeddings.py` 建立独立 SQLCipher 向量库，只保存稳定 `source_id/chunk_id/model_id`、向量 blob、内容 hash 和版本，不复制源文本。`vector_models` 锁定每个模型的维度；启动后解包到 `MemoryVectorIndex` 做确定性余弦线性检索，进程退出即丢弃内存索引。
 5. C 仍是离线可组合件：当前运行时继续使用既有明文数据目录与 Chroma。D 提供正式 MK/key broker、E 完成迁移切换后，才允许把真实媒体和向量写入这些入口，并清理可重建的明文 Chroma 目录。
 
+## D 切片决策（2026-09-12，执行：ZCode（GLM））
+
+1. `backend/core/keyslots.py`：MK 为 256-bit `os.urandom`。本机槽 = DPAPI CurrentUser（`CryptProtectData`，描述串 `tztuzhan-mk`，`UI_FORBIDDEN`），落盘 `keyslots/local.dpapi`，写后原子替换；恢复槽 = Argon2id（本机标定 t=4/m=128MiB/p=4，实测约 120ms，参数随槽落盘并按记录执行，读取时做边界校验）派生 KEK，AES-256-GCM 包装 MK，落盘 salt/参数/nonce/ciphertext，无口令无 KEK。
+2. 槽写入即自检：恢复槽落盘后立即实际解包，解不开就删除该槽（不留「看似存在实则解不开」的槽）。初始化在存在任意槽时拒绝（防静默换 MK）；轮换 = 用当前 MK 重建恢复槽，MK 不变。
+3. `backend/core/key_broker.py`：进程内单例唯一持有 MK，**零知识接口**——业务侧只能按域派生 data key / 取数据库 key，不外泄 MK 本体；`lock()` 即清零并丢弃（尽力缩短生命周期，不宣称绝对内存清零）。
+4. 应用锁三态（自行补充的决策，理由：D 片若两态会把从未初始化的用户在启动时锁死）：`inactive`（无 keyslots，中间件不拦任何请求——**现有部署零行为变化**）→ `unlocked` ⇄ `locked`。已初始化的用户重启后由 `engage_if_slots` 进入 `locked`，本机槽一键解锁或恢复口令解锁。
+5. `backend/api/lock.py` + `app.py` 中间件：锁定态下除 `/api/lock*` 与 `/api/health` 外全部 423 `app_locked`；前端负责清空敏感 store/停 TTS/停流（「仅遮窗口不算锁定」——后端侧语义是忘钥匙）。恢复口令失败统一 401（不区分口令错/槽坏），15 分钟窗口 5 次失败后 429 限速。`/api/lock` 的 status 如实返回 `data_encrypted: false`（E 片前数据仍为明文，不把应用锁说成磁盘加密）。
+6. 前端解锁界面属 E 片配套（迁移后才有解锁刚需）；D 片交付后端语义与 API，`initialize` 仅在无任何槽时可用。
+
 ## 未完成边界
 
-- D：MK、DPAPI 本机槽、Argon2id 恢复槽、应用锁和进程内 key broker。
-- E：全局 persistence gate、迁移状态机、隔离进程校验与原子目录切换。
+- E：全局 persistence gate、迁移状态机、隔离进程校验与原子目录切换；含前端锁定/解锁界面接线。
 - F：同 generation 加密备份、空目录恢复、目标机新建 DPAPI 槽和恢复演练。
 
-在 D/E 完成并通过用户数据副本演练前，不给运行时数据库传入密钥，也不删除任何明文原库。
+在 E 完成并通过用户数据副本演练前，不给运行时数据库传入密钥，也不删除任何明文原库。D 片的 broker 是「随时可挂钥匙的锁架」，不改变现有数据路径。
 
 ## 验证记录
 
@@ -61,6 +69,10 @@
 .venv/Scripts/python.exe scripts/sqlcipher_poc.py
 .venv/Scripts/python.exe tests/test_schema_backup.py
 .venv/Scripts/python.exe tests/test_relationship_bundle.py
+.venv/Scripts/python.exe tests/test_keyslots.py
+.venv/Scripts/python.exe tests/test_app_lock.py
 ```
+
+D 片验证（2026-09-12，ZCode）：`test_keyslots.py` 五组（双槽往返/统一失败与二次输入/轮换/重复初始化与损坏槽/边界）与 `test_app_lock.py` 六组（inactive 不拦/锁定 423 与白名单/限速/忘钥匙语义/重启锁定态/参数校验）全绿；suite runner 复跑 data_protection、encrypted_storage、schema_backup、flags_http、m4_relationship 无回归。真实 `data/keyslots` 未创建（未调用 initialize），运行时行为与 D 片前完全一致。
 
 真数据迁移记录：未执行（按计划留空）。
