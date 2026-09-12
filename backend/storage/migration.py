@@ -388,6 +388,26 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - 子进程�
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) == 3 and argv[0] == "--verify-child":
         return _verify_child_main(argv[1], argv[2])
+    if len(argv) == 2 and argv[0] in ("--migrate", "--cleanup"):
+        # 停应用后的迁移/收尾 CLI：MK 从本机 DPAPI 槽读取（同 Windows 用户）。
+        # 必须在全新进程中运行——Chroma 的 HNSW mmap 只随进程消失，
+        # 应用进程内无法完成目录切换（真实演练验证）。
+        root = Path(argv[1]).resolve()
+        from ..core.keyslots import KeySlotError, read_local_slot
+
+        try:
+            if argv[0] == "--migrate":
+                journal = migrate_data_root(root, read_local_slot(root / "keyslots"))
+                print(json.dumps({"ok": True, "state": journal["state"],
+                                  "plaintext_keep": journal["plaintext_keep"]},
+                                 ensure_ascii=False))
+            else:
+                journal = finish_cleanup(root)
+                print(json.dumps({"ok": True, "state": journal["state"]}, ensure_ascii=False))
+            return 0
+        except (MigrationError, KeySlotError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+            return 1
     print(json.dumps({"ok": False, "error": "未知子命令"}))
     return 2
 
