@@ -222,3 +222,27 @@ def create_encrypted_copy(source: str | Path, target: str | Path, key: bytes) ->
         "source_manifest": source_manifest,
         "target_manifest": verified["manifest"],
     }
+
+
+def operational_errors() -> tuple[type[Exception], ...]:
+    """sqlite3 与 sqlcipher3 两个驱动的 OperationalError 元组。
+
+    P3-04 E：SQLCipher 驱动的异常与 sqlite3 是平行体系（互不继承），
+    幂等兼容 DDL（「列已存在则跳过」类）必须同时捕获两者。模块级常量
+    ``OPERATIONAL_ERRORS`` 供 except 子句直接引用。
+    """
+    return OPERATIONAL_ERRORS
+
+
+def _operational_errors() -> tuple[type[Exception], ...]:
+    errors: list[type[Exception]] = [sqlite3.OperationalError]
+    try:
+        from sqlcipher3 import dbapi2 as _sqlcipher
+
+        errors.append(_sqlcipher.OperationalError)
+    except Exception:
+        pass
+    return tuple(errors)
+
+
+OPERATIONAL_ERRORS = _operational_errors()

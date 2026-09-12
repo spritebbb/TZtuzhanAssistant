@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -26,6 +27,7 @@ from ..core.config import config
 from ..core.persona_profiles import active_id, session_storage_id
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 from ..storage.connect import connect_database
+from ..storage.connect import OPERATIONAL_ERRORS
 
 _DB: Path = config.data_dir / "sessions.db"
 _SCHEMA_VERSION = 1
@@ -34,10 +36,28 @@ _SCHEMA_VERSION = 1
 CURRENT_SESSION_ID = "current"
 
 _lock = asyncio.Lock()
+# P3-04 E：建表初始化从模块导入期改为首次连接前惰性执行——加密模式下
+# 应用锁定时 MK 不在内存，库无法（也不应）在启动期打开。
+_initialized = False
+_init_lock = threading.Lock()
 
 
 def _connect() -> sqlite3.Connection:
-    conn = connect_database(_DB, row_factory=True)
+    global _initialized
+    if not _initialized:
+        with _init_lock:
+            if not _initialized:
+                _init()
+                _initialized = True
+    return _connect_raw()
+
+
+def _connect_raw() -> sqlite3.Connection:
+    """打开连接（不含建表初始化；_init 内部也走这里，避免递归死锁）。"""
+    from ..storage import runtime
+
+    key = runtime.database_key_or_none()
+    conn = connect_database(_DB, row_factory=True, encrypted_key=key)
     conn.execute("PRAGMA journal_mode=WAL")
     # 与 userdb.py 一致：设置 busy_timeout，避免多连接/未来多进程并发写时
     # 直接撞 "database is locked" 异常而非短暂等待
@@ -57,9 +77,13 @@ def _ensure_session(conn: sqlite3.Connection, session_id: str) -> None:
 
 
 def _init() -> None:
+    from ..storage import runtime
+
     config.data_dir.mkdir(parents=True, exist_ok=True)
-    create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
-    conn = _connect()
+    if not runtime.encrypted_mode():
+        # 加密库的明文升级前快照无意义（读不出 schema），备份由 F 片接管
+        create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
+    conn = _connect_raw()
     try:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS sessions ("
@@ -74,7 +98,7 @@ def _init() -> None:
         )
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN explanation_json TEXT")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
@@ -88,7 +112,7 @@ def _init() -> None:
         )
         try:
             conn.execute("ALTER TABLE archives ADD COLUMN persona_id TEXT NOT NULL DEFAULT 'default'")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_archives_created ON archives(created_at)"
@@ -493,8 +517,11 @@ async def search_archives(q: str) -> list[dict]:
 
 
 def init() -> None:
-    _init()
-
-
-# 启动时初始化（幂等）
-init()
+    """显式初始化入口（幂等；_connect 也会自动确保）。"""
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if not _initialized:
+            _init()
+            _initialized = True

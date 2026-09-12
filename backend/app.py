@@ -299,7 +299,17 @@ def create_app() -> FastAPI:
                 )
         except Exception:
             logger.exception("[配置] 启动配置校验失败（不影响启动）")
-        session_store.init()
+        try:
+            # P3-04 E：加密锁定态 MK 不在内存，库无法打开——初始化延后到
+            # 解锁后的首次连接（session store 的 _connect 已惰性确保）。
+            from .storage import runtime as _rt
+
+            if _rt.encrypted_mode() and _rt.locked():
+                logger.info("[启动] 加密锁定态：会话库初始化延后至解锁")
+            else:
+                session_store.init()
+        except Exception:
+            logger.exception("[启动] 会话库初始化失败（不影响进程启动）")
         # 记忆引擎 v2 初始化（后台：Chroma + embedding + 存量迁移，不阻塞启动）。
         # 注意：存量迁移必须等 embedding 模型就绪后再跑，否则 migrate 会以 768 维
         # 哈希回退向量去写已锁 1024 维的 collection，整批写入失败（见下方 prewarm

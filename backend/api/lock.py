@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Request
@@ -87,7 +88,11 @@ async def lock_status() -> JSONResponse:
 async def lock_now() -> JSONResponse:
     """锁定：立即忘掉主密钥并关门（幂等）。"""
     result = broker().lock()
-    logger.info("[应用锁] 已锁定（key_id 清零）")
+    # 忘钥匙的存储侧落实：关闭已打开的库连接，解锁后由惰性开库重连
+    from ..storage import runtime
+
+    await asyncio.to_thread(runtime.close_all_databases)
+    logger.info("[应用锁] 已锁定（key_id 清零，库连接已关闭）")
     return JSONResponse({"ok": True, **result})
 
 

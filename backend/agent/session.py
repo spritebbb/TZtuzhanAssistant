@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -76,7 +77,23 @@ class AgentTask:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = connect_database(_DB, row_factory=True)
+    # P3-04 E：建表初始化从模块导入期（原 _init() 在模块尾执行）改为首次
+    # 连接前惰性执行——加密模式下锁定时 MK 不在内存，库无法在启动期打开。
+    global _initialized
+    if not _initialized:
+        with _init_lock:
+            if not _initialized:
+                _init()
+                _initialized = True
+    return _connect_raw()
+
+
+def _connect_raw() -> sqlite3.Connection:
+    """打开连接（不含建表初始化；_init 内部也走这里，避免递归死锁）。"""
+    from ..storage import runtime
+
+    key = runtime.database_key_or_none()
+    conn = connect_database(_DB, row_factory=True, encrypted_key=key)
     conn.execute("PRAGMA journal_mode=WAL")
     # 与 store.py / userdb.py 对齐：设置 busy_timeout，避免 run_task（后台线程）
     # 与 cancel_task / confirm_step（HTTP 请求）独立连接并发读写 WAL 单写者库时
@@ -85,10 +102,18 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+_init_initialized = False
+_init_lock = threading.Lock()
+
+
 def _init() -> None:
+    from ..storage import runtime
+
     config.data_dir.mkdir(parents=True, exist_ok=True)
-    create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
-    conn = _connect()
+    if not runtime.encrypted_mode():
+        # 加密库的明文升级前快照无意义，备份由 F 片接管
+        create_pre_upgrade_backup(_DB, config.data_dir / "backups", _SCHEMA_VERSION)
+    conn = _connect_raw()
     try:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS agent_tasks ("
@@ -657,4 +682,6 @@ def to_dict(task: AgentTask) -> dict:
     }
 
 
-_init()
+# 启动时初始化改为惰性（_connect 首次调用时确保），加密锁定态不打开库
+_initialized = False
+_init_lock = threading.Lock()

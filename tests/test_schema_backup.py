@@ -80,8 +80,14 @@ def main() -> None:
         os.environ["MEMORY_V2"] = "0"
         os.environ["MEMORY_MEM0"] = "0"
         from backend.core.userdb import db
-        from backend.session import store  # noqa: F401
-        from backend.agent import session  # noqa: F401
+        from backend.session import store
+        from backend.agent import session
+
+        # P3-04 E 惰性化：导入不再立即开库/升级，需显式触发首次连接
+        # （升级前快照逻辑随首次连接执行，语义不变）
+        db._ensure_connected()
+        store.init()
+        session._connect().close()
 
         for name, expected_version in versions.items():
             conn = sqlite3.connect(runtime / name)
