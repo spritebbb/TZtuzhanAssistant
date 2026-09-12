@@ -39,7 +39,7 @@ from .connect import (
     verify_encrypted_database,
 )
 
-JOURNAL_NAME = "encryption-migration.json"
+JOURNAL_PREFIX = "encryption-migration"
 STATES = (
     "unencrypted", "preparing", "verified", "switched",
     "cleanup_pending", "encrypted", "failed",
@@ -60,8 +60,39 @@ class MigrationError(RuntimeError):
     """迁移状态机拒绝执行或某一步失败（journal 会记录原因）。"""
 
 
+# 目录句柄释放钩子：进程内迁移时，日志文件句柄等会钉住数据目录导致
+# Windows 上 rename 失败。运行时（log sink 等）注册释放器，引擎在切换前
+# 调用。钩子必须幂等、失败不抛（尽力而为）。
+# 目录句柄释放：进程内已知钉点（loguru bot.log sink）由 _rename_dir 直接处理。
+
+
+def _rename_dir(src: Path, dst: Path) -> None:
+    """带句柄释放与短重试的目录改名（Windows 对打开句柄零容忍）。"""
+    last_exc: OSError | None = None
+    for attempt in range(4):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            try:
+                from ..core.log import release_file_sink
+
+                release_file_sink()  # 幂等；释放后不得立即 restore（会按旧路径重建目录）
+            except Exception:
+                pass
+            time.sleep(0.3 * (attempt + 1))
+    raise last_exc if last_exc else OSError("rename failed")
+
+
+def _journal_path(data_root: Path) -> Path:
+    """journal 放在数据目录父级（跨目录切换存活）并按目录名唯一化——
+    多个候选数据目录（测试/多实例）互不覆盖。"""
+    return data_root.parent / f"{JOURNAL_PREFIX}.{data_root.name}.json"
+
+
 def read_journal(data_root: str | Path) -> dict | None:
-    journal = Path(data_root).parent / JOURNAL_NAME
+    journal = _journal_path(Path(data_root))
     if not journal.is_file():
         return None
     try:
@@ -72,7 +103,7 @@ def read_journal(data_root: str | Path) -> dict | None:
 
 def _write_journal(data_root: Path, journal: dict) -> None:
     journal["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-    target = data_root.parent / JOURNAL_NAME
+    target = _journal_path(data_root)
     tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(journal, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, target)
@@ -231,6 +262,12 @@ def migrate_data_root(
 
     try:
         # ---- preparing：一致性快照 + 逐库加密导出 ----
+        # keyslots 随迁移走：目录切换后新 data root 必须仍持有槽（DPAPI/口令
+        # 保护的密文，明文复制无风险）；否则锁定/解锁在切换后失效。
+        keyslots_dir = data_root / "keyslots"
+        if keyslots_dir.is_dir():
+            shutil.copytree(keyslots_dir, staging / "keyslots", dirs_exist_ok=True)
+            journal["keyslots_migrated"] = True
         for name in DATABASE_NAMES:
             source = data_root / name
             _checkpoint_source(source)
@@ -263,12 +300,19 @@ def migrate_data_root(
         _write_journal(data_root, journal)
 
         # ---- switched：原子目录切换（失败立即回滚 rename） ----
-        os.rename(data_root, plaintext_keep)
+        # 日志 sink 在切换前释放；无论成败，结束后按当前 data root 重建
+        from ..core.log import release_file_sink as _release_sink
+        from ..core.log import restore_file_sink as _restore_sink
+
         try:
-            os.rename(staging, data_root)
+            _release_sink()
+            _rename_dir(data_root, plaintext_keep)
+            _rename_dir(staging, data_root)
         except OSError as exc:
-            os.rename(plaintext_keep, data_root)  # 回滚：明文目录归位
+            _rename_dir(plaintext_keep, data_root)  # 回滚：明文目录归位
+            _restore_sink()
             raise fail(f"目录切换失败已回滚：{exc}") from exc
+        _restore_sink()
         journal["state"] = "switched"
         journal["state"] = "cleanup_pending"
         _write_journal(data_root, journal)

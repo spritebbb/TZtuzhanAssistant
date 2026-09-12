@@ -99,9 +99,12 @@ def _connection() -> sqlite3.Connection:
             _conn = None
             _last_prune_day = ""
         if _conn is None:
+            from ..storage import runtime
+
             path.parent.mkdir(parents=True, exist_ok=True)
             _conn = connect_database(
-                path, timeout=10, check_same_thread=False, row_factory=True
+                path, timeout=10, check_same_thread=False, row_factory=True,
+                encrypted_key=runtime.database_key_or_none(),
             )
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.executescript(
@@ -213,6 +216,12 @@ def record_event(
     now: datetime | None = None,
 ) -> bool:
     """校验并记录一个事件；出现字段越权时拒绝整条事件。"""
+    # P3-04 E：应用锁定（加密模式 MK 不在内存）时静默跳过——遥测是非关键
+    # 路径，不能因为开不了库而阻塞对话，也不该在锁定期间落盘。
+    from ..storage import runtime
+
+    if runtime.encrypted_mode() and runtime.locked():
+        return False
     unknown = set(payload) - EVENT_FIELDS
     if unknown:
         raise ValueError(f"不允许的遥测字段: {', '.join(sorted(unknown))}")
@@ -347,6 +356,11 @@ def clear_user(user_id: str) -> int:
         second = conn.execute("DELETE FROM telemetry_daily WHERE user_scope_hash=?", (scope_hash,)).rowcount
         conn.commit()
     return int(first + second)
+
+
+def close() -> None:
+    """关闭并丢弃当前连接（应用锁锁定时由 runtime 调用）。"""
+    close_for_tests()
 
 
 def close_for_tests() -> None:

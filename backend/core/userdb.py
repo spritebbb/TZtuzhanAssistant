@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 
 from .config import config
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
+from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
 _SCHEMA_VERSION = 41  # v41: durable acknowledgement for monitoring notifications
@@ -994,7 +995,7 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("PRAGMA journal_mode = WAL")
             return
-        except sqlite3.OperationalError as exc:
+        except OPERATIONAL_ERRORS as exc:
             if "locked" not in str(exc).lower() or attempt == 19:
                 raise
             time.sleep(0.05 * (attempt + 1))
@@ -1017,12 +1018,48 @@ class UserDB:
         # 写锁：pipeline 按用户串行，但 daily/profile/mood/greeting/agent 等
         # 模块也直接写同一连接，统一加锁避免并发写竞态
         self._lock = threading.RLock()
-        config.data_dir.mkdir(parents=True, exist_ok=True)
-        path = config.data_dir / "bot.db"
-        create_pre_upgrade_backup(path, config.data_dir / "backups", _SCHEMA_VERSION)
-        self.conn = connect_database(
-            path, check_same_thread=False, timeout=30.0, row_factory=True
-        )
+        # P3-04 E：连接惰性化——加密模式下应用锁定时 MK 不在内存，库要等
+        # 解锁后首次访问才打开（明文模式行为与惰性化前一致：首次访问即连）。
+        self._conn: sqlite3.Connection | None = None
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """当前连接（首次访问触发惰性开库；锁定+加密态抛 DatabaseLockedError）。"""
+        self._ensure_connected()
+        return self._conn  # type: ignore[return-value]
+
+    def _ensure_connected(self) -> None:
+        if self._conn is not None:
+            return
+        with self._lock:
+            if self._conn is not None:
+                return
+            from ..storage import runtime
+
+            key = runtime.database_key_or_none()
+            config.data_dir.mkdir(parents=True, exist_ok=True)
+            path = config.data_dir / "bot.db"
+            if key is None:
+                # 明文模式维持升级前快照语义；加密库的备份由 F 片接管，
+                # 明文快照流程对 SQLCipher 文件只会得到「非数据库」错误。
+                create_pre_upgrade_backup(path, config.data_dir / "backups", _SCHEMA_VERSION)
+            self._conn = connect_database(
+                path, check_same_thread=False, timeout=30.0, row_factory=True,
+                encrypted_key=key,
+            )
+            self._prepare_schema()
+
+    @_locked
+    def close(self) -> None:
+        """关闭并丢弃当前连接（应用锁锁定时由 runtime 调用；解锁后惰性重连）。"""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
+
+    def _prepare_schema(self) -> None:
+        assert self._conn is not None
         self.conn.execute("PRAGMA busy_timeout = 5000")
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
@@ -1084,14 +1121,14 @@ class UserDB:
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # P1-05：important_dates 补 namespace 列（角色纪念日/用户真实日子分流）
         try:
             self.conn.execute(
                 "ALTER TABLE important_dates ADD COLUMN namespace TEXT NOT NULL DEFAULT 'user_real'"
             )
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # P2-03：promises 补对称约定列；旧 pending 状态统一迁移为 open
         for col_decl in (
@@ -1104,14 +1141,14 @@ class UserDB:
         ):
             try:
                 self.conn.execute(f"ALTER TABLE promises ADD COLUMN {col_decl}")
-            except sqlite3.OperationalError:
+            except OPERATIONAL_ERRORS:
                 pass
         self.conn.execute("UPDATE promises SET status='open' WHERE status='pending'")
         # P2-01：users 补 trust/intimacy 两列（NULL=未迁移，首次回填=旧 affection）
         for col in ("trust", "intimacy"):
             try:
                 self.conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER")
-            except sqlite3.OperationalError:
+            except OPERATIONAL_ERRORS:
                 pass
         # P2-01 首次迁移：仅回填 NULL（判据=trust IS NULL），二次运行零副作用
         self.conn.execute(
@@ -1122,36 +1159,36 @@ class UserDB:
             self.conn.execute(
                 "ALTER TABLE long_memory ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
             )
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # 心情系统字段（旧库迁移）
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN mood_value INTEGER NOT NULL DEFAULT 60")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN mood_updated_at TEXT")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # C5 养成仪表盘：旧 affection_log 补绝对值列，便于准确画历史曲线。
         try:
             self.conn.execute("ALTER TABLE affection_log ADD COLUMN value INTEGER")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # 旧库迁移：user_meta 补 last_profile_msg_id 列
         try:
             self.conn.execute("ALTER TABLE user_meta ADD COLUMN last_profile_msg_id INTEGER NOT NULL DEFAULT 0")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # 旧库迁移：stickers 补 emotion 列
         try:
             self.conn.execute("ALTER TABLE stickers ADD COLUMN emotion TEXT NOT NULL DEFAULT ''")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # 旧库迁移：tasks 补 blocked_reason 列
         try:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT NOT NULL DEFAULT ''")
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             pass
         # v2 记忆溯源：旧事实保守标为 legacy/中等置信度，保持原有召回行为。
         fact_columns = (
@@ -1168,7 +1205,7 @@ class UserDB:
         for column, definition in fact_columns:
             try:
                 self.conn.execute(f"ALTER TABLE facts ADD COLUMN {column} {definition}")
-            except sqlite3.OperationalError:
+            except OPERATIONAL_ERRORS:
                 pass
         # M3.2 专注陪伴：activities 复用为 focus 类型的计时字段（旧库迁移）。
         # 幂等：列已存在时 ALTER 报 duplicate column，按惯例静默跳过。
@@ -1179,7 +1216,7 @@ class UserDB:
         ):
             try:
                 self.conn.execute(statement)
-            except sqlite3.OperationalError:
+            except OPERATIONAL_ERRORS:
                 pass
         # 用户身份统一迁移：历史版本聊天链路用 f"session_{session_id}"（单一会话
         # 下即 "session_current"），现统一为 "assistant-main"，与 agent 任务代理、
@@ -2042,6 +2079,7 @@ class UserDB:
         self.conn.execute("PRAGMA busy_timeout = 5000")
         self.conn.commit()
         self.conn.close()
+        self._conn = None
 
         path = config.data_dir / "bot.db"
         deleted = False
@@ -2053,8 +2091,13 @@ class UserDB:
             except PermissionError:
                 time.sleep(0.3)
 
-        self.conn = connect_database(
-            path, check_same_thread=False, timeout=30.0, row_factory=True
+        # 就地重建连接：加密模式沿用当前 MK（reset 不退出加密态）
+        from ..storage import runtime
+
+        key = runtime.database_key_or_none()
+        self._conn = connect_database(
+            path, check_same_thread=False, timeout=30.0, row_factory=True,
+            encrypted_key=key,
         )
         self.conn.execute("PRAGMA busy_timeout = 5000")
         _enable_wal(self.conn)
@@ -2515,7 +2558,7 @@ def save_sticker(user_id: str, file: str, url: str, desc: str, emotion: str = ""
             row = db.conn.execute(
                 "SELECT id FROM stickers WHERE user_id = ? AND url = ?", (user_id, url)
             ).fetchone()
-        except sqlite3.OperationalError:
+        except OPERATIONAL_ERRORS:
             db.conn.executescript(_SCHEMA)  # 旧库补建表
             row = db.conn.execute(
                 "SELECT id FROM stickers WHERE user_id = ? AND url = ?", (user_id, url)

@@ -60,7 +60,9 @@
 2. 可重建产物不迁移并在 journal 记录理由：chroma/chroma_mem0（C 片 vector_embeddings 接管）、tts_cache、telemetry.db、历史明文备份（F 片接管加密备份）、派生日志。
 3. 明文目录在 switched/cleanup_pending 阶段完整保留为 `data.plaintext-<stamp>`；`finish_cleanup` 是显式独立动作（用户确认后调用），永不随迁移自动删除。
 4. journal（encryption-migration.json）存于数据目录**父级**，跨目录切换存活；failed 后允许重跑，cleanup_pending/encrypted 期间拒绝重入。引擎内曾有一处真实缺陷被回归抓出：业务 MigrationError 走直通分支绕过 fail() 落账，状态会卡在中间态——已修。
-5. E 片剩余（运行时接线）：persistence gate（优雅停机 + 拒绝并发写）、启动顺序重构（锁定态下延迟开库，解锁后再连 SQLCipher 库）、「启用加密」API 与 UI 引导、真实数据迁移执行。迁移引擎对一次性数据全流程验证，未触碰真实 data/。
+5. **运行时接线（2026-09-12，ZCode）**：`backend/storage/runtime.py`——加密态判定（journal 指纹缓存）+ 密钥分发（锁定态抛 `DatabaseLockedError`）；userdb 惰性开库（`conn` 属性首次访问触发，明文模式语义不变）、session/agent 库建表初始化从导入期改为首次连接前、telemetry 锁定态静默跳过；锁定端点调用 `close_all_databases()` 关闭库连接（忘钥匙的存储侧落实）；维护循环在加密模式跳过明文 checkpoint/备份（F 片接管）。
+6. **双驱动异常兼容**：sqlcipher3 异常与 sqlite3 是平行体系（互不继承），`storage/connect.OPERATIONAL_ERRORS` 提供双元组，幂等兼容 DDL（「列已存在则跳过」）统一引用——否则加密库上 schema 兼容逻辑全部失效（回归抓出）。
+7. **迁移目录切换与日志句柄**：loguru 的 `bot.log` sink 会钉住数据目录（Windows rename 零容忍）；引擎在 rename 重试前释放 sink、两步 rename 结束后按新 data root 重建（过早 restore 会把刚挪走的目录「复活」，回归抓出）。keyslots 随迁移复制进暂存区（DPAPI/口令保护密文，明文复制无风险），否则切换后锁定/解锁失效。
 
 ## 未完成边界
 

@@ -60,6 +60,14 @@ def _checkpoint_one(path: Path) -> None:
 
 
 def checkpoint_all() -> None:
+    # P3-04 E：加密模式下 checkpoint/明文备份对 SQLCipher 文件无意义（读不出
+    # schema），加密备份由 F 片接管；锁定态一律跳过（MK 不在内存）。
+    from ..storage import runtime
+
+    if runtime.encrypted_mode():
+        if runtime.locked():
+            logger.debug("[维护] 加密锁定态：跳过 checkpoint")
+            return
     for p in (_BOT_DB, _SESSIONS_DB, _AGENT_DB):
         if p.exists():
             _checkpoint_one(p)
@@ -67,6 +75,12 @@ def checkpoint_all() -> None:
 
 def backup() -> Path | None:
     """创建带校验清单的每日快照；任一必需项失败则不留下成功目录。"""
+    from ..storage import runtime
+
+    if runtime.encrypted_mode():
+        # 明文备份管线对 SQLCipher 库会产出损坏副本；加密备份是 F 片范围
+        logger.info("[维护] 加密模式：明文备份停用，等待 F 片加密备份")
+        return None
     try:
         from .backup_manifest import create_periodic_backup, valid_backups
 
