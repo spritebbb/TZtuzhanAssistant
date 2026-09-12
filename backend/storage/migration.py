@@ -91,6 +91,12 @@ def _rename_dir(src: Path, dst: Path) -> None:
                 release_file_sink()  # 幂等；释放后不得立即 restore（会按旧路径重建目录）
             except Exception:
                 pass
+            try:
+                from ..core.memory import vector_store as _vec
+
+                _vec.shutdown()
+            except Exception:
+                pass
             time.sleep(0.3 * (attempt + 1))
     raise last_exc if last_exc else OSError("rename failed")
 
@@ -272,6 +278,14 @@ def migrate_data_root(
 
     try:
         # ---- preparing：一致性快照 + 逐库加密导出 ----
+        # Chroma 持久客户端持有 data/chroma 句柄，会钉住目录切换——迁移不需要
+        # 向量库（SQLite 是权威），先释放；解锁后惰性重建，rebuild_all 重灌。
+        try:
+            from ..core.memory import vector_store as _vec
+
+            _vec.shutdown()
+        except Exception:
+            pass
         # keyslots 随迁移走：目录切换后新 data root 必须仍持有槽（DPAPI/口令
         # 保护的密文，明文复制无风险）；否则锁定/解锁在切换后失效。
         keyslots_dir = data_root / "keyslots"

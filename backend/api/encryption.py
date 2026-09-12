@@ -100,9 +100,16 @@ async def enable_encryption(body: EnableBody) -> JSONResponse:
 
 
 async def _rebuild_vectors() -> None:
-    try:
-        from ..core.memory import vector_store
+    # embedding 模型后台预热需要时间（冷启动数十秒）；就绪前 rebuild_all 会
+    # 拒绝（哈希模式会把库锁回低维）。轮询等待就绪，最多 10 分钟。
+    from ..core.memory import embedding as emb
+    from ..core.memory import vector_store
 
+    for _ in range(60):
+        if emb.is_loaded():
+            break
+        await asyncio.sleep(10)
+    try:
         rebuilt = await asyncio.to_thread(vector_store.rebuild_all, "encryption-migration")
         logger.info("[加密] 向量索引重建完成（{} 条）", rebuilt)
     except Exception:

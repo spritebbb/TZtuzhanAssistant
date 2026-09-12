@@ -91,6 +91,23 @@ def _client_instance():
     return _client
 
 
+def shutdown() -> None:
+    """P3-04 E：释放 Chroma 持久客户端（迁移引擎切换目录前调用）。
+
+    PersistentClient 持有 data/chroma 的 SQLite 句柄，会钉住数据目录；
+    清空系统缓存后连接随之关闭，后续首次使用会按新路径重建。
+    """
+    global _client
+    with _lock:
+        if _client is None:
+            return
+        try:
+            _client.clear_system_cache()
+        except Exception:
+            pass
+        _client = None
+
+
 def enabled() -> bool:
     """Chroma 是否可用。"""
     try:
