@@ -22,6 +22,38 @@ PROVIDERS = {
     "bocha": {"key_ref": "BOCHA_API_KEY", "url": "https://api.bochaai.com/v1/web-search"},
 }
 
+# .env 读到的凭据回退（仅 CLI 入口填充；见 load_dotenv_keys）
+_ENV_FILE_KEYS: dict[str, str] = {}
+
+
+def load_dotenv_keys() -> None:
+    """CLI 入口用：从 .env 补齐凭据，省去手工拼环境变量。
+
+    - ``TAVILY_API_KEY`` / ``BOCHA_API_KEY`` 若已在环境中则不覆盖；
+    - 应用侧搜索只用 ``SEARCH_API_KEY``（博查），实测脚本用 ``BOCHA_API_KEY``，
+      故自动把前者作为后者的回退名，避免同一把 key 在两处各配一遍。
+
+    只在 ``__main__`` 里调用：测试直接调 ``run()`` 时不受 .env 影响，
+    「无凭据 → unavailable、不伪造结果」的契约保持可测。
+    """
+    try:
+        from dotenv import dotenv_values
+    except Exception:  # dotenv 缺失时退回纯环境变量
+        return
+    values = dotenv_values(ROOT / ".env")
+    for ref in ("TAVILY_API_KEY", "BOCHA_API_KEY"):
+        value = (values.get(ref) or "").strip()
+        if value and not os.getenv(ref):
+            _ENV_FILE_KEYS[ref] = value
+    if not os.getenv("BOCHA_API_KEY") and "BOCHA_API_KEY" not in _ENV_FILE_KEYS:
+        legacy = (values.get("SEARCH_API_KEY") or "").strip()
+        if legacy:
+            _ENV_FILE_KEYS["BOCHA_API_KEY"] = legacy
+
+
+def _key_for(ref: str) -> str:
+    return (os.getenv(ref) or _ENV_FILE_KEYS.get(ref) or "").strip()
+
 
 def load_queries(path: Path = FIXTURE) -> list[dict]:
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -145,7 +177,7 @@ async def run(argv=None) -> dict:
         for item in plan:
             if item["checkpoint_key"] in previous:
                 continue
-            key = os.getenv(item["key_ref"], "").strip()
+            key = _key_for(item["key_ref"])
             if not key:
                 report["unavailable"].append({"checkpoint_key": item["checkpoint_key"], "provider": item["provider"], "reason": f"missing {item['key_ref']}"})
             else:
@@ -165,5 +197,24 @@ async def run(argv=None) -> dict:
 
 
 if __name__ == "__main__":
+    load_dotenv_keys()
     result = asyncio.run(run())
     print(f"{result['mode']}: {len(result['plan'])} planned, {len(result['results'])} completed")
+    if result["unavailable"]:
+        reasons = Counter(item["reason"] for item in result["unavailable"])
+        for reason, count in reasons.items():
+            print(f"  unavailable x{count}: {reason}")
+    for provider, stats in result["summary"].items():
+        if not stats["attempted"]:
+            continue
+        latency = stats["latency_sec"] or []
+        avg = f"{sum(latency) / len(latency):.2f}s" if latency else "-"
+        print(f"  {provider:7} 成功 {stats['successful']}/{stats['attempted']}"
+              f"  平均延迟 {avg}  独立域名 {len(stats['domain_distribution'])}")
+    if result["mode"] == "live" and result["results"] and not any(
+        row["status"] == "success" for row in result["results"]
+    ):
+        first_error = next((row.get("error", "") for row in result["results"]), "")
+        print(f"  全部请求失败（首个错误）：{first_error[:160]}")
+        print("  若为 ConnectError/连接被拒，先确认本机出网与代理：项目 .env 的 LLM_PROXY，"
+              "或系统代理设置。")
