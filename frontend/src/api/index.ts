@@ -55,5 +55,10 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (remoteToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${remoteToken}`)
   }
-  return fetch(getApiUrl(path), { ...init, headers })
+  const response = await fetch(getApiUrl(path), { ...init, headers })
+  // P3-04 应用锁：后端 423 = 已锁定。锁面板自身放行，其余唤起全局锁屏事件
+  if (response.status === 423 && !path.startsWith('/api/lock')) {
+    window.dispatchEvent(new CustomEvent('tztuzhan:app-locked'))
+  }
+  return response
 }

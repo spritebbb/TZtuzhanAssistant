@@ -14,7 +14,9 @@ import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
 import CornerPanel from './components/CornerPanel.vue'
 import PersonaSwitcher from './components/PersonaSwitcher.vue'
+import LockScreen from './components/LockScreen.vue'
 import { ensureBaseUrl, apiFetch } from './api'
+import { getLockStatus, lockNow, type LockStatus } from './api/lock'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
 import { useFocusMode } from './utils/focusMode'
@@ -39,6 +41,9 @@ const moreOpen = ref(false)
 const tourOpen = ref(false)
 const moreQuery = ref('')
 const compactUi = ref(true)
+// P3-04 应用锁：locked 时遮罩整个应用（面板全关，等 LockScreen 解锁）
+const lockScreenOpen = ref(false)
+const lockAvailable = ref(false)
 const currentId = ref<string | null>(CURRENT_SESSION_ID)
 const sessionListKey = ref(0)
 const chatReloadKey = ref(0)
@@ -293,6 +298,36 @@ function onPersonaSwitched(profile: PersonaProfile) {
   window.dispatchEvent(new CustomEvent('tztuzhan:persona-switched', { detail: profile }))
 }
 
+// P3-04 应用锁：任何请求收到 423 → 后端已锁，弹锁屏（清面板防旧界面泄数据）
+function onAppLocked(): void {
+  lockScreenOpen.value = true
+  for (const key of [settingsOpen, agentOpen, diaryOpen, knowledgeOpen, memoryOpen,
+    cornerOpen, usageOpen, dashboardOpen, activityOpen, personaOpen, tourOpen]) {
+    key.value = false
+  }
+  moreOpen.value = false
+}
+
+async function refreshLockAvailability(): Promise<void> {
+  try {
+    const st = await getLockStatus()
+    // 只认已知状态：异常响应（如 mock/旧后端缺 state）不显示锁定入口
+    lockAvailable.value = st.state === 'locked' || st.state === 'unlocked'
+    if (st.state === 'locked') onAppLocked()
+  } catch { /* 锁状态读不到时不阻塞启动 */ }
+}
+
+function onLockStatus(st: LockStatus): void {
+  lockAvailable.value = st.state === 'locked' || st.state === 'unlocked'
+}
+
+async function lockAppNow(): Promise<void> {
+  try {
+    await lockNow()
+  } catch { /* 后端会如实返回错误；锁屏状态以刷新为准 */ }
+  onAppLocked()
+}
+
 onMounted(async () => {
   await ensureBaseUrl()
   loadTheme()
@@ -303,6 +338,10 @@ onMounted(async () => {
     if (Array.isArray(saved)) recentToolIds.value = saved.filter(id => moreTools.some(item => item.id === id)).slice(0, 4)
   } catch { /* ignore */ }
   document.addEventListener('keydown', onKeydown)
+  // 应用锁：启动先确认锁态（已初始化的用户重启后处于锁定态）
+  await refreshLockAvailability()
+  // 运行期任何 423（后台轮询/面板请求撞上锁定）也会唤起锁屏
+  window.addEventListener('tztuzhan:app-locked', onAppLocked)
   try {
     const flags = await (await apiFetch('/api/flags')).json()
     compactUi.value = flags.flags?.compact_ui_enabled !== false
@@ -313,6 +352,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('tztuzhan:app-locked', onAppLocked)
   focusMode.stop()
   stopVisualState()
 })
@@ -429,6 +469,18 @@ onUnmounted(() => {
         </div>
         <div v-else class="header-right compact-actions">
           <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">活动</button>
+          <button
+            v-if="lockAvailable"
+            class="icon-btn"
+            title="锁定应用（忘掉密钥，需解锁后继续）"
+            aria-label="锁定应用"
+            @click="lockAppNow"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </button>
           <button class="icon-btn" aria-haspopup="dialog" aria-controls="more-panel" :aria-expanded="moreOpen" title="更多功能" @click="moreOpen = !moreOpen">更多</button>
         </div>
       </header>
@@ -460,6 +512,14 @@ onUnmounted(() => {
     <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
     <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
     <PersonaSwitcher :show="personaOpen" :disabled="generating" @close="personaOpen = false" @switched="onPersonaSwitched" />
+
+    <!-- P3-04 应用锁：锁定/初始化密钥的锁屏（解锁成功后收起并刷新面板） -->
+    <LockScreen
+      v-if="lockScreenOpen"
+      :persona-name="activePersona.name"
+      @unlocked="lockScreenOpen = false"
+      @status="onLockStatus"
+    />
 
     <!-- 彻底重置确认弹窗 -->
     <div v-if="resetOpen" class="modal-mask" @click.self="closeResetConfirm">

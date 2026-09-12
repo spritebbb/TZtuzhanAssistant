@@ -372,3 +372,34 @@ test('shows observed expression habits and lets the user delete one', async ({ p
   await habitsCard.getByRole('button', { name: /删掉这条观察/ }).first().click()
   await expect(habitsCard.getByText(/倾诉烦恼时——E2E 喜欢用短句加省略号/)).toHaveCount(0)
 })
+
+test('locks the app and unlocks via the local slot through the real lock screen', async ({ page }) => {
+  // 放最后执行：初始化密钥槽后同 run 内其他用例依赖解锁态（本用例以解锁收尾）
+  await openApp(page)
+  // 未初始化：无锁定按钮（inactive 不显示入口）
+  await expect(page.getByTitle('锁定应用（忘掉密钥，需解锁后继续）')).toHaveCount(0)
+
+  const init = await page.request.post('/api/lock/initialize', {
+    headers: { 'Content-Type': 'application/json' },
+    data: { passphrase: 'e2e-lock-passphrase', passphrase_repeat: 'e2e-lock-passphrase' },
+  })
+  expect(init.ok()).toBeTruthy()
+
+  // 刷新后：已初始化 → 头部出现锁定按钮
+  await page.reload()
+  await expect(page.getByTitle('切换人格')).toBeVisible()
+  const lockBtn = page.getByTitle('锁定应用（忘掉密钥，需解锁后继续）')
+  await expect(lockBtn).toBeVisible()
+
+  await lockBtn.click()
+  const lockScreen = page.getByRole('dialog', { name: '应用锁定' })
+  await expect(lockScreen).toBeVisible()
+  await expect(lockScreen.getByText('已锁定')).toBeVisible()
+  // 锁定态：普通 API 被拦（423）
+  expect((await page.request.get('/api/meta')).status()).toBe(423)
+
+  await lockScreen.getByRole('button', { name: '本机解锁' }).click()
+  await expect(lockScreen).toHaveCount(0)
+  await expect(page.getByTitle('一起做点什么')).toBeVisible()
+  expect((await page.request.get('/api/meta')).status()).toBe(200)
+})

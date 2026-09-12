@@ -9,7 +9,11 @@ vi.mock('../api', () => ({
     ok: true,
     json: async () => path === '/api/flags'
       ? { flags: { compact_ui_enabled: true } }
-      : { visual_state: { persona_id: 'default', revision: 1, mood_label: '平静', bond_label: '熟悉', energy_band: 'high', activity_kind: 'reading', presence: 'home', quiet: false, reduced_motion: false, source_time: '2026-09-09' }, recent_events: [] },
+      : path === '/api/lock'
+        ? { ok: true, state: 'inactive', unlocked: false, key_id: '', locked_at: null,
+            slots: { initialized: false, local_slot: false, recovery_slot: false },
+            data_encrypted: false }
+        : { visual_state: { persona_id: 'default', revision: 1, mood_label: '平静', bond_label: '熟悉', energy_band: 'high', activity_kind: 'reading', presence: 'home', quiet: false, reduced_motion: false, source_time: '2026-09-09' }, recent_events: [] },
   })),
 }))
 vi.mock('../api/sessions', () => ({ CURRENT_SESSION_ID: 'current', archiveCurrent: vi.fn(), resetUser: vi.fn() }))
