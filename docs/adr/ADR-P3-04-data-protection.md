@@ -54,9 +54,17 @@
 5. `backend/api/lock.py` + `app.py` 中间件：锁定态下除 `/api/lock*` 与 `/api/health` 外全部 423 `app_locked`；前端负责清空敏感 store/停 TTS/停流（「仅遮窗口不算锁定」——后端侧语义是忘钥匙）。恢复口令失败统一 401（不区分口令错/槽坏），15 分钟窗口 5 次失败后 429 限速。`/api/lock` 的 status 如实返回 `data_encrypted: false`（E 片前数据仍为明文，不把应用锁说成磁盘加密）。
 6. 前端解锁界面属 E 片配套（迁移后才有解锁刚需）；D 片交付后端语义与 API，`initialize` 仅在无任何槽时可用。
 
+## E 片决策（2026-09-12，执行：ZCode（GLM）——迁移引擎，运行时接线待续）
+
+1. `backend/storage/migration.py`：状态机 unencrypted → preparing → verified → switched → cleanup_pending → encrypted（任一步失败 → failed，暂存清理、原目录分毫不动）。preparing = 三库先 WAL 收敛 + backup API 一致性快照（迁移集内独立副本）+ 逐库 `create_encrypted_copy`（B 片原语，内含 manifest 等价校验）；verified = **隔离子进程**双 key 校验（错误 key 必拒、正确 key 必过；MK 只经 stdin 传给子进程，不进 argv/env/磁盘）+ 资产按 C 片容器加密（imgs/screenshots=media、documents=attachment、personas=persona，映射关系与原相对路径记入 asset-index.json）；switched = 同卷两次 rename 原子切换，第二次失败立即挪回。
+2. 可重建产物不迁移并在 journal 记录理由：chroma/chroma_mem0（C 片 vector_embeddings 接管）、tts_cache、telemetry.db、历史明文备份（F 片接管加密备份）、派生日志。
+3. 明文目录在 switched/cleanup_pending 阶段完整保留为 `data.plaintext-<stamp>`；`finish_cleanup` 是显式独立动作（用户确认后调用），永不随迁移自动删除。
+4. journal（encryption-migration.json）存于数据目录**父级**，跨目录切换存活；failed 后允许重跑，cleanup_pending/encrypted 期间拒绝重入。引擎内曾有一处真实缺陷被回归抓出：业务 MigrationError 走直通分支绕过 fail() 落账，状态会卡在中间态——已修。
+5. E 片剩余（运行时接线）：persistence gate（优雅停机 + 拒绝并发写）、启动顺序重构（锁定态下延迟开库，解锁后再连 SQLCipher 库）、「启用加密」API 与 UI 引导、真实数据迁移执行。迁移引擎对一次性数据全流程验证，未触碰真实 data/。
+
 ## 未完成边界
 
-- E：全局 persistence gate、迁移状态机、隔离进程校验与原子目录切换；含前端锁定/解锁界面接线。
+- E 运行时接线：全局 persistence gate、锁定态延迟开库、启用加密 API/UI、真实数据迁移执行。
 - F：同 generation 加密备份、空目录恢复、目标机新建 DPAPI 槽和恢复演练。
 
 在 E 完成并通过用户数据副本演练前，不给运行时数据库传入密钥，也不删除任何明文原库。D 片的 broker 是「随时可挂钥匙的锁架」，不改变现有数据路径。
