@@ -177,7 +177,7 @@
 | 12b 沉睡功能激活 | 完成。执行：ZCode（用户指示「先帮我激活」）。§17.1 必要性门真实生效+注意力接入主链路；P3-05 三参数消费接线（行为帧/幽默门/主动权重）+ 统计四处埋点与查询 API；§17.2 生产者+每日过期+管理 API；L16 开关生效+前端共享入口；L05 五域展示 + L05/L03 behavior_hint 接入行为帧 | 852f59a、b14608e、9a68614、1d643d1、1b84f3b | 2026-09-09 |
 | 13 阈值与内容加量 | 完成。执行：Codex。新用户前 3 天 2h 主动阈值且保留初识门槛；惊喜 7 天/50%/120 分钟；设置页可调；问候四类扩至各 4 条；核对 8 条升档台词与 30 天首个快照；新增正典→日程素材桶映射 | 2b7210c | 2026-09-09 |
 | 14 Q1–Q5 质量轨道 | 完成。Q1 完成：27 条九组 fixture、固定种子/配置快照、脱敏回放、A/B 盲评与发布门槛；Q2 完成：八类外部内容边界、授权矩阵、日志/异常脱敏与安全 request_id；Q3 完成：本地字段白名单遥测、request/logical id 全链路、工具失败分类、7 天事件链/30 天日聚合、设置开关与按人格清理；审查同时修复 HTTP 测试写真实库及生活模板补跑单日多触发；Q4 完成：本地 p95 预算、v40 去敏旧库升级/快照恢复、JOB-1 租约和外部调用故障边界；Q5 完成：对话框焦点管理、键盘闭环、语义名称/错误播报、克制关系说明、对比度及缩放/窄屏/reduced-motion E2E | ce86bea、b10296b、4c17339、151f1c2、b10ce32、7844213、a6c8c21、b8a3134、c44e151 | 2026-09-10 |
-| 15 D 类离线件（P3-03/04、L09/L10/L12/L13/L14/L15） | 进行中。P3-04 A/B/C 离线件完成：明文面 ADR、统一 SQLite 入口、SQLCipher 导出 PoC、HKDF 分域 AES-GCM 文件容器、SQLCipher 向量表与内存线性索引；未迁移真实数据。其余训练/真机/账号环节按计划留运行记录空位 | 94f0593、f43a1d2 | 2026-09-10 |
+| 15 D 类离线件（P3-03/04、L09/L10/L12/L13/L14/L15） | **部分完成**（2026-09-18 核对）。P3-04 A–E 已落地，且真实 `data/` 已于 2026-09-13 迁移到加密目录（journal 停在 `cleanup_pending`，明文副本待清理）；**F 片加密备份/换机恢复未实现**。**P3-03、L09、L10、L12、L13、L14、L15 未开工**：代码中无 `voice_profiles`/`local_stt`/`petWindow`/`backend/channels` 任何落点，仅有技术指导方案 | A/B/C：94f0593、f43a1d2（09-10）；D：9d90af0；E：e34bf56、633289b、2b83d83、46795b4、8954b5d、8c9bb62（09-12～13） | 2026-09-10 ～ 2026-09-13 |
 | 16 流式输出改造 | 完成。执行：ZCode/Codex。16A 热重载 client 缓存修复；16B 安全句段增量流式；16C 工具最终答复流式，图片对话补 RESET | c0c783d、a799e0b | 2026-09-09 |
 
 ### 批次14：Q1–Q5 横向质量轨道（2026-09-08 用户拍板纳入；五片独立提交）
@@ -190,7 +190,7 @@
 
 ### 批次15：D 类离线件（2026-09-08 用户拍板：全部照做，真机环节留空位）
 
-- **P3-04 A/B/C 片**：已完成。数据面清单 ADR + `storage/connect.py` central connector + SQLCipher 4.12 PoC + 分块 AEAD 文件容器 + SQLCipher 向量表/内存线性索引（临时目录，不真迁移）；所有后端 SQLite 打开路径已收口，静态守卫禁止重新绕过。D–F 的 key broker、应用锁、迁移和恢复仍待后续切片。
+- **P3-04 A–E 片**：A/B/C（2026-09-10）已完成：数据面清单 ADR + `storage/connect.py` central connector + SQLCipher 4.12 PoC + 分块 AEAD 文件容器 + SQLCipher 向量表/内存线性索引；所有后端 SQLite 打开路径已收口，静态守卫禁止重新绕过。D/E（2026-09-12～13）亦已完成：密钥层级与应用锁（MK/DPAPI/Argon2id/key broker）、迁移引擎（状态机/隔离进程校验/原子目录切换）、锁定启动与惰性开库、一键启用加密与停机 CLI。**真实 `data/` 已于 2026-09-13 迁移到加密目录**，journal 停在 `cleanup_pending`（明文副本待清理）。**F 片（同 generation 加密备份与换机恢复演练）仍未实现**；加密模式下明文周期备份已按 ADR 停用，等待 F 片接管。
 - **P3-03 adapter**：provider 协商（GET /capabilities 或版本自检）+ 缓存键（provider/model/voice/version/text/prosody）+ 显式回退 + voice_profiles/voice_manifests 表；不训练。
 - **L09 worker 骨架**：stdin/stdout framed 协议 + 超限/取消/无模型测试 + PWA 禁用态；不装模型。
 - **L10 骨架**：petWindow（contextIsolation/IPC 白名单/点击穿透）+ displayAvoidance helper 协议 + mock 测试；不真机验收。
