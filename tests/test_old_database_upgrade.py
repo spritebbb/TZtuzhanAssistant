@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_watch.sql"
-TARGET_VERSION = 41
+TARGET_VERSION = 42
 
 
 def _root() -> Path:
@@ -31,7 +31,11 @@ def _seed(data_root: Path) -> Path:
     return path
 
 
-def _run_import(data_root: Path, code: str = "from backend.core.userdb import db") -> None:
+def _run_import(
+    data_root: Path,
+    code: str = "from backend.core.userdb import db\ndb.ensure_user('x')",
+) -> None:
+    # ensure_user 触发 _prepare_schema：db 连接自懒加载重构后不再在 import 时建立
     env = os.environ.copy()
     env.update({
         "TZTUZHAN_DATA_DIR": str(data_root),
@@ -72,7 +76,7 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     before_count = conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0]
     conn.close()
 
-    backups = list((data_root / "backups").glob("schema-bot-v40-to-v41-*/bot.db"))
+    backups = list((data_root / "backups").glob("schema-bot-v40-to-v42-*/bot.db"))
     assert len(backups) == 1, backups
     old = sqlite3.connect(backups[0])
     assert _version(old) == 40
@@ -82,7 +86,7 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     old.close()
 
     _run_import(data_root)
-    after_backups = list((data_root / "backups").glob("schema-bot-v40-to-v41-*/bot.db"))
+    after_backups = list((data_root / "backups").glob("schema-bot-v40-to-v42-*/bot.db"))
     conn = sqlite3.connect(db_path)
     assert len(after_backups) == 1
     assert _version(conn) == TARGET_VERSION

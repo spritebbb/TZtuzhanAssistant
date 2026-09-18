@@ -22,7 +22,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 41  # v41: durable acknowledgement for monitoring notifications
+_SCHEMA_VERSION = 42  # v42: tavern sessions（酒馆同玩剧情沉淀）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -446,6 +446,19 @@ CREATE TABLE IF NOT EXISTS writing_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_writing_turns_activity
     ON writing_turns(user_id, activity_id, id);
+-- 酒馆同玩：一局结束后的剧情沉淀。剧情是「真回忆」（用户拍板 2026-09-14）：
+-- 摘要同时写入长期记忆供 recall 检索；本表保存忠实原文，供回忆注入与追溯。
+CREATE TABLE IF NOT EXISTS tavern_sessions (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    card_name   TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    turns_json  TEXT NOT NULL DEFAULT '[]',
+    played_at   TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tavern_sessions_user
+    ON tavern_sessions(user_id, played_at);
 -- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
 CREATE TABLE IF NOT EXISTS activity_lists (
     activity_id  INTEGER PRIMARY KEY,
@@ -2131,6 +2144,7 @@ class UserDB:
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
+                "tavern_sessions",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()

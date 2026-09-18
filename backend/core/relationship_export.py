@@ -7,15 +7,18 @@
   只导出标记 export=True 的持久关系状态。
 - 恢复预览：先校验格式、schema 版本、引用完整性（含跨类别引用），再展示
   将写入的计数；不做静默覆盖。
-- 恢复写入当前 bot.db 的目标命名空间：要求目标命名空间为空；整数主键
-  （bot.db 全局唯一）按 AUTOINCREMENT 重新分配，引用列按映射重建，
-  user_id 文本列一律重写为目标命名空间。
+- 恢复写入当前 bot.db 的目标命名空间：要求目标命名空间为空；主键一律重新
+  分配（整数主键按 AUTOINCREMENT，文本主键如 tavern_sessions 的 uuid 重新
+  生成）——主键在 bot.db 内全局唯一且不含 user_id，原样保留会让同一份备份
+  恢复进第二个命名空间时主键冲突；引用列按映射重建，user_id 文本列一律
+  重写为目标命名空间。
 - 恢复完成后向量库与 SQLite 可能暂时不一致：SQLite 是唯一权威源，由
   vector_store.rebuild_all 的既有机制在 embedding 就绪时全量重灌。
 """
 from __future__ import annotations
 
 import json
+import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime
@@ -34,7 +37,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
                "learning_candidates"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
-             "persona_evolution_log"),
+             "persona_evolution_log", "tavern_sessions"),
     "tasks": ("tasks", "promises", "open_questions"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
@@ -392,7 +395,9 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
 
     data: dict[str, list[dict]] = bundle["data"]
     kv_export: dict[str, str] = (bundle.get("kv") or {}).get("exported") or {}
-    id_maps: dict[str, dict[int, int]] = defaultdict(dict)
+    # 主键映射：整数主键 old_int → new_int；文本主键（tavern_sessions 的 uuid）
+    # old_str → new_str。两者都重新分配，见模块 docstring 的恢复契约。
+    id_maps: dict[str, dict] = defaultdict(dict)
     self_fixups: list[tuple[str, str, str, int, int]] = []  # (table, column, ref_table, referencing_old_id, old_ref_value)
     restored: dict[str, int] = {}
     global _rows_of
@@ -407,7 +412,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     for rule_table, ref_fn, column in _REFERENCE_RULES
                     if rule_table == table
                 ]
-                has_id_column = bool(rows) and "id" in rows[0]
                 for row in rows:
                     values = {
                         key: (target_user_id if key == "user_id" else row[key])
@@ -432,7 +436,20 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         values["state"] = "closed"
                         values["offered_message_id"] = None
                         values["response_message_id"] = None
-                    old_id = int(values.pop("id")) if "id" in values else None
+                    # 主键一律重新分配：整数主键交给 AUTOINCREMENT；文本主键
+                    # 没有自增，重新生成一个（原值在 bot.db 内全局唯一且不含
+                    # user_id，原样保留会让同一份备份恢复进第二个命名空间时
+                    # 主键冲突）。
+                    old_id: int | str | None = None
+                    new_text_id: str | None = None
+                    if "id" in values:
+                        raw_id = values.pop("id")
+                        try:
+                            old_id = int(raw_id)
+                        except (TypeError, ValueError):
+                            old_id = str(raw_id)
+                            new_text_id = uuid.uuid4().hex[:12]
+                            values["id"] = new_text_id
                     for ref_fn, column in rules:
                         if column not in values:
                             continue
@@ -457,8 +474,10 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
                         [values[column] for column in columns],
                     )
-                    if has_id_column and old_id is not None:
-                        id_maps[table][old_id] = int(cur.lastrowid)
+                    if old_id is not None:
+                        id_maps[table][old_id] = (
+                            new_text_id if new_text_id is not None else int(cur.lastrowid)
+                        )
                 restored[table] = len(rows)
             # 二阶段：自引用回填（引用行与被引用行的新 id 都已确定）
             for table, column, ref_table, referencing_old_id, old_value in self_fixups:
