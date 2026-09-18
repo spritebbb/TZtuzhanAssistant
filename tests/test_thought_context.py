@@ -22,7 +22,9 @@ os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_f03
 from backend.core import pending_thoughts as pt
 from backend.core.userdb import db
 
-NOW = datetime(2026, 9, 8, 12, 0)
+# 必须相对当前时间：写死日期会随真实时间过期，心事被 expires_at 过滤掉后
+# 「话题相关才注入」的断言就会假红。
+NOW = datetime.now().replace(microsecond=0)
 
 
 def _activity(uid: str, title: str) -> int:

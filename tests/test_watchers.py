@@ -150,8 +150,12 @@ def test_v41_notification_ack_migration() -> int:
                     "SELECT last_hash,last_notified_hash FROM watches"
                 ).fetchone()
                 assert row["last_hash"] == row["last_notified_hash"] == "legacy-digest"
-                assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == 41
-                assert list((root / "backups").glob("schema-bot-v40-to-v41-*/bot.db"))
+                from backend.core.userdb import _SCHEMA_VERSION
+
+                assert upgraded.conn.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_VERSION
+                assert list((root / "backups").glob(
+                    f"schema-bot-v40-to-v{_SCHEMA_VERSION}-*/bot.db"
+                ))
             finally:
                 upgraded.conn.close()
     print("[OK] v40→v41 迁移：历史哈希回填为已通知，不产生误报")

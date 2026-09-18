@@ -68,7 +68,9 @@ def main() -> None:
         # real pre-migration image rather than an empty placeholder.
         runtime = root / "runtime"
         runtime.mkdir()
-        versions = {"bot.db": 41, "sessions.db": 1, "agent_tasks.db": 3}
+        from backend.core.userdb import _SCHEMA_VERSION
+
+        versions = {"bot.db": _SCHEMA_VERSION, "sessions.db": 1, "agent_tasks.db": 3}
         for name in versions:
             conn = sqlite3.connect(runtime / name)
             conn.execute("CREATE TABLE pre_upgrade_marker (value TEXT NOT NULL)")
@@ -79,6 +81,12 @@ def main() -> None:
         os.environ["TZTUZHAN_DATA_DIR"] = str(runtime)
         os.environ["MEMORY_V2"] = "0"
         os.environ["MEMORY_MEM0"] = "0"
+        # P3-04 E 惰性化后 config 实例在 import 期就固化了 data_dir，此刻再改 env
+        # 已经太晚（首次连接会去升级另一个库）；直接把权威路径指到本测试的
+        # runtime 目录，下面的版本守卫断言的才是这里造出来的库。
+        from backend.core.config import config as _config
+
+        _config.data_dir = runtime
         from backend.core.userdb import db
         from backend.session import store
         from backend.agent import session
