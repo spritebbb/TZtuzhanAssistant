@@ -24,8 +24,11 @@ def test_owner_symmetry_and_hash_idempotent() -> int:
     db.ensure_user(uid)
 
     # 她许下的约定：owner=assistant + 叙事 action_kind
-    pid = save_promise(uid, "周末把那本书的读后感写给你", "2026-09-12",
-                       owner="assistant", due_at="2026-09-12")
+    # 期限必须相对今天：get_open_promises 会先推进到期状态机，写死的过去日期
+    # 会让这条 open 约定被标记 expired，下面的行断言随之找不到。
+    due = (date.today() + timedelta(days=3)).isoformat()
+    pid = save_promise(uid, "周末把那本书的读后感写给你", due,
+                       owner="assistant", due_at=due)
     assert pid is not None
     rows = get_open_promises(uid)
     row = [r for r in rows if r["id"] == pid][0]
