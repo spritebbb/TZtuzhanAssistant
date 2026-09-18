@@ -1317,6 +1317,12 @@ VERIFY_TIMEOUT: 600
 
 执行：Codex，2026-09-10。P3-04 C 离线切片由 `f43a1d2` 落地：新增 HKDF-SHA256 分域派生与 AES-256-GCM 分块文件容器，header/AAD 覆盖版本、key id、nonce、块序和终块，随机对象名且失败不留残件；新增独立 SQLCipher `vector_embeddings`/`vector_models` 存储和进程内余弦线性索引，不持久化源文本并锁定模型维度。真实媒体、Chroma 与 `data/` 仍未迁移，运行时不强制加载 C 模块；D–F key broker/应用锁、迁移状态机与加密备份仍待后续切片。新增 `tests/test_encrypted_storage.py` 覆盖多块往返、错误 key、篡改、截断、覆盖保护、密文头、维度门与内存检索。
 
+执行：未署名提交（D/E 系列提交信息未标注执行者），2026-09-12～13。P3-04 D 片由 `9d90af0` 落地：密钥层级与应用锁——首次初始化生成随机 256-bit MK，本机槽走 Windows DPAPI CurrentUser，恢复槽以用户口令经 Argon2id（每槽随机 salt、参数版本化）派生 KEK、AES-256-GCM 包装 MK；密钥只经进程内存传递，`core/key_broker.py` 三态（inactive/unlocked/locked）与 `core/keyslots.py`、`api/lock.py` 就位，前端配套见 `8954b5d`。验证见 `tests/test_keyslots.py`、`tests/test_app_lock.py`（含错误口令统一失败与限速语义）。
+
+执行：未署名提交（同上），2026-09-12～13。P3-04 E 片由 `e34bf56`、`633289b`、`2b83d83`、`46795b4`（前端配套 `8c9bb62`）落地：迁移状态机 `unencrypted → preparing → verified → switched → cleanup_pending → encrypted`，隔离进程以错误 key/正确 key 校验后原子目录切换、失败回滚；加密目录上的锁定启动与惰性开库；一键启用加密（API/门控/设置页卡片）与停机 CLI（`--migrate`/`--cleanup`）。journal 中 keyslots 随迁移复制，可重建产物（chroma/chroma_mem0/tts_cache/telemetry.db/历史明文备份/派生日志）不迁移并逐项记录理由。
+
+执行：2026-09-13。真实 `data/` 迁移已实际执行：`encryption-migration.data.json` 记录 `state=cleanup_pending`（`started_at=20260913-002815`，明文副本保留在 `data.plaintext-20260913-002815/`），运行时已走加密库。**F 片（同 generation 加密备份、空目录恢复与换机 DPAPI/口令演练）仍未实现**；`backend/maintenance/loop.py` 在加密模式下已按 ADR 停用明文周期备份，等待 F 片接管密钥材料之外的加密对象备份。
+
 ### 21.2 P3-03 GPT-SoVITS 训练、推理和回退补充
 
 Adapter 先执行 `GET /capabilities` 或版本自检，固定实际安装 commit、模型格式、采样率、语言和可用接口；不把某篇教程的参数当稳定合同。新建 `voice_profiles(id,persona_id,provider_version,model_hash,reference_manifest_id,enabled,created_at)` 与加密 `voice_manifests`，原始素材不进入关系导出。
