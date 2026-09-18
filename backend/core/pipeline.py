@@ -1127,6 +1127,16 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     except Exception:
         logger.exception("[pipeline] 共同创作上下文读取失败，按无活动继续")
 
+    # 3.0.1d-2) 酒馆同玩回忆：聊到酒馆/一起玩过时注入最近几局的忠实摘要。
+    # 剧情是真回忆（用户拍板 2026-09-14），无虚构声明；门控在 tavern_context 内部。
+    tavern_mem_ctx = ""
+    try:
+        from .tavern import tavern_context
+
+        tavern_mem_ctx = await asyncio.to_thread(tavern_context, user_id, text)
+    except Exception:
+        logger.exception("[pipeline] 酒馆回忆读取失败，按无回忆继续")
+
     # 3.0.1e) M3.4 共同清单：只在聊到歌/书/推荐时注入真实清单摘要。
     # P1-02 语境注册表（开关默认关）：开启时由注册表统一选择与生命周期管理，
     # 关闭时保持 colists.list_context 旧路径；两路互斥，不会双注入。
@@ -1633,6 +1643,15 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             {
                 "role": "system",
                 "content": writing_ctx,
+            }
+        )
+
+    # 酒馆同玩回忆：真回忆，仅话题命中时注入（tavern_context 内部门控）。
+    if tavern_mem_ctx:
+        messages.append(
+            {
+                "role": "system",
+                "content": tavern_mem_ctx,
             }
         )
 

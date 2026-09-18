@@ -88,10 +88,26 @@ async def test_flags_post_validation() -> None:
     print("[OK] POST /api/flags 校验拒绝未知开关/非法值")
 
 
+async def test_every_flag_has_label() -> None:
+    """面板按 flags 的键遍历渲染，缺标签的开关会显示英文键名且切不动。
+
+    POST 白名单用的就是 _FLAG_LABELS，所以新开关漏登记 = 默认开启却关不掉。
+    """
+    from backend.api.config_api import _FLAG_LABELS
+    from backend.core.features import FLAG_DEFAULTS
+
+    missing = sorted(set(FLAG_DEFAULTS) - set(_FLAG_LABELS))
+    assert not missing, f"缺少中文标签、用户无法切换的开关：{missing}"
+    extra = sorted(set(_FLAG_LABELS) - set(FLAG_DEFAULTS))
+    assert not extra, f"标签表残留已废弃的开关：{extra}"
+    print("[OK] 开关全覆盖：每个开关都有中文标签且可切换")
+
+
 async def main() -> None:
     await test_flags_get_lists_all()
     await test_flags_post_roundtrip_and_persistence()
     await test_flags_post_validation()
+    await test_every_flag_has_label()
     print("\n全部通过 ✓")
 
 

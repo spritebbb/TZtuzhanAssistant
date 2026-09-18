@@ -73,6 +73,9 @@ FLAG_DEFAULTS = {
     # D1：场景化表达观察（user_style_map 复活）。关闭后停止注入已观察到的
     # 表达习惯；提炼与用户主权操作（查看/删除）不受影响。
     "style_map_enabled": True,
+    # 酒馆同玩（SillyTavern「菟菚同伴」扩展点名她说话）。关闭后 /api/tavern/*
+    # 一律 403；卡/世界书素材的不可信包裹与裁决规则不依赖本开关。
+    "tavern_enabled": True,
 }
 
 
