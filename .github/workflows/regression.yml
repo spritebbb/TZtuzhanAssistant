@@ -1,0 +1,74 @@
+name: regression
+
+# 之前仓库没有 CI，「后端 171/171 全绿」这类结论靠人工某天跑一遍得出，
+# 于是 README 会长期落后于代码（曾经落后两个 schema 版本、9 天、一整轮回归）。
+# 这个 workflow 让绿色由机器产出。
+#
+# 不在 CI 里跑的门禁：`npm run test:electron`（真实 Electron 外壳冒烟：主进程 +
+# preload/IPC + 随包后端 + 首屏 DOM）。它需要桌面会话和后端 Python 运行时，
+# runner 上不稳，因此列为发布前必跑项，由人在本机执行。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: backend regression
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # 只装跑回归必需的子集：torch / sentence-transformers 体积过大（数 GB），
+        # 测试用 MEMORY_EMBED_FORCE=1 走哈希回退 embedding，不需要真实模型权重。
+        # 其余都必须装齐，否则用例会在收集期就红：
+        #   cryptography / sqlcipher3  → backend.storage.file_container、keyslots
+        #   pywin32                    → Windows DPAPI 本机槽
+        #   pypdf / ddgs / chromadb / mem0ai → 知识库、搜索、记忆 v2 用例
+        # 依据：2026-09-18 在本机以同构 venv 实跑 `pytest tests/ -q` → 175 passed。
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio fastapi uvicorn python-dotenv loguru httpx openai Pillow python-multipart
+          python -m pip install cryptography sqlcipher3 pywin32 pypdf ddgs chromadb mem0ai
+
+      - name: Run backend regression
+        env:
+          # 每个测试脚本独占数据目录（runner 内部还会再按用例隔离一层）
+          TZTUZHAN_DATA_DIR: ${{ runner.temp }}/tztuzhan-ci
+          # 强制哈希回退，避免 CI 尝试下载 BGE 模型
+          MEMORY_EMBED_FORCE: "1"
+          MEMORY_V2: "0"
+        run: python -m pytest tests/ -q --basetemp=${{ runner.temp }}/bt
+
+  frontend:
+    name: frontend unit + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx vue-tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
