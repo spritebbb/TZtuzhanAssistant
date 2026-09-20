@@ -67,12 +67,57 @@ def test_stale_claim_recovers() -> None:
     print("[OK] 崩溃遗留的占位超时后自动恢复")
 
 
+def test_initiative_loop_actually_ticks() -> None:
+    """回归：loop 第一轮必须真的执行 _tick_once。
+
+    P1 缺陷是循环体内 `from .storage import runtime` 导入路径写错，ImportError 被
+    兜底 except 吞掉，于是 loop 永远空转、主动性完全不出牌。这里断言首轮确实进入
+    tick：若导入再次失败，calls 为空即失败；`asyncio.sleep` 被替换成立刻取消，
+    保证失败时快速退出而不是无限空转。
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from backend.core import initiative
+    from backend.core.config import config as core_config
+
+    calls: list[str] = []
+
+    async def fake_tick() -> int:
+        calls.append("tick")
+        return 0
+
+    async def fake_sleep(_delay: float) -> None:
+        raise asyncio.CancelledError()
+
+    async def drive() -> None:
+        await initiative.initiative_loop()
+
+    original_tick = initiative._tick_once
+    original_interval = core_config.proactive_check_interval_sec
+    initiative._tick_once = fake_tick
+    core_config.proactive_check_interval_sec = 0.01
+    try:
+        with patch("backend.core.initiative.asyncio.sleep", new=fake_sleep):
+            try:
+                asyncio.run(drive())
+            except asyncio.CancelledError:
+                pass
+    finally:
+        initiative._tick_once = original_tick
+        core_config.proactive_check_interval_sec = original_interval
+
+    assert calls == ["tick"], f"initiative_loop 未进入 _tick_once：{calls}"
+    print("[OK] initiative_loop 首轮确实进入 tick（导入失败不再被静默吞掉）")
+
+
 def main() -> None:
     test_cross_channel_dedup()
     test_concurrent_claim()
     test_failure_cooldown_and_retry()
     test_stale_claim_recovers()
-    print("\n=== A3 主动引擎闸门：4 项全部通过 ===")
+    test_initiative_loop_actually_ticks()
+    print("\n=== A3 主动引擎闸门：5 项全部通过 ===")
 
 
 if __name__ == "__main__":
