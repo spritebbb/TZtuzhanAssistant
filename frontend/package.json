@@ -1,6 +1,8 @@
 {
   "name": "tztuzhan-assistant",
   "version": "3.1.0",
+  "description": "Local-first desktop assistant",
+  "author": "TZtuzhanAssistant Contributors",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -8,6 +10,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
+    "test:electron": "node scripts/electron-smoke.mjs",
     "test:e2e": "npm run build && node -e \"require('node:fs').rmSync('../.tmp/e2e-datadir',{force:true})\" && playwright test",
     "dist:win": "npm run build && electron-builder --win",
     "preview": "vite preview"
@@ -22,8 +25,8 @@
     "@types/node": "^22.0.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "@vue/test-utils": "^2.5.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3",
     "happy-dom": "^20.12.0",
     "typescript": "~5.7.0",
     "vite": "^6.0.0",
