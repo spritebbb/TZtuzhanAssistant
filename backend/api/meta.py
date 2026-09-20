@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from ..core.config import config
+from ..core.effect_ledger import effect_stats
 from ..core.mood import current_mood
 from ..core.persona_profiles import active_profile, active_user_id
 from ..tools.base import ToolRegistry
@@ -85,6 +86,9 @@ async def api_meta(session_id: str = ""):
         "affection": affection_display(uid),
         "persona": active_profile(),
         "visual_state": visual_state(uid),
+        # 旁路副作用台账：本轮/累计被吞掉的失败（只记名称与错误类型，不记用户内容）。
+        # 没有它，「回复照常」和「某路静默降级」在外部看起来完全一样。
+        "effect_stats": effect_stats(),
     }
 
 
