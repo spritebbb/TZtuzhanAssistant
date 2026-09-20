@@ -586,7 +586,7 @@ async def initiative_loop() -> None:
     logger.info("[主动性] 引擎启动，轮询间隔 {}s", config.proactive_check_interval_sec)
     while True:
         try:
-            from .storage import runtime as _rt
+            from ..storage import runtime as _rt
 
             if not _rt.migration_gate_engaged():
                 n = await _tick_once()
