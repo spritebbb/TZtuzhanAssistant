@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+
+import { desktopSttBridge, PcmRecorder } from '../utils/stt'
 
 const input = defineModel<string>('input', { required: true })
 const ephemeral = defineModel<boolean>('ephemeral', { default: false })
@@ -12,6 +14,76 @@ const emit = defineEmits<{
 defineProps<{ busy: boolean; streaming: boolean; personaName?: string }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// === 本地语音输入（L09 骨架）===
+// 桌面版走 preload 注入的 tuzhanStt 桥 + 本地 worker；PWA/网页无桥 → 按钮禁用。
+const sttBridge = desktopSttBridge()
+const sttState = ref<'idle' | 'recording' | 'busy' | 'denied'>('idle')
+const sttHint = ref('')
+let recorder: PcmRecorder | null = null
+let sttGen = 0 // 迟到结果丢弃：卸载/重开后旧请求的结果不再回填
+
+if (sttBridge) {
+  sttBridge.onEvent((ev) => {
+    if (ev.op === 'final' && ev.text) {
+      // 只回填草稿，用户确认才发送；不把识别结果直接喂意图/工具
+      input.value = input.value ? `${input.value}${ev.text}` : ev.text
+      sttState.value = 'idle'
+    } else if (ev.op === 'error') {
+      sttState.value = 'idle'
+      sttHint.value = ev.message || '本地转写失败'
+    }
+  })
+}
+
+const micTitle = computed(() => {
+  if (!sttBridge) return '语音输入是桌面版本地能力，网页版不可用'
+  if (sttState.value === 'recording') return '说完点这里：转成文字草稿（不自动发送）'
+  if (sttState.value === 'denied') return '麦克风权限被拒绝'
+  return '语音输入（本地转写，音频不出本机）'
+})
+
+async function toggleMic(): Promise<void> {
+  if (!sttBridge) return
+  if (sttState.value === 'recording') {
+    sttState.value = 'busy'
+    sttHint.value = ''
+    await recorder?.stop()
+    recorder = null
+    await sttBridge.stop() // final 经事件回填草稿
+    return
+  }
+  if (sttState.value === 'busy') return
+  sttGen += 1
+  const gen = sttGen
+  try {
+    recorder = new PcmRecorder()
+    // 先拿麦克风权限，再开 worker 请求：权限失败不创建空请求
+    await recorder.start((chunk) => {
+      if (gen === sttGen) sttBridge?.pushAudio(chunk)
+    })
+  } catch {
+    await recorder?.stop()
+    recorder = null
+    sttState.value = 'denied'
+    return
+  }
+  const started = await sttBridge.start({ language: 'zh', modelRef: 'base' })
+  if (!started.ok) {
+    await recorder?.stop()
+    recorder = null
+    sttHint.value = started.error || '本地语音识别不可用（需先在设置下载模型）'
+    return
+  }
+  sttState.value = 'recording'
+}
+
+onBeforeUnmount(() => {
+  sttGen += 1
+  void recorder?.stop()
+  recorder = null
+  void sttBridge?.cancel()
+})
 
 // === 快捷指令面板 ===
 const shortcutsOpen = ref(false)
@@ -76,6 +148,21 @@ function useShortcut(s: Shortcut) {
           <path d="M21 15l-5-5L5 21"/>
         </svg>
       </button>
+      <button
+        class="icon-btn mic-btn"
+        :class="{ recording: sttState === 'recording' }"
+        :disabled="!sttBridge || busy || sttState === 'busy'"
+        :title="micTitle"
+        aria-label="语音输入"
+        @click="toggleMic"
+      >
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10v1a7 7 0 0 0 14 0v-1"/>
+          <path d="M12 18v4"/>
+        </svg>
+      </button>
+      <span v-if="sttHint" class="stt-hint">{{ sttHint }}</span>
       <textarea v-model="input" :disabled="busy" rows="1" :aria-label="'给' + (personaName || '助手') + '的消息'" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact.prevent="emit('send')"></textarea>
       <button v-if="streaming" class="btn stop" aria-label="停止生成" @click="emit('stop')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
@@ -151,6 +238,16 @@ function useShortcut(s: Shortcut) {
   color: var(--primary-text);
 }
 .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.mic-btn.recording { color: var(--primary-text); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--edge-active); }
+.mic-btn.recording svg { animation: mic-pulse 1.4s ease-in-out infinite; }
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn.recording svg { animation: none; }
+}
+.stt-hint { font-size: 0.68rem; color: var(--text-faint); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: center; }
 textarea {
   flex: 1;
   background: transparent;

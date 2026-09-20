@@ -290,6 +290,14 @@ const flagBusy = ref('')
 const flagMsg = ref('')
 const telemetryClearBusy = ref(false)
 
+// ---- 桌面宠物（L10 骨架，仅桌面版可见；网页版不渲染） ----
+const petAvailable = typeof window !== 'undefined' && !!window.tuzhanPet
+const petOn = ref(false)
+async function togglePet() {
+  if (!window.tuzhanPet) return
+  petOn.value = await window.tuzhanPet.togglePet()
+}
+
 const flagOrder: string[] = ['output_hygiene_enabled', 'context_registry_enabled', 'profile_enabled']
 const flagList = computed<FlagInfo[]>(() =>
   Object.keys(flags.value)
@@ -583,6 +591,10 @@ function confirmLabel(c: string): string {
             <button class="small-btn" :disabled="telemetryClearBusy" @click="clearTelemetry">
               {{ telemetryClearBusy ? '清理中…' : '清除统计' }}
             </button>
+          </div>
+          <div v-if="petAvailable" class="srow flag-row">
+            <label>桌面宠物（桌面上开一只陪伴小窗，Esc 或再点一次关闭）</label>
+            <input type="checkbox" aria-label="桌面宠物" :checked="petOn" @change="togglePet" />
           </div>
           <div v-if="flagMsg" class="mcp-msg" :class="{ err: flagMsg.startsWith('✗') }" :role="flagMsg.startsWith('✗') ? 'alert' : 'status'">{{ flagMsg }}</div>
 

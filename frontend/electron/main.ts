@@ -1,9 +1,12 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
 import { dirname, join, resolve } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import http from 'http'
+
+import { createPetWindowManager, type PetWindowManager } from './petWindow'
+import { SttHost } from './stt'
 
 // ESM 模式没有 __dirname，用 import.meta.url 推导（指向 dist-electron/ 或 electron/ 源码目录）
 const _dirname = dirname(fileURLToPath(import.meta.url))
@@ -385,10 +388,67 @@ app.whenReady().then(async () => {
   if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或可用 Python，或后端在 30 秒内未能启动。详情见主窗口的排查清单。')
   createWindow(backendReady)
   createTray()
+  attachDesktopExtras()
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
   })
+})
+
+/** L09/L10 桌面能力接线：本地 STT worker 宿主 + 桌面宠物窗口管理器。 */
+let sttHost: SttHost | null = null
+let petManager: PetWindowManager | null = null
+
+function attachDesktopExtras(): void {
+  const rootDir = process.env.NODE_ENV === 'production' && _dirname.includes('resources')
+    ? resolve(_dirname, '../../')          // 打包版：resources/app.asar → 项目根
+    : resolve(_dirname, '../../')          // 开发版：dist-electron → 项目根
+  const isDev = !process.env.VITE_DEV_SERVER_URL ? false : true
+
+  // L09：本地 STT worker（python 解释器复用后端启动器的探测链）
+  sttHost = new SttHost({
+    pythonExe: () => {
+      const launcher = resolveBackendLauncher(rootDir, isDev)
+      return launcher?.exe ?? 'python'
+    },
+    backendRoot: () => rootDir,
+    modelsDir: () => join(rootDir, 'data', 'local_stt_models'),
+    getWindow: () => mainWindow,
+  })
+  sttHost.attach()
+
+  // L10：桌面宠物（骨架：前台全屏 helper 未实装 → 避让为 mock 模式不隐藏）
+  const prefsFile = () => join(app.getPath('userData'), 'pet-prefs.json')
+  const loadPrefs = () => {
+    try {
+      return JSON.parse(readFileSync(prefsFile(), 'utf-8'))
+    } catch {
+      return null
+    }
+  }
+  petManager = createPetWindowManager({
+    preloadPath: () => join(_dirname, 'preload.mjs'),
+    resolveUrl: () => process.env.VITE_DEV_SERVER_URL
+      ? `${process.env.VITE_DEV_SERVER_URL}pet.html`
+      : `${BACKEND_HOST}/pet.html`,
+    loadPrefs,
+    savePrefs: (prefs) => {
+      try {
+        writeFileSync(prefsFile(), JSON.stringify(prefs), 'utf-8')
+      } catch { /* 偏好保存失败不影响窗口 */ }
+    },
+    foregroundProbe: null,
+  })
+  ipcMain.handle('pet:toggle', () => petManager?.toggle() ?? Promise.resolve(false))
+}
+
+app.on('before-quit', () => {
+  isQuitting = true
+  sttHost?.dispose()      // L09：终止本地转写 worker
+  petManager?.close()     // L10：宠物窗口立即关闭并释放全部订阅/定时器
+  // 先归档当前会话，等归档请求结束后再停后端，避免杀进程过早导致归档丢失。
+  // 若托盘退出已归档过（archiveDone），则直接停后端。
+  archiveSessionOnQuit().finally(() => stopBackend())
 })
 
 app.on('window-all-closed', () => {
@@ -397,13 +457,6 @@ app.on('window-all-closed', () => {
     stopBackend()
     if (process.platform !== 'darwin') app.quit()
   }
-})
-
-app.on('before-quit', () => {
-  isQuitting = true
-  // 先归档当前会话，等归档请求结束后再停后端，避免杀进程过早导致归档丢失。
-  // 若托盘退出已归档过（archiveDone），则直接停后端。
-  archiveSessionOnQuit().finally(() => stopBackend())
 })
 
 /** 退出前归档：把当前会话消息打包存入 archives 表（best-effort，失败静默；只执行一次） */

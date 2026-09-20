@@ -16,3 +16,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('initiative-message', listener)
   },
 })
+
+// L09 本地语音输入：帧经主进程转发给本地 STT worker（无 shell、无任意模型路径）
+contextBridge.exposeInMainWorld('tuzhanStt', {
+  start: (opts: { language: string; modelRef: string }) =>
+    ipcRenderer.invoke('stt:start', opts) as Promise<{ ok: boolean; error?: string }>,
+  pushAudio: (chunk: Uint8Array) => {
+    ipcRenderer.send('stt:audio', chunk)
+  },
+  stop: () => ipcRenderer.invoke('stt:stop') as Promise<{ ok: boolean }>,
+  cancel: () => ipcRenderer.invoke('stt:cancel') as Promise<{ ok: boolean }>,
+  onEvent: (cb: (ev: { op: string; request_id?: string; text?: string; code?: string; message?: string }) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, ev: { op: string }) => cb(ev)
+    ipcRenderer.on('stt:event', listener)
+    return () => ipcRenderer.removeListener('stt:event', listener)
+  },
+})
+
+// L10 桌面宠物：drag/close/toggleIgnoreMouse（宠物页）+ togglePet（设置页）
+contextBridge.exposeInMainWorld('tuzhanPet', {
+  drag: (delta: { dx: number; dy: number }) => {
+    ipcRenderer.send('pet:drag', delta)
+  },
+  close: () => {
+    ipcRenderer.send('pet:close')
+  },
+  toggleIgnoreMouse: (ignore: boolean) => {
+    ipcRenderer.send('pet:toggleIgnoreMouse', ignore)
+  },
+  togglePet: () => ipcRenderer.invoke('pet:toggle') as Promise<boolean>,
+})
