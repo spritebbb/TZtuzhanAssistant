@@ -482,6 +482,13 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
         messages = [{"role": "system", "content": system}]
         messages.append({"role": "user", "content": exec_prompt})
 
+        # 成本闸门（§24.3）：本任务的 token 预算从此刻起计量（prompt+completion，
+        # 实际或估算；工具循环每轮开闸前检查，子代理派发前预检）
+        from ..core import llm as _llm
+        from ..core.config import config as _cfg
+
+        _llm.reset_task_usage(budget=_cfg.agent_task_token_budget)
+
         final = await asyncio.wait_for(
             run_tool_round(
                 messages,
@@ -492,17 +499,28 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
             ),
             timeout=TASK_TIMEOUT,
         )
+        used_tokens = _llm.task_tokens()
         # 执行期间用户可能点了取消：保留 cancelled 状态，不覆盖为 done。
         # （正在进行的 LLM 调用无法中断，但最终状态以用户选择为准。）
         fresh = _load(task_id)
         if fresh is not None and fresh.status == "cancelled":
             return fresh
         task.result = final
+        if _llm.task_budget_exceeded():
+            task.result = (
+                f"{final}\n\n（成本闸门：任务 token 用量约 {used_tokens} 已达预算 "
+                f"{_cfg.agent_task_token_budget}（AGENT_TASK_TOKEN_BUDGET），"
+                "后续工具轮/子代理已被熔断）"
+            )
         task.status = "done"
         task.artifact_path = _write_report(task) or task.artifact_path
         if task.artifact_path:
-            task.result = f"{final}\n\n（完整报告已存到工作区：{task.artifact_path}）"
+            task.result = f"{task.result}\n\n（完整报告已存到工作区：{task.artifact_path}）"
         task.log.append({"ts": time.time(), "type": "result", "content": final[:500]})
+        task.log.append({
+            "ts": time.time(), "type": "usage",
+            "content": f"tokens≈{used_tokens}/{_cfg.agent_task_token_budget}",
+        })
         task.updated_at = time.time()
         _save(task)
         return task
