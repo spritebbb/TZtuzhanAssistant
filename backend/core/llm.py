@@ -153,8 +153,38 @@ def _record_usage(channel: str, model: str, usage, prompt_text: str, completion_
         from .persona_profiles import active_user_id
 
         log_usage(current_user_id.get() or active_user_id(), channel, model or "", pt, ct, estimated)
+        add_task_tokens(pt + ct)
     except Exception:
         pass
+
+
+# ---- 任务级 token 计量（成本闸门，§24.3）----
+# ContextVar 随 asyncio 任务上下文复制：gather 出去的子任务用量不会自动回流
+# 父上下文，由 subagent 插件显式把增量加回。预算只做闸门（拒绝新的调用轮），
+# 不中断已在途的请求。
+from contextvars import ContextVar as _ContextVar  # noqa: E402
+
+_task_tokens_var: _ContextVar[int] = _ContextVar("tztuzhan_task_tokens", default=0)
+_task_budget_var: _ContextVar[int | None] = _ContextVar("tztuzhan_task_budget", default=None)
+
+
+def reset_task_usage(budget: int | None = None) -> None:
+    """开始一个受预算约束的任务：清零计量并设置 token 预算（None=不限）。"""
+    _task_tokens_var.set(0)
+    _task_budget_var.set(budget)
+
+
+def add_task_tokens(n: int) -> None:
+    _task_tokens_var.set(max(0, _task_tokens_var.get() + int(n)))
+
+
+def task_tokens() -> int:
+    return _task_tokens_var.get()
+
+
+def task_budget_exceeded() -> bool:
+    budget = _task_budget_var.get()
+    return budget is not None and _task_tokens_var.get() >= budget
 
 
 async def chat(

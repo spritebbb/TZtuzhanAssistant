@@ -226,6 +226,14 @@ class Config:
         ]
         # 工具结果截断上限（字符；超长输出压缩头尾）
         self.agent_max_output_chars: int = _env_int("AGENT_MAX_OUTPUT_CHARS", 4000)
+        # 成本闸门（§24.3 第 1 项）：全局并行的子代理 LLM 调用数 / 单次 fanout 任务数 /
+        # 单任务 token 预算（prompt+completion，实际或估算）/ 子代理嵌套深度上限
+        self.agent_subagent_concurrency: int = max(1, _env_int("AGENT_SUBAGENT_CONCURRENCY", 3))
+        self.agent_fanout_max: int = max(1, _env_int("AGENT_FANOUT_MAX", 5))
+        self.agent_task_token_budget: int = max(
+            1000, _env_int("AGENT_TASK_TOKEN_BUDGET", 120000)
+        )
+        self.agent_subagent_max_depth: int = max(1, _env_int("AGENT_SUBAGENT_MAX_DEPTH", 1))
         # 外部 Agent 桥：Codex CLI 路径（留空则自动探测）
         self.agent_codex_path: str = os.getenv("AGENT_CODEX_PATH", "").strip()
         # 外部 Agent 桥：Codex profile 名（~/.codex/<name>.config.toml）

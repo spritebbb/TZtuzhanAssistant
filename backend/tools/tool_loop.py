@@ -492,6 +492,11 @@ async def _run_native(
     while loop_count < max_loops:
         if is_cancelled and is_cancelled():
             return "（操作已取消）"
+        # 成本闸门：任务 token 预算用尽时提前收束，新轮不再发起 LLM 调用
+        from ..core import llm as _llm
+
+        if _llm.task_budget_exceeded():
+            return "（任务 token 预算已用尽（AGENT_TASK_TOKEN_BUDGET），工具循环提前收束；请基于以上已完成的步骤总结收尾）"
         loop_count += 1
         await _progress({"type": "thinking"})
         try:
@@ -652,6 +657,11 @@ async def _run_text(
     while loop_count < max_loops:
         if is_cancelled and is_cancelled():
             return "（操作已取消）"
+        # 成本闸门：任务 token 预算用尽时提前收束，新轮不再发起 LLM 调用
+        from ..core import llm as _llm
+
+        if _llm.task_budget_exceeded():
+            return "（任务 token 预算已用尽（AGENT_TASK_TOKEN_BUDGET），工具循环提前收束；请基于以上已完成的步骤总结收尾）"
         loop_count += 1
         await _progress({"type": "thinking"})
         raw = await call_llm(work)
