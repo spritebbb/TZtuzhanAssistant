@@ -278,11 +278,12 @@ cd frontend; npm run dist:win
 
 - 后端入口支持 `python -m backend.main --host 127.0.0.1 --port 8801 --debug`
 - 后端检测到 `frontend/dist` 存在时会自动托管前端页面，浏览器访问 `http://127.0.0.1:8801` 即可使用，无需单独跑前端 dev server
-- 运行测试（后端聚合回归 + 前端单测）：
+- 运行测试（后端聚合回归 + 前端单测 + 桌面外壳冒烟）：
 
 ```powershell
 .venv\Scripts\python -m pytest tests/
-cd frontend; npm test
+cd frontend; npm test                # 渲染层单测（Vitest）
+npm run build; npm run test:electron # 真实拉起 Electron 外壳：主进程/preload/IPC/后端连通
 ```
 
 - 打包部署包（生成 `deploy/` 一键包）：
@@ -368,7 +369,7 @@ backend/                      # Python 后端
 │   ├── fact_decay.py         # 琐碎记忆自然衰减
 │   ├── fact_lifecycle.py     # 事实生命周期（来源/置信度/级联清理）
 │   ├── memory/               # 记忆系统（事实/话题/五元组/日期记忆 + 压缩）
-│   ├── userdb.py             # SQLite 数据层（schema v41）
+│   ├── userdb.py             # SQLite 数据层（schema v42）
 │   ├── search.py             # 联网搜索 + 多源求证
 │   ├── knowledge.py          # 知识库（文档/分块/观点/来源）
 │   ├── imagegen.py           # 文生图
@@ -469,8 +470,12 @@ persona-菟菚.md               # 人格源文件
 
 ## 开发状态
 
-- 当前版本：**v3.1.0**（schema v41）
-- 后端聚合回归 **141/141**、前端 Vitest **90/90**、vue-tsc 与生产构建通过（2026-09-09 全量实跑）
+- 当前版本：**v3.1.0**（schema v42）
+- 后端聚合回归 **175/175**、前端 Vitest **115/115**、浏览器 E2E **15/15**、桌面外壳冒烟 **5/5**（2026-09-18 全量实跑）
+- 桌面壳依赖：Electron **44.4.2** + electron-builder **26.15.3**（`npm audit` 0 漏洞；外壳冒烟见下方「运行测试」的 `npm run test:electron`）
+- 发布门禁报告：[docs/RELEASE-QUALITY-GATE-2026-09-18.md](docs/RELEASE-QUALITY-GATE-2026-09-18.md)
+- 回归由 CI 代跑，不再依赖「某天有人手动跑过一遍」：`.github/workflows/regression.yml` 在后端/测试/前端变更时自动执行
+- 运行期被降级的旁路副作用（记忆检索、联网搜索、表情包等）不再是静默日志——累计失败计数可在 `GET /api/meta` 的 `effect_stats` 字段查看
 - 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
 - 欢迎提 Issue 与 PR；提交请保持小切片、一个主题一个提交
 
