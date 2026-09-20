@@ -27,6 +27,7 @@ from backend.storage.connect import SQLITE_HEADER, connect_database  # noqa: E40
 from backend.storage.file_container import decrypt_to_bytes  # noqa: E402
 from backend.storage.migration import (  # noqa: E402
     MigrationError,
+    _write_journal,
     finish_cleanup,
     migrate_data_root,
     read_journal,
@@ -113,6 +114,11 @@ def test_full_migration_roundtrip_and_cleanup(root: Path) -> None:
     # 加密库里没有可重建产物（chroma 等已按 journal 记录 skip）
     assert not (data / "chroma").exists()
     assert "chroma" in journal["skipped"]
+
+    # 迁移前的明文一致性备份必须待在明文目录里：它建在 staging 内，会随目录切换
+    # 落进加密 data root，等于在「已加密」的目录里留一份明文库
+    assert not (data / "premigration-backup").exists()
+    assert (keep / "premigration-backup" / "bot.db").read_bytes()[:16] == SQLITE_HEADER
 
     # 用户确认后收尾：明文目录删除、journal → encrypted
     journal = finish_cleanup(data)
@@ -201,20 +207,60 @@ def test_journal_guards_against_reentry(root: Path) -> None:
     shutil.rmtree(root, ignore_errors=True)
 
 
+def test_cleanup_relocates_stale_journal_path(root: Path) -> None:
+    """journal 的绝对路径失效时按名重定位；顺带清掉旧版本留在加密目录里的明文快照。"""
+    data = root / "data"
+    _make_data_root(data)
+    journal = migrate_data_root(data, KEY)
+    keep = Path(journal["plaintext_keep"])
+    assert keep.is_dir()
+
+    # 模拟数据目录搬迁：journal 里仍是搬走前的旧绝对路径（实测就是这么发生的）
+    written = read_journal(data)
+    written["plaintext_keep"] = str(root / "old-drive" / keep.name)
+    _write_journal(data, written)
+
+    # 旧版本迁移把 staging 内的明文快照留在了加密目录里
+    legacy = data / "premigration-backup"
+    legacy.mkdir()
+    (legacy / "bot.db").write_bytes(SQLITE_HEADER + b"legacy-plaintext")
+
+    journal = finish_cleanup(data)
+    assert journal["state"] == "encrypted"
+    assert not keep.exists(), "失效路径必须按目录名重定位后真删"
+    assert not legacy.exists(), "加密目录里的明文快照必须一起清掉"
+    assert set(journal["removed_paths"]) == {str(keep), str(legacy)}
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def test_cleanup_refuses_when_plaintext_missing(root: Path) -> None:
+    """明文目录真找不到时报错，绝不静默把状态改成 encrypted。"""
+    data = root / "data"
+    _make_data_root(data)
+    journal = migrate_data_root(data, KEY)
+    shutil.rmtree(Path(journal["plaintext_keep"]))
+
+    with pytest.raises(MigrationError, match="明文目录不存在"):
+        finish_cleanup(data)
+    assert read_journal(data)["state"] == "cleanup_pending", "失败不得留下假成功的 encrypted"
+    shutil.rmtree(root, ignore_errors=True)
+
+
 def main() -> None:
+    cases = {
+        "full": test_full_migration_roundtrip_and_cleanup,
+        "export-fail": test_export_failure_leaves_original_untouched,
+        "switch-fail": test_switch_failure_rolls_back_directory,
+        "reentry": test_journal_guards_against_reentry,
+        "cleanup-stale-path": test_cleanup_relocates_stale_journal_path,
+        "cleanup-refuse": test_cleanup_refuses_when_plaintext_missing,
+    }
     workspace = Path(tempfile.mkdtemp(prefix="migration-tests-"))
     try:
-        for name in ("full", "export-fail", "switch-fail", "reentry"):
+        for name, case in cases.items():
             test_root = workspace / name
             test_root.mkdir()
-            if name == "full":
-                test_full_migration_roundtrip_and_cleanup(test_root)
-            elif name == "export-fail":
-                test_export_failure_leaves_original_untouched(test_root)
-            elif name == "switch-fail":
-                test_switch_failure_rolls_back_directory(test_root)
-            else:
-                test_journal_guards_against_reentry(test_root)
+            case(test_root)
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
     print("\n=== P3-04 E 迁移引擎：全部通过 ===")

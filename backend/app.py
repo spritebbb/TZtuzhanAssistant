@@ -327,6 +327,23 @@ def create_app() -> FastAPI:
                 )
         except Exception:
             logger.exception("[配置] 启动配置校验失败（不影响启动）")
+        # P3-04 D/E：密钥槽存在即从启动那一刻进入锁定态。
+        # 中间件与 /api/lock 也会 engage_if_slots，但那要等第一个请求；在启动
+        # 窗口里 broker 停在 inactive，runtime.locked() 会误答「没锁」，于是
+        # checkpoint/session.init 会按明文去开密文库（2026-09-18 实测：加密
+        # 部署的后端在 lifespan 阶段直接起不来）。这里把状态钉在真实的
+        # 「有槽未解锁」，之后一切 locked() 判断都成立。
+        try:
+            from .core.config import config as _lock_cfg
+            from .core.key_broker import broker as _broker
+
+            _before = _broker().status()["state"]
+            _broker().engage_if_slots(_lock_cfg.data_dir / "keyslots")
+            _after = _broker().status()["state"]
+            if _after != _before:
+                logger.info("[启动] 检测到密钥槽：以{}态启动", "锁定" if _after == "locked" else _after)
+        except Exception:
+            logger.exception("[启动] 应用锁状态初始化失败（不影响启动）")
         try:
             # P3-04 E：加密锁定态 MK 不在内存，库无法打开——初始化延后到
             # 解锁后的首次连接（session store 的 _connect 已惰性确保）。
@@ -418,6 +435,13 @@ def create_app() -> FastAPI:
             try:
                 from .core.config import config as _cfg
                 from .maintenance.time_tick import run as _tick_run
+                from .storage import runtime as _rt
+
+                if _rt.encrypted_mode() and _rt.locked():
+                    # 加密锁定态没有 MK：补跑只会失败。周期 tick 会在解锁后
+                    # 继续推进，这里跳过而不是记一条假故障。
+                    logger.debug("[tick] 加密锁定态：跳过启动补跑")
+                    return
 
                 def _run() -> int:
                     return _tick_run(["--data-root", str(_cfg.data_dir), "--json"])

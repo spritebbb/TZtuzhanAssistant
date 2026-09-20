@@ -112,10 +112,17 @@ def valid_backups(backup_root: Path) -> list[tuple[Path, dict]]:
 
 
 def backup_due(backup_root: Path, *, now: float | None = None, interval_sec: int = 86400) -> bool:
+    """明文或加密备份任一新于间隔即视为已覆盖，避免加密态重复备份。"""
     backups = valid_backups(backup_root)
+    try:
+        from .encrypted_backup import valid_encrypted_backups
+
+        backups.extend(valid_encrypted_backups(backup_root))
+    except ImportError:
+        pass
     if not backups:
         return True
-    completed = float(backups[-1][1].get("completed_at_epoch", 0))
+    completed = max(float(item.get("completed_at_epoch", 0)) for _folder, item in backups)
     return (time.time() if now is None else now) - completed >= interval_sec
 
 
