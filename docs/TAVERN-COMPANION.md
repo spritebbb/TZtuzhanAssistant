@@ -32,7 +32,7 @@ SillyTavern「菟菚同伴」扩展（本机；扩展本体不在本仓库）
 
 | 方法 | 路径 | 入参要点 | 返回 |
 |---|---|---|---|
-| POST | `/api/tavern/turn` | `session_id`、`card_name`、`card_summary`、`world_text`、`transcript≤40`、`user_text`、`role_mode`(self/costume)、`costume_name`、`auto`、`mock` | `{ok, session_id, name, reply, silent}` |
+| POST | `/api/tavern/turn` | `session_id`、`card_name`、`card_summary`、`world_text`、`transcript≤40`、`user_text`、`role_mode`(self/costume)、`costume_name`、`presence`(full/moderate/shy，默认 moderate)、`auto`、`mock` | `{ok, session_id, name, reply, silent}` |
 | POST | `/api/tavern/end` | `session_id`（必填） | `{ok, removed}` |
 | POST | `/api/tavern/save` | `session_id`、`card_name`、`transcript≤80`、`mock` | `{ok, session_id, summary, memory_id}` |
 | GET | `/api/tavern/sessions` | — | `{ok, sessions[]}`（最近 10 局） |
@@ -80,6 +80,16 @@ SillyTavern「菟菚同伴」扩展（本机；扩展本体不在本仓库）
 
 > 2026-09-18 修复：此前该开关只在 `FLAG_DEFAULTS`、未登记 `_FLAG_LABELS`，而
 > `POST /api/flags` 的白名单用的正是 `_FLAG_LABELS`——面板会显示英文键名且**关不掉**。
+
+## 6.5 亲密段落在场程度（④旋钮，2026-09-20）
+
+用户在酒馆扩展设置面板选择三档（`full` 全程在场 / `moderate` 适度收着（默认） /
+`shy` 明显淡出），扩展在 `fetchTurn` 出口统一随每条 `/turn` 请求带上 `presence`
+（点名、@悄悄话、自动插话三条路共用）；后端在场景 system 里注入对应行为指令，
+并硬约束「遵守但不点破」——不出戏解释、不提幕后规则与提供方限制。
+API 层 `Literal` 校验非法值（422），core 层非法/缺省回落 `moderate`。
+用户拍板（2026-09-20）：不装本地模型（Ollama）——实质成人段落仍受云端服务商
+口径约束，旋钮决定她在边界的参与深浅。
 
 ## 7. 生命周期与用户主权
 

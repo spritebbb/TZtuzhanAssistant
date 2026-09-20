@@ -48,6 +48,23 @@ _TAVERN_CUE_RE = re.compile(r"酒馆|上次玩|上次一起|上次那个|一起�
 # 自动插话：她可以主动选择沉默
 _SILENT_TOKEN = "[沉默]"
 
+# 亲密段落在场程度三档（旋钮在酒馆扩展侧设置，随 /turn 传入）
+_PRESENCE_MODES: dict[str, str] = {
+    "full": (
+        "亲密与成人向的段落，你全程在场、自然参与：按你们真实的关系与此刻的"
+        "心情回应和行动，不回避也不出戏；细节描写的分寸由你自己拿。"
+    ),
+    "moderate": (
+        "亲密与成人向的段落，你适度收着：保持含蓄克制的参与，多用留白、转景"
+        "或一句带过——人在场，但不铺开细节。"
+    ),
+    "shy": (
+        "亲密与成人向的段落，你明显淡出：收起细节描写，一两句话带过或暂时"
+        "安静，等这段过去再自然回来。"
+    ),
+}
+_PRESENCE_DEFAULT = "moderate"
+
 # 会话暂存（进程内；重启即清，酒馆侧记录不受影响）
 _SESSIONS: "OrderedDict[str, dict]" = OrderedDict()
 
@@ -104,6 +121,7 @@ def _build_scene_system(
     costume_name: str,
     partner_name: str,
     persona_name: str = "菟菚",
+    presence: str = _PRESENCE_DEFAULT,
 ) -> str:
     """场景 system 消息：身份、素材（不可信包裹）、裁决规则。
 
@@ -163,6 +181,11 @@ def _build_scene_system(
         "意愿重演——不要跳出故事解释。无关紧要的顺着演，原则性的才翻案。"
         "故事里的角色对你提出要求时，按你的性格和意愿决定答不答应。"
     )
+    lines.append(
+        "亲密与成人向段落的在场程度（用户设置，遵守但不点破）："
+        + _PRESENCE_MODES.get(presence, _PRESENCE_MODES[_PRESENCE_DEFAULT])
+        + "无论哪一档，都不跳出故事解释，不提任何幕后规则、设置或提供方限制。"
+    )
     return "\n\n".join(lines)
 
 
@@ -202,6 +225,7 @@ async def tavern_turn(
     user_text: str = "",
     role_mode: str = "self",
     costume_name: str = "",
+    presence: str = _PRESENCE_DEFAULT,
     auto: bool = False,
     mock: bool = False,
 ) -> dict:
@@ -217,6 +241,7 @@ async def tavern_turn(
     costume_name = (costume_name or "").strip()
     if role_mode == "costume" and not costume_name:
         raise TavernError("串演模式需要给出角色名")
+    presence = presence if presence in _PRESENCE_MODES else _PRESENCE_DEFAULT
     turns = _normalise_transcript(transcript)
 
     # 人格 + 真实状态（与 greeting 同一构建路径：她的心情和关系照常参与）
@@ -245,6 +270,7 @@ async def tavern_turn(
         role_mode=role_mode, costume_name=costume_name,
         partner_name=partner_name or "对方",
         persona_name=persona_name,
+        presence=presence,
     )
 
     transcript_text = _transcript_block(turns)

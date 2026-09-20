@@ -239,6 +239,66 @@ def _test_export_restore_reassigns_text_id() -> None:
     print("[OK] 导出恢复：剧情随包迁移、原文逐字保留、文本主键重分配且可重复导入")
 
 
+def _test_presence_knob() -> None:
+    # 三档指令块各有区分文本，且都带「不点破」约束
+    marks = {"full": "全程在场", "moderate": "适度收着", "shy": "明显淡出"}
+    for mode, mark in marks.items():
+        scene = tavern._build_scene_system(
+            card_name="莉卡", card_summary="", world_text="",
+            role_mode="self", costume_name="", partner_name="小明", presence=mode,
+        )
+        assert mark in scene, f"{mode} 档应含「{mark}」"
+        assert "不提任何幕后规则" in scene
+    # 缺省与非法值都回落 moderate（core 层容错，API 层另有 Literal 校验）
+    for presence in (None, "wild"):
+        kwargs = {} if presence is None else {"presence": presence}
+        scene = tavern._build_scene_system(
+            card_name="莉卡", card_summary="", world_text="",
+            role_mode="self", costume_name="", partner_name="小明", **kwargs,
+        )
+        assert "适度收着" in scene
+
+    # tavern_turn 把 presence 透传进场景 system prompt
+    import backend.core.llm as llm_mod
+
+    captured: list[list[dict]] = []
+
+    async def fake_chat(messages, **kwargs):
+        captured.append(messages)
+        return "（抬眼看你）说吧"
+
+    original = llm_mod.chat
+    llm_mod.chat = fake_chat
+    try:
+        asyncio.run(tavern.tavern_turn(
+            UID, card_name="莉卡", user_text="在吗", presence="shy",
+        ))
+    finally:
+        llm_mod.chat = original
+    assert captured and any(
+        "明显淡出" in m["content"] for m in captured[0] if m.get("role") == "system"
+    ), "presence=shy 应出现在场景 system 里"
+
+    # API 层：非法 presence 被 Literal 拒绝（422）；合法值放行
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.api import tavern as tavern_api
+
+    app = FastAPI()
+    app.include_router(tavern_api.router)
+    client = TestClient(app)
+    resp = client.post("/api/tavern/turn", json={
+        "user_text": "x", "mock": True, "presence": "wild",
+    })
+    assert resp.status_code == 422, f"非法 presence 应 422，实际 {resp.status_code}"
+    resp = client.post("/api/tavern/turn", json={
+        "user_text": "x", "mock": True, "presence": "full",
+    })
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    print("[OK] 在场程度三档：指令块/缺省回落/透传 prompt/API Literal 校验")
+
+
 def main() -> None:
     db.conn.execute("SELECT 1")  # 确保临时数据目录初始化
     _test_turn_and_session()
@@ -247,9 +307,10 @@ def main() -> None:
     _test_http_gate()
     _test_save_and_recall()
     _test_auto_silent()
+    _test_presence_knob()
     _test_table_registry_coverage()
     _test_export_restore_reassigns_text_id()
-    print("酒馆同玩测试通过（点名 + 沉淀 + 回忆 + 看着办 + 清单/导出恢复）")
+    print("酒馆同玩测试通过（点名 + 沉淀 + 回忆 + 看着办 + 在场程度 + 清单/导出恢复）")
 
 
 if __name__ == "__main__":

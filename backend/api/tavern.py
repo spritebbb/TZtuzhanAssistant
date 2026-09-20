@@ -35,6 +35,7 @@ class TavernTurnBody(BaseModel):
     user_text: str = ""
     role_mode: Literal["self", "costume"] = "self"
     costume_name: str = Field(default="", max_length=40)
+    presence: Literal["full", "moderate", "shy"] = "moderate"
     auto: bool = False
     mock: bool = False
 
@@ -72,6 +73,7 @@ async def api_tavern_turn(body: TavernTurnBody):
             user_text=body.user_text,
             role_mode=body.role_mode,
             costume_name=body.costume_name,
+            presence=body.presence,
             auto=body.auto,
             mock=body.mock,
         )
