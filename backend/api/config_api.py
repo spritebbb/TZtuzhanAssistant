@@ -31,6 +31,7 @@ _FLAG_LABELS = {
     "experience_metrics_enabled": "质量统计：本地计数回复延迟、规则失败、重复与你的反馈（不记录正文，可清除）",
     "shared_resources_enabled": "跨角色共享：允许把你的文档或共同产物明确分享给另一个角色看（默认全部隔离）",
     "tavern_enabled": "酒馆同玩：允许本机酒馆扩展点名她一起玩故事（关闭后相关接口一律拒绝）",
+    "willingness_enabled": "主动意愿：值得说的主动消息她还是会想想此刻想不想说（约定到点与你点名的必应不受影响）",
 }
 
 

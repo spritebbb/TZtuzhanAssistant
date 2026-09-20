@@ -76,6 +76,9 @@ FLAG_DEFAULTS = {
     # 酒馆同玩（SillyTavern「菟菚同伴」扩展点名她说话）。关闭后 /api/tavern/*
     # 一律 403；卡/世界书素材的不可信包裹与裁决规则不依赖本开关。
     "tavern_enabled": True,
+    # D12 主动意愿 roll：necessity 达标的主动候选再掷一次「她想不想说」；
+    # 硬规则源（约定到点等）与用户直接对话永不进骰子。关闭后回到纯 necessity 门。
+    "willingness_enabled": True,
 }
 
 

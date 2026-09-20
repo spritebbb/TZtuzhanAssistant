@@ -134,6 +134,13 @@ class Config:
         self.proactive_global_cooldown_sec: int = max(30, _env_int("PROACTIVE_GLOBAL_COOLDOWN_SEC", 900))
         self.proactive_check_interval_sec: int = max(30, _env_int("PROACTIVE_CHECK_INTERVAL_SEC", 300))
         self.proactive_failure_cooldown_sec: int = max(30, _env_int("PROACTIVE_FAILURE_COOLDOWN_SEC", 900))
+        # D12 主动意愿 roll（docs/D9-D12-DESIGN-2026-09-21.md §1）：权重与上下限离线校准
+        self.willingness_affection_weight: float = _env_float("WILLINGNESS_AFFECTION_WEIGHT", 0.20)
+        self.willingness_tension_weight: float = _env_float("WILLINGNESS_TENSION_WEIGHT", 0.30)
+        self.willingness_focus_penalty: float = _env_float("WILLINGNESS_FOCUS_PENALTY", 0.40)
+        self.willingness_miss_compensate: float = _env_float("WILLINGNESS_MISS_COMPENSATE", 0.15)
+        self.willingness_floor: float = _env_float("WILLINGNESS_FLOOR", 0.05)
+        self.willingness_ceil: float = _env_float("WILLINGNESS_CEIL", 0.95)
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))
