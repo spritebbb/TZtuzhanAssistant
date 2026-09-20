@@ -45,43 +45,75 @@ AUDIT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 审计日志单文件上限（5MB）
 AUDIT_LOG_KEEP = 3                   # 轮转保留份数
 
 
-def _checkpoint_one(path: Path) -> None:
-    """对单个 SQLite 库执行 WAL checkpoint（TRUNCATE 模式）。"""
+def _checkpoint_one(path: Path, *, encrypted_key: bytes | None = None) -> None:
+    """对单个 SQLite/SQLCipher 库执行 WAL checkpoint（TRUNCATE 模式）。"""
     try:
-        conn = connect_database(path, timeout=5)
+        conn = connect_database(path, encrypted_key=encrypted_key, timeout=5)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             conn.close()
         logger.debug(f"[维护] checkpoint: {path.name}")
-    except sqlite3.Error as e:
+    except Exception as e:
         logger.warning(f"[维护] checkpoint 失败 {path.name}: {e}")
 
 
 def checkpoint_all() -> None:
-    # P3-04 E：加密模式下 checkpoint/明文备份对 SQLCipher 文件无意义（读不出
-    # schema），加密备份由 F 片接管；锁定态一律跳过（MK 不在内存）。
+    # P3-04 F：加密态在已解锁时用同一 MK 正常 checkpoint；锁定态没有密钥，
+    # 只能跳过而不是尝试以明文打开密文库。
     from ..storage import runtime
 
+    encrypted_key = None
     if runtime.encrypted_mode():
-        if runtime.locked():
+        try:
+            encrypted_key = runtime.database_key_or_none()
+        except runtime.DatabaseLockedError:
+            # 锁定/未 engage 时没有 MK：跳过而不是继续，否则 §startup 里的
+            # checkpoint_all 会把「加密目录未解锁」升级成进程启动失败。
             logger.debug("[维护] 加密锁定态：跳过 checkpoint")
             return
     for p in (_BOT_DB, _SESSIONS_DB, _AGENT_DB):
         if p.exists():
-            _checkpoint_one(p)
+            _checkpoint_one(p, encrypted_key=encrypted_key)
 
 
 def backup() -> Path | None:
     """创建带校验清单的每日快照；任一必需项失败则不留下成功目录。"""
     from ..storage import runtime
 
-    if runtime.encrypted_mode():
-        # 明文备份管线对 SQLCipher 库会产出损坏副本；加密备份是 F 片范围
-        logger.info("[维护] 加密模式：明文备份停用，等待 F 片加密备份")
-        return None
     try:
+        if runtime.encrypted_mode():
+            if runtime.locked():
+                logger.debug("[维护] 加密锁定态：跳过备份")
+                return None
+            from .encrypted_backup import (
+                create_encrypted_periodic_backup,
+                valid_encrypted_backups,
+            )
+
+            try:
+                master_key = runtime.database_key_or_none()
+            except runtime.DatabaseLockedError:
+                logger.debug("[维护] 加密锁定态：跳过备份")
+                return None
+            with runtime.persistence_gate():
+                dest = create_encrypted_periodic_backup(
+                    _DATA,
+                    _BACKUPS,
+                    master_key=master_key,
+                    persona_file=config.persona_file,
+                    keep=BACKUP_KEEP,
+                )
+            count = len(valid_encrypted_backups(_BACKUPS))
+            logger.info(
+                "[维护] 加密备份完成: {}（共 {} 份，保留最近 {} 份）",
+                dest.name,
+                count,
+                BACKUP_KEEP,
+            )
+            return dest
+
         from .backup_manifest import create_periodic_backup, valid_backups
 
         dest = create_periodic_backup(
@@ -95,8 +127,13 @@ def backup() -> Path | None:
         return None
 
 
-def _referenced_image_names() -> set[str]:
+def _referenced_image_names() -> set[str] | None:
     """所有会话里仍被 bot/user 消息引用的图片文件名集合。
+
+    返回 ``None`` 表示清单**读不出来**（加密库未解锁、库损坏等），与「确实
+    没有引用空集」是两回事：调用方必须据此放弃清理，否则超限时会把仍被引用
+    的图片当孤儿删掉（2026-09-18 加密态实测：sessions.db 无密钥打不开，引用
+    清单退化成空集，清理逻辑会照着空集开删）。
 
     同时扫描 messages 表（当前会话）和 archives.messages_json（已归档会话），
     避免归档后图片引用从 messages 挪进 archives 却被判定为「无引用」误删，
@@ -112,8 +149,15 @@ def _referenced_image_names() -> set[str]:
         except ValueError:
             pass
 
+    from ..storage import runtime
+
     try:
-        conn = connect_database(_SESSIONS_DB, timeout=5)
+        encrypted_key = runtime.database_key_or_none()
+    except runtime.DatabaseLockedError:
+        logger.debug("[维护] 加密锁定态：无法读取图片引用，跳过孤儿图片清理")
+        return None
+    try:
+        conn = connect_database(_SESSIONS_DB, encrypted_key=encrypted_key, timeout=5)
         try:
             # 1) 当前会话 messages 表的 image 字段
             rows = conn.execute(
@@ -137,7 +181,8 @@ def _referenced_image_names() -> set[str]:
         finally:
             conn.close()
     except sqlite3.Error as e:
-        logger.warning(f"[维护] 读取引用图片失败: {e}")
+        logger.warning(f"[维护] 读取引用图片失败，本轮放弃孤儿图片清理: {e}")
+        return None
     return names
 
 
@@ -160,6 +205,9 @@ def clean_orphan_images(max_mb: int = IMGS_MAX_MB) -> int:
     if size <= max_mb:
         return 0
     referenced = _referenced_image_names()
+    if referenced is None:
+        logger.warning("[维护] 引用清单不可用：本轮不做孤儿图片清理（宁占盘不误删）")
+        return 0
     removed = 0
     files = sorted(
         (f for f in _IMGS.iterdir() if f.is_file() and f.name not in referenced),
@@ -251,8 +299,17 @@ def clean_old_long_memory(keep: int = LONG_MEMORY_KEEP) -> int:
     保护：pinned=1（用户显式要求记住的记忆）永不清理、永不降级，容量清理
     只从 unpinned 候选中选；pinned 超过 PINNED_MEMORY_KEEP 仅记计数提示。
     """
+    from ..storage import runtime
+
     try:
-        conn = connect_database(_BOT_DB, timeout=5, row_factory=True)
+        encrypted_key = runtime.database_key_or_none()
+    except runtime.DatabaseLockedError:
+        logger.debug("[维护] 加密锁定态：跳过旧长期记忆清理")
+        return 0
+    try:
+        conn = connect_database(
+            _BOT_DB, encrypted_key=encrypted_key, timeout=5, row_factory=True
+        )
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
             # 字典式行访问依赖 Row 工厂（旧实现漏设：rows 非空时 row["user_id"]
@@ -374,6 +431,25 @@ def health() -> dict:
     checks["screenshots_mb"] = round(_dir_size_mb(_SCREENSHOTS), 1)
     backups = sorted(p.name for p in _BACKUPS.iterdir() if p.is_dir()) if _BACKUPS.exists() else []
     checks["backups"] = backups
+    try:
+        from ..storage import runtime
+        from .encrypted_backup import valid_encrypted_backups
+
+        if runtime.encrypted_mode():
+            encrypted = valid_encrypted_backups(_BACKUPS)
+            if encrypted:
+                folder, manifest = encrypted[-1]
+                checks["encrypted_backup"] = {
+                    "name": folder.name,
+                    "generation": manifest.get("generation"),
+                    "completed_at": manifest.get("completed_at"),
+                    "key_id": str(manifest.get("key_id") or "")[:8],
+                    "files": len(manifest.get("files") or []),
+                }
+            else:
+                checks["encrypted_backup"] = None
+    except Exception:
+        checks["encrypted_backup"] = None
 
     extra: dict = {}
     # 1) LLM_API_KEY 是否已配置（非空）

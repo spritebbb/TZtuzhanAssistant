@@ -307,3 +307,38 @@ def suite_migrate_table_passes_rebuild_exemption(monkeypatch):
     assert captured["kwargs"].get("_allow_during_rebuild") is True, (
         "migration 写向量必须传 _allow_during_rebuild=True，否则重建期 migrate 自锁"
     )
+
+# ---- 13. 维护清理在「引用清单读不出」时必须 fail-closed ----
+
+def suite_orphan_image_cleanup_fails_closed_when_refs_unreadable(monkeypatch, tmp_path):
+    """引用清单不可用时 clean_orphan_images 必须一张都不删。
+
+    缺陷现场（2026-09-18 加密态实测）：_referenced_image_names() 打不开
+    SQLCipher 的 sessions.db，异常被吞成「空引用集」，清理逻辑于是把仍被
+    会话引用的图片当孤儿删掉——超限即误删用户图片。
+    """
+    from backend.maintenance import loop as m
+
+    imgs = tmp_path / "imgs"
+    imgs.mkdir()
+    for i in range(3):
+        (imgs / f"pic{i}.bin").write_bytes(b"x" * 2048)
+
+    monkeypatch.setattr(m, "_IMGS", imgs)
+    monkeypatch.setattr(m, "_dir_size_mb", lambda _d: 999.0)  # 假装已超上限
+    monkeypatch.setattr(m, "_referenced_image_names", lambda: None)
+
+    assert m.clean_orphan_images(max_mb=1) == 0, "清单不可用时不得删除任何图片"
+    assert sorted(p.name for p in imgs.iterdir()) == ["pic0.bin", "pic1.bin", "pic2.bin"]
+
+
+def suite_reference_list_unavailable_is_none_not_empty(monkeypatch):
+    """读不到引用清单必须返回 None（可判定的「不知道」），而不是空集（「没有引用」）。"""
+    from backend.maintenance import loop as m
+    from backend.storage import runtime
+
+    def _locked() -> bytes:
+        raise runtime.DatabaseLockedError("已锁定或未解锁，无法提供数据库密钥")
+
+    monkeypatch.setattr(runtime, "database_key_or_none", _locked)
+    assert m._referenced_image_names() is None

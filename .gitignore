@@ -57,3 +57,9 @@ workspace/
 # 演示与 PPT 构建临时产物
 .ppt-build/
 demo.txt
+data-backup-*/
+
+# P3-04 加密迁移产物：明文副本、暂存区与机器相关 journal，一律不入库
+data.plaintext-*/
+data.encrypted-staging-*/
+encryption-migration.*.json

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from .migration import read_journal
@@ -100,23 +101,43 @@ def close_all_databases() -> None:
         pass
 
 
-# ---- 迁移持久化门（P3-04 E）：迁移进行中暂停一切后台写入 ----
-_gate_lock = threading.Lock()
+# ---- 持久化门（P3-04 E/F）：迁移或一致性备份期间暂停写入 ----
+# 使用计数式可重入门：迁移流程显式 engage/release，备份流程用
+# ``persistence_gate()`` 在短窗口内复用同一状态。这样嵌套调用不会提前放门，
+# 且保持原有布尔查询接口完全兼容。
+_gate_lock = threading.RLock()
+_gate_depth = 0
 _gate_engaged = False
 
 
 def engage_migration_gate() -> None:
-    """启用加密前落门：后台循环（initiative/维护/agent/tick）据此跳过一轮。"""
-    global _gate_engaged
+    """启用持久化门：后台循环（initiative/维护/agent/tick）据此跳过一轮。"""
+    global _gate_depth, _gate_engaged
     with _gate_lock:
-        globals()["_gate_engaged"] = True
+        _gate_depth += 1
+        _gate_engaged = True
 
 
 def release_migration_gate() -> None:
-    global _gate_engaged
+    """释放一次持久化门；只有最后一层释放后才真正放行。"""
+    global _gate_depth, _gate_engaged
     with _gate_lock:
-        globals()["_gate_engaged"] = False
+        if _gate_depth > 0:
+            _gate_depth -= 1
+        if _gate_depth == 0:
+            _gate_engaged = False
+
+
+@contextmanager
+def persistence_gate():
+    """短窗口持久化门，供备份等需要一致快照的维护任务使用。"""
+    engage_migration_gate()
+    try:
+        yield
+    finally:
+        release_migration_gate()
 
 
 def migration_gate_engaged() -> bool:
+    """兼容旧名：查询持久化门是否启用（迁移或备份窗口）。"""
     return _gate_engaged

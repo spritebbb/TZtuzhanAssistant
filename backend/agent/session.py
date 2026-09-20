@@ -584,6 +584,12 @@ async def agent_scheduler_loop(interval: int = 60) -> None:
             if _rt.migration_gate_engaged():
                 await asyncio.sleep(max(10, int(interval)))
                 continue
+            if _rt.encrypted_mode() and _rt.locked():
+                # 应用锁锁定态：MK 不在内存，due_tasks()/recover_stale_tasks()
+                # 只会抛 DatabaseLockedError。这里按「跳过一轮」处理，否则每个
+                # 周期都刷一条 ERROR，真正的故障会被自己的噪声埋掉。
+                await asyncio.sleep(max(10, int(interval)))
+                continue
             if not reset_in_progress():
                 recover_stale_tasks()
                 # 复用 HTTP 层的统一启动器：身份、确认通道、取消句柄、reset epoch

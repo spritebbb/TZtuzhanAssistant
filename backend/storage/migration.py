@@ -352,6 +352,17 @@ def migrate_data_root(
             except OSError as exc:
                 logger.warning("[迁移] 随迁失败 %s: %s", name, exc)
         journal["carried_over"] = carried
+        # 迁移前的明文一致性备份必须随明文目录走：它建在 staging 内，会随目录
+        # 切换落进「已加密」的新 data root，等于在加密目录里留一份明文库
+        # （2026-09-18 实测：data/premigration-backup/bot.db 仍是明文 SQLite）。
+        backup_dir = data_root / "premigration-backup"
+        if backup_dir.is_dir():
+            try:
+                shutil.move(str(backup_dir), str(plaintext_keep / "premigration-backup"))
+                journal["premigration_backup"] = "moved_to_plaintext_keep"
+            except OSError as exc:
+                logger.warning("[迁移] 明文备份归位失败，留待 finish_cleanup 兜底：%s", exc)
+                journal["premigration_backup"] = "left_in_data_root"
         journal["state"] = "switched"
         journal["state"] = "cleanup_pending"
         _write_journal(data_root, journal)
@@ -363,11 +374,34 @@ def migrate_data_root(
         raise fail(f"{type(exc).__name__}: {exc}") from exc
 
 
+def _cleanup_targets(data_root: Path, journal: dict) -> tuple[Path, list[Path]]:
+    """解析待清理的明文档，返回 (必须存在的保留目录, 额外的明文残留)。
+
+    journal 记录的是迁移当时的绝对路径；数据目录搬迁过之后那个路径可能已经
+    不存在（2026-09-18 实测：journal 写 D:\\DSH\\... 而实际在 D:\\TZtuzhanAssistant）。
+    这时按目录名在现父目录下重定位，而不是当作「没有明文要清」。
+    """
+    recorded = str(journal.get("plaintext_keep") or "").strip()
+    if not recorded:
+        raise MigrationError("journal 缺少 plaintext_keep，无法确定明文目录")
+    keep = Path(recorded)
+    if not keep.is_dir():
+        keep = data_root.parent / Path(recorded).name
+    extras: list[Path] = []
+    # 旧版本迁移把 staging 内的明文快照一起搬进了加密目录；新版本已归位到
+    # 明文目录，这里兜底清理历史残留。
+    legacy_backup = data_root / "premigration-backup"
+    if legacy_backup.is_dir():
+        extras.append(legacy_backup)
+    return keep, extras
+
+
 def finish_cleanup(data_root: str | Path) -> dict:
     """用户确认迁移成功后的收尾：删除明文目录，journal → encrypted。
 
     删除是显式动作，永不随迁移自动发生（普通 SSD 上的覆盖删除不等于物理
-    擦除——ADR 边界声明）。
+    擦除——ADR 边界声明）。明文目录找不到时报错，而不是静默把状态改成
+    encrypted：否则会留下「journal 说已加密、明文其实还在」的假成功。
     """
     data_root = Path(data_root).resolve()
     journal = read_journal(data_root)
@@ -375,11 +409,20 @@ def finish_cleanup(data_root: str | Path) -> dict:
         raise MigrationError("找不到迁移 journal")
     if journal.get("state") != "cleanup_pending":
         raise MigrationError(f"当前状态 {journal.get('state')} 不允许清理明文目录")
-    plaintext = Path(journal["plaintext_keep"])
-    if plaintext.is_dir():
-        shutil.rmtree(plaintext)
+
+    keep, extras = _cleanup_targets(data_root, journal)
+    if not keep.is_dir():
+        raise MigrationError(
+            f"明文目录不存在，拒绝静默收尾（journal 记录：{journal.get('plaintext_keep')}；"
+            f"按名重定位后：{keep}）"
+        )
+    removed: list[str] = []
+    for path in [keep, *extras]:
+        shutil.rmtree(path)
+        removed.append(str(path))
     journal["state"] = "encrypted"
     journal["plaintext_removed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    journal["removed_paths"] = removed
     _write_journal(data_root, journal)
     return journal
 
