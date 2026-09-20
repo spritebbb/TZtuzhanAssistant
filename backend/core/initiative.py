@@ -712,6 +712,23 @@ async def _arbited_proactive(
                 return None
         except Exception:
             logger.exception("[主动仲裁] necessity 评分异常，按放行处理")
+    # D12 意愿 roll：值得说（necessity）之后，再问一次「她此刻想不想说」。
+    # 硬规则源（约定到点）不掷骰；掷骰结果可复现并落想念补偿计数。
+    try:
+        from .expression_policy import (
+            note_willingness_outcome,
+            willingness_decision,
+        )
+
+        speak, decision = willingness_decision(user_id, source=source)
+        if not speak:
+            logger.info("[主动仲裁] {} 意愿未中（p={:.2f} roll={:.2f} 压抑={:.2f}），这轮她没想说",
+                        source, float(decision.get("p", 0)), float(decision.get("roll", 0)),
+                        float(decision.get("suppression", 0)))
+            note_willingness_outcome(user_id, decision)
+            return None
+    except Exception:
+        logger.exception("[主动仲裁] 意愿 roll 异常，按放行处理")
     last = _last_chat_ts(user_id)
     if last is not None and time.time() - last < idle_minutes * 60:
         return None

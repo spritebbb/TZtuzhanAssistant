@@ -19,6 +19,11 @@ os.environ.setdefault("MEMORY_V2", "0")
 os.environ["PROACTIVE_DAILY_MAX"] = "1"
 
 from backend.core import focus, initiative, proactive_policy as policy  # noqa: E402
+
+from backend.core import features  # noqa: E402
+# D12：本组契约断言「投递成功」，主动意愿骰子会引入按分钟波动的随机性；
+# 意愿层自身由 test_willingness_roll 覆盖，这里关掉保持确定性。
+features.set_flag("willingness_enabled", False)
 from backend.core.userdb import db, get_due_promises, save_promise  # noqa: E402
 
 UID = "arbiter-user-1"

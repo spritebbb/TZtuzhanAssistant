@@ -16,6 +16,10 @@ os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_tes
 os.environ.setdefault("MEMORY_V2", "0")
 
 from backend.core import proactive_policy as policy, surprise  # noqa: E402
+
+from backend.core import features  # noqa: E402
+# D12：惊喜走意愿骰子，本组断言投递成功——关掉骰子保持确定性（意愿层另有专测）。
+features.set_flag("willingness_enabled", False)
 from backend.core.config import config  # noqa: E402
 from backend.core.userdb import db, kv_get  # noqa: E402
 
