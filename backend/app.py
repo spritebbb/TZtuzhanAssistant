@@ -42,6 +42,7 @@ from .api import (
     meta,
     personas,
     shared_resources,
+    situation,
     tour,
     telemetry,
     possibilities,
@@ -250,6 +251,7 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(health.router)
     app.include_router(lock.router)
+    app.include_router(situation.router)
     app.include_router(encryption.router)
     app.include_router(sessions.router)
     app.include_router(chat.router)

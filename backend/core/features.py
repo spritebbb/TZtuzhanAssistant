@@ -79,6 +79,9 @@ FLAG_DEFAULTS = {
     # D12 主动意愿 roll：necessity 达标的主动候选再掷一次「她想不想说」；
     # 硬规则源（约定到点等）与用户直接对话永不进骰子。关闭后回到纯 necessity 门。
     "willingness_enabled": True,
+    # D9 局势档案：≤2.5k tokens 恒定世界快照常驻注入（目标/约定/悬念/近事件/
+    # 生活/焦点），钩子不靠检索命中。派生态可随时重编译重建；关闭时整层退场。
+    "situation_enabled": True,
 }
 
 

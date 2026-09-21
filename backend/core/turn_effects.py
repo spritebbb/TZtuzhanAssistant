@@ -172,6 +172,17 @@ def _schedule_lazy_extraction(user_id: str, prev_ts: str | None) -> None:
         schedule(f"triples:{user_id}", lambda: _pipeline._extract_triples_lazy(user_id))
 
 
+def _schedule_situation_update(user_id: str) -> None:
+    """D9：后台调度局势档案增量更新（事件驱动 + 每 10 轮；LLM 受 D10 门控）。"""
+    from .features import flag
+    from .situation import update_after_turn
+    from .tasks import schedule
+
+    if not flag("situation_enabled"):
+        return
+    schedule(f"situation:{user_id}", lambda: update_after_turn(user_id))
+
+
 async def run_turn_effects(
     user_id: str,
     text: str,
@@ -224,6 +235,7 @@ async def run_turn_effects(
         persona_name=persona_name,
     )
     ledger.run("惰性提炼调度", _schedule_lazy_extraction, user_id, prev_ts)
+    ledger.run("局势档案调度", _schedule_situation_update, user_id)
     return ledger
 
 
