@@ -176,6 +176,16 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     except Exception:
         logger.exception("[每日总结] 语义关系事件提取失败（不影响批次）")
     transcript = "\n".join(f"{r['role']}: {r['content']}" for r in rows[-60:])
+    # D10 成本闸：hard/extreme 档暂停批处理 LLM（journal 记原因，不产半成品）。
+    # 不推进 last_batch_date——下月额度恢复后这些日子仍可被补跑。
+    try:
+        from .cost_guard import check as _cost_ok, note_batch_skipped
+
+        if not _cost_ok("daily"):
+            note_batch_skipped(user_id, day)
+            return
+    except Exception:
+        logger.exception("[每日总结] 成本闸异常，按放行处理")
     data = {}
     llm_ok = False
     try:

@@ -66,6 +66,8 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("attention:topics", "attention_state", "§17.1 注意力主题（≤5 个 topic id + 权重，无正文）", "runtime"),
     KvKeySpec("proactive:source_last:{source}", "expression_policy", "§17.1 各主动来源最近一次投递时间（重复惩罚输入）", "runtime"),
     KvKeySpec("proactive:willingness", "expression_policy", "D12 意愿 roll 连续未中计数（想念补偿输入）", "runtime"),
+    KvKeySpec("cost:hint_day", "cost_guard", "D10 叙事提示每日一次标记", "daily"),
+    KvKeySpec("cost:skipped_batch:{day}", "cost_guard", "D10 daily 批处理被熔断跳过的 journal 记录", "runtime"),
 )
 
 

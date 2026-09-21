@@ -466,6 +466,21 @@ def _mcp_tool_filter(user_text: str, skill_texts: list[str]):
         return None
 
 
+def _cost_line(user_id: str) -> str:
+    """D10 成本熔断叙事面 → 行为帧 cost_line。
+
+    提示类（事多轻提）每日一次由 cost_guard 内部 kv 门控；extreme 的
+    「更简短」是常驻质地约束。任一失败即空串，不阻塞回复。
+    """
+    try:
+        from .cost_guard import cost_lines
+
+        hint, standing = cost_lines(user_id)
+        return " ".join(p for p in (hint, standing) if p)
+    except Exception:
+        return ""
+
+
 def _evolution_line(user_id: str) -> str:
     """P3-05 表达层演化 + L05 领域调制 + L03 气质倾向 → 行为帧 evolution_line。
 
@@ -1009,6 +1024,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             calendar_line=compose_line(cal_mod),
             style_line=_style_line(user_id),
             evolution_line=_evolution_line(user_id),
+            cost_line=_cost_line(user_id),
         )
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")
