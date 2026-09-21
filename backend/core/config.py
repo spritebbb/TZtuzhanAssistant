@@ -147,6 +147,10 @@ class Config:
         self.cost_soft_ratio: float = _env_float("COST_SOFT_RATIO", 0.70)
         self.cost_extreme_ratio: float = _env_float("COST_EXTREME_RATIO", 1.30)
         self.cost_downgrade_model: str = os.getenv("COST_DOWNGRADE_MODEL", "").strip()
+        # D11 离线补算（docs/D9-D12-DESIGN-2026-09-21.md §4：确定性重放+限额裁剪+逐条回放可跳过）
+        self.offline_recap_min_gap_hours: float = _env_float("OFFLINE_RECAP_MIN_GAP_HOURS", 8.0)
+        self.offline_recap_max_days: int = max(1, _env_int("OFFLINE_RECAP_MAX_DAYS", 14))
+        self.offline_recap_event_cap: int = max(1, _env_int("OFFLINE_RECAP_EVENT_CAP", 8))
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))
