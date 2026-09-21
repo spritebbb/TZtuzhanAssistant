@@ -497,6 +497,8 @@ onMounted(async () => {
   window.electronAPI?.setActiveSession(props.sessionId)
   // 订阅主进程转发的主动消息（追加气泡，与 SSE 去重）
   unsubscribeInitiativeIpc = window.electronAPI?.onInitiativeMessage((message) => handleProactiveMessage(message))
+  // D11 离线补算：重开后把她离线期间的日子逐条说给你（可跳过）；不阻塞输入
+  void replayOfflineRecap()
   document.addEventListener('keydown', onKeydown)
 })
 
@@ -543,6 +545,44 @@ function _isDuplicateProactive(message: ProactiveMessage): boolean {
     && last.role === 'bot'
     && last.content === message.text
     && (last.image ?? null) === (message.image ?? null)
+}
+
+// ---- D11 离线补算回放（逐条、可跳过）----
+const recapReplaying = ref(false)
+let recapSkip = false
+
+async function replayOfflineRecap() {
+  try {
+    const r = await apiFetch('/api/offline-recap')
+    const d = await r.json()
+    if (!d?.ok || !d.pending || !Array.isArray(d.events) || d.events.length === 0) return
+    recapSkip = false
+    recapReplaying.value = true
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    try {
+      if (d.opening) {
+        handleProactiveMessage(String(d.opening))
+        await sleep(1500)
+      }
+      for (const ev of d.events) {
+        if (recapSkip) break
+        const line = ev.summary
+          ? String(ev.text)
+          : `（${String(ev.at || '').slice(5, 16)}）${String(ev.text)}`
+        handleProactiveMessage(line)
+        await sleep(1200)
+      }
+    } finally {
+      recapReplaying.value = false
+    }
+    void apiFetch('/api/offline-recap/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: recapSkip ? 'skip' : 'delivered' }),
+    })
+  } catch {
+    /* 离线补算是锦上添花，失败静默 */
+  }
 }
 
 function handleProactiveMessage(input: ProactiveMessage | string) {
@@ -691,6 +731,12 @@ function isActive(i: number): boolean {
     </div>
     <ConfirmPanel :pending="pendingConfirm" @resolve="resolveConfirm" />
     <ChatInput v-model:input="input" v-model:ephemeral="ephemeralMode" :busy="busy || initializing" :streaming="streaming" :persona-name="props.personaName" @send="send" @stop="stop" @file="handleImageFile" />
+    <transition name="fade">
+      <div v-if="recapReplaying" class="recap-skip glass" role="status" aria-label="离线补算回放中">
+        <span>她正在讲你不在的这段时间……</span>
+        <button class="recap-skip-btn" @click="recapSkip = true">跳过</button>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -703,6 +749,32 @@ function isActive(i: number): boolean {
   position: relative;
   overflow: hidden;
 }
+/* D11 离线补算回放中的跳过横幅 */
+.recap-skip {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.recap-skip-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.recap-skip-btn:hover { color: var(--primary-text); border-color: var(--edge-active); }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 /* 全身立绘背景：舞台层统一月光、景深与底部融入，避免贴图感 */
 .portrait-stage {
   position: absolute;

@@ -43,6 +43,7 @@ from .api import (
     personas,
     shared_resources,
     situation,
+    offline_recap,
     tour,
     telemetry,
     possibilities,
@@ -252,6 +253,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(lock.router)
     app.include_router(situation.router)
+    app.include_router(offline_recap.router)
     app.include_router(encryption.router)
     app.include_router(sessions.router)
     app.include_router(chat.router)
@@ -471,6 +473,14 @@ def create_app() -> FastAPI:
             _spawn_bg(_agent_session.agent_scheduler_loop())
         except Exception:
             logger.exception("[Agent] 定时任务调度器启动失败")
+        # D11 离线补算：启动时为当前人格后台预生成（有足够离线窗口才真正生成）；
+        # 锁定态由 maybe_generate 内部自然失败/跳过，不影响启动
+        try:
+            from .core.offline_recap import startup_recap as _startup_recap
+
+            _spawn_bg(_startup_recap())
+        except Exception:
+            logger.exception("[离线补算] 启动预生成任务创建失败")
 
     _bg_tasks: set = set()
 
