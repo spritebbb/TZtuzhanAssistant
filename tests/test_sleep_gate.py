@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_sleep_gate_"))
+# 本套件测的就是睡眠门控：弹掉 conftest 的测试豁免，验证真实门控行为
+os.environ.pop("TZTUZHAN_NO_SLEEP_GATE", None)
 
 from backend.core import sleep_gate
 from backend.core.userdb import db
