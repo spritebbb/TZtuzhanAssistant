@@ -27,6 +27,11 @@ os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_g04
 from backend.core import companion_requests as cr
 from backend.core.userdb import db
 
+from backend.core import features as _features  # noqa: E402
+# D12：本组断言「投递成功」，主动意愿骰子按分钟播种会引入波动；
+# 意愿层由 test_willingness_roll 专测，这里关掉保持契约确定性。
+_features.set_flag("willingness_enabled", False)
+
 NOW = datetime(2026, 9, 8, 15, 0)
 
 

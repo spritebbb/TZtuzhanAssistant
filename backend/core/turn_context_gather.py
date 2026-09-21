@@ -211,16 +211,16 @@ async def gather_search(text: str, *, mock: bool, needs_search: bool) -> tuple[d
     return {"hits": list(report.get("evidence", [])), "report": report}, None
 
 
-async def gather_situation(user_id: str) -> tuple[str, Failure]:
+async def gather_situation(user_id: str, *, ephemeral: bool = False) -> tuple[str, Failure]:
     """D9 局势档案：常驻世界快照（目标/约定/悬念/近事件/生活/焦点）。
 
     与其他采集器不同：它不做话题门控——「钩子恒定在场」正是这一层的意义
-    （不靠检索命中）。flag 关闭时返回空串。
+    （不靠检索命中）。flag 关闭时返回空串；临时轮只读不落盘。
     """
     from .situation import situation_context
 
     try:
-        return await _to_thread(situation_context, user_id), None
+        return await _to_thread(situation_context, user_id, persist=not ephemeral), None
     except Exception as exc:  # noqa: BLE001
         return "", ("局势档案", exc)
 
@@ -243,7 +243,7 @@ async def gather_all(
     每轮省下的几百毫秒，不值得拿行为一致性换。顺序也与抽取前逐字一致。
     """
     gathered = [
-        await gather_situation(user_id),
+        await gather_situation(user_id, ephemeral=ephemeral),
         await gather_memories(user_id, text, mock=mock),
         await gather_knowledge(user_id, text, mock=mock),
         await gather_reading(user_id, text),
