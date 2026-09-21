@@ -18,6 +18,10 @@ from backend.core import pending_thoughts as thoughts  # noqa: E402
 from backend.core.narrative_planner import plan_next  # noqa: E402
 from backend.core.userdb import db, save_promise  # noqa: E402
 
+from backend.core import features  # noqa: E402
+# D12：本组断言「投递成功」，意愿骰子按分钟播种会随机假红；骰子另有专测，这里关掉。
+features.set_flag("willingness_enabled", False)
+
 UID = "assistant-main"
 NOW = datetime.now()
 
