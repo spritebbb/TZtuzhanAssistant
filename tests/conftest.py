@@ -18,3 +18,8 @@ import tempfile
 
 if not os.environ.get("TZTUZHAN_DATA_DIR"):
     os.environ["TZTUZHAN_DATA_DIR"] = tempfile.mkdtemp(prefix="tztuzhan_pytest_")
+
+# 睡眠门控测试豁免：她的睡眠时段（深夜）会让所有断言 mock 回复非空的套件
+# 整批假红（睡眠门控对前两条消息返回空回复）。suite_runner 复制本进程环境
+# 到每个测试子进程，置一次即全套生效；生产环境不设此变量，门控照常工作。
+os.environ.setdefault("TZTUZHAN_NO_SLEEP_GATE", "1")

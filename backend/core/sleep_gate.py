@@ -60,7 +60,17 @@ def before_user_message(
     now: datetime | None = None,
     persist: bool = True,
 ) -> str:
-    """返回 active/silent/woke；当前消息尚未写入 messages 表。"""
+    """返回 active/silent/woke；当前消息尚未写入 messages 表。
+
+    TZTUZHAN_NO_SLEEP_GATE=1（测试豁免）：凌晨跑全量时她的睡眠时段会让
+    所有「断言 mock 回复非空」的套件整批假红（2026-09-22 凌晨实证）；
+    conftest 为 pytest 进程默认置位并随 env 继承到套件子进程，生产不设
+    即保持真实门控。
+    """
+    import os
+
+    if os.getenv("TZTUZHAN_NO_SLEEP_GATE", "").strip().lower() in {"1", "true"}:
+        return "active"
     instant = _instant(now)
     if not _resting_now(user_id, instant):
         return "active"
