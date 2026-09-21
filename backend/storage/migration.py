@@ -76,10 +76,16 @@ class MigrationError(RuntimeError):
 # 目录句柄释放：进程内已知钉点（loguru bot.log sink）由 _rename_dir 直接处理。
 
 
-def _rename_dir(src: Path, dst: Path) -> None:
-    """带句柄释放与短重试的目录改名（Windows 对打开句柄零容忍）。"""
+def _rename_dir(src: Path, dst: Path, *, attempts: int = 8) -> None:
+    """带句柄释放与指数退避重试的目录改名（Windows 对打开句柄零容忍）。
+
+    除了进程内句柄（日志 sink / 向量库，见释放逻辑），杀软会短暂持有
+    「刚写完的文件」的扫描句柄数秒（2026-09-21 实测： Defender 扫描
+    staging 密文导致切换 rename 连续 PermissionError）。迁移是罕见的一次性
+    停机操作，值得长退避：0.25s 起指数增长、单次封顶 3s，总窗约 13s。
+    """
     last_exc: OSError | None = None
-    for attempt in range(4):
+    for attempt in range(attempts):
         try:
             os.rename(src, dst)
             return
@@ -97,7 +103,7 @@ def _rename_dir(src: Path, dst: Path) -> None:
                 _vec.shutdown()
             except Exception:
                 pass
-            time.sleep(0.3 * (attempt + 1))
+            time.sleep(min(3.0, 0.25 * (2 ** attempt)))
     raise last_exc if last_exc else OSError("rename failed")
 
 
@@ -328,12 +334,41 @@ def migrate_data_root(
         from ..core.log import release_file_sink as _release_sink
         from ..core.log import restore_file_sink as _restore_sink
 
+        # 终局句柄清场：契约是「句柄释放由引擎负责」。调用方（HTTP/CLI）各自
+        # 的 close_all_databases 覆盖面可能滞后于新增的惰性连接（2026-09-21
+        # 实测：一条进程内 sqlite 连接在关库后仍持有 bot.db/-wal，rename 全数
+        # PermissionError）。这里引擎自己兜底：关全部已知库 + GC 扫尾关闭残余
+        # sqlite 连接——迁移是停机语义，此刻进程内不允许任何活连接。
+        def _final_sweep() -> None:
+            try:
+                from . import runtime as _rt
+
+                _rt.close_all_databases()
+            except Exception:
+                pass
+            import gc as _gc
+            import sqlite3 as _sq
+
+            _gc.collect()
+            for obj in _gc.get_objects():
+                if isinstance(obj, _sq.Connection):
+                    try:
+                        obj.close()
+                    except Exception:
+                        pass
+
+        _final_sweep()
+
         try:
             _release_sink()
             _rename_dir(data_root, plaintext_keep)
             _rename_dir(staging, data_root)
         except OSError as exc:
-            _rename_dir(plaintext_keep, data_root)  # 回滚：明文目录归位
+            # 回滚前先确认明文目录真的被切换走：rename1 未成功时 plaintext_keep
+            # 不存在，此时 data_root 原位未动，直接上抛真实主错误——不能让回滚的
+            # FileNotFoundError 盖掉 PermissionError（误导排查方向，2026-09-21 实测踩过）。
+            if plaintext_keep.exists():
+                _rename_dir(plaintext_keep, data_root)  # 回滚：明文目录归位
             _restore_sink()
             raise fail(f"目录切换失败已回滚：{exc}") from exc
         _restore_sink()
