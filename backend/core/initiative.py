@@ -358,6 +358,16 @@ async def _tick_once() -> int:
         return 0
     _last_global_run = now
 
+    # D10 成本闸：hard/extreme 档自主主动整体暂停（次级源在 _arbited_proactive
+    # 另有一道；此处拦主循环与通用主动，叙事面走行为帧 cost_line）
+    try:
+        from .cost_guard import check as _cost_ok
+
+        if not _cost_ok("initiative"):
+            return 0
+    except Exception:
+        logger.exception("[主动性] 成本闸异常，按放行处理")
+
     # 归档建议、约定跟进与心事：统一仲裁点出牌，一轮至多一条；
     # 与通用主动共享每日额度（额度用尽时下方 _eligible_users 自然全跳过）。
     try:
@@ -606,6 +616,14 @@ async def poll_message_for(user_id: str) -> ProactiveMessage | None:
     from .reset import reset_epoch, reset_in_progress
     if reset_in_progress():
         return None
+    # D10 成本闸：拉模式主动同样受熔断（用户聊天不经过本函数）
+    try:
+        from .cost_guard import check as _cost_ok
+
+        if not _cost_ok("initiative"):
+            return None
+    except Exception:
+        pass
     epoch = reset_epoch()
     user = db.get_user(user_id)
     if not user:
@@ -704,14 +722,29 @@ async def _arbited_proactive(
             necessity = None
     if necessity is not None:
         try:
-            from .expression_policy import gate_proactive_candidate
+            from .cost_guard import necessity_bump
+            from .expression_policy import (
+                NECESSITY_THRESHOLD,
+                gate_proactive_candidate,
+            )
 
-            if not gate_proactive_candidate(necessity):
-                logger.info("[主动仲裁] {} necessity {:.2f} 未达标，淘汰",
-                            source, float(necessity["necessity"]))
+            # D10：soft 档非紧急主动更挑剔（阈值 +0.15）；hard/extreme 在下方成本闸整体暂停
+            threshold = NECESSITY_THRESHOLD + necessity_bump()
+            if not gate_proactive_candidate(necessity, threshold=threshold):
+                logger.info("[主动仲裁] {} necessity {:.2f} 未达 {:.2f}，淘汰",
+                            source, float(necessity["necessity"]), threshold)
                 return None
         except Exception:
             logger.exception("[主动仲裁] necessity 评分异常，按放行处理")
+    # D10 成本闸：hard/extreme 档自主主动整体暂停（叙事面走行为帧，不在此弹话）；
+    # 用户直接对话不经本闸门。
+    try:
+        from .cost_guard import check as _cost_ok
+
+        if not _cost_ok("initiative"):
+            return None
+    except Exception:
+        logger.exception("[主动仲裁] 成本闸异常，按放行处理")
     # D12 意愿 roll：值得说（necessity）之后，再问一次「她此刻想不想说」。
     # 硬规则源（约定到点）不掷骰；掷骰结果可复现并落想念补偿计数。
     try:

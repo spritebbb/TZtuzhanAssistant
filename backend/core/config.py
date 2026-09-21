@@ -141,6 +141,12 @@ class Config:
         self.willingness_miss_compensate: float = _env_float("WILLINGNESS_MISS_COMPENSATE", 0.15)
         self.willingness_floor: float = _env_float("WILLINGNESS_FLOOR", 0.05)
         self.willingness_ceil: float = _env_float("WILLINGNESS_CEIL", 0.95)
+        # D10 叙事化成本熔断（docs/D9-D12-DESIGN-2026-09-21.md §2，2026-09-21 拍板：
+        # 月预算 ¥30、三档 70%/100%/130%、extreme 含回复简短；用户聊天永不受影响）
+        self.cost_monthly_budget_cny: float = _env_float("COST_MONTHLY_BUDGET_CNY", 30.0)
+        self.cost_soft_ratio: float = _env_float("COST_SOFT_RATIO", 0.70)
+        self.cost_extreme_ratio: float = _env_float("COST_EXTREME_RATIO", 1.30)
+        self.cost_downgrade_model: str = os.getenv("COST_DOWNGRADE_MODEL", "").strip()
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))

@@ -99,12 +99,26 @@ def _validate_chain(route: Route) -> None:
 
 
 def resolve_route(task: str, explicit_model: str | None = None) -> Route:
-    """在请求开始时解析路由快照；显式 model 只覆盖模型，不换端点。"""
+    """在请求开始时解析路由快照；显式 model 只覆盖模型，不换端点。
+
+    D10：extreme 档把感知/批处理类文本任务降级到廉价模型（用户对话链路
+    chat_*/tool/vision 不降，保住交互质量）；降级目标未配置时保持原模型。
+    """
     if task not in TASKS:
         raise ValueError(f"未知模型任务：{task}")
     route = _configured(task)
     _validate_chain(route)
-    return replace(route, model=explicit_model) if explicit_model else route
+    if explicit_model:
+        return replace(route, model=explicit_model)
+    try:
+        from .cost_guard import downgrade_model
+
+        cheap = downgrade_model(task)
+        if cheap and cheap != route.model:
+            return replace(route, model=cheap)
+    except Exception:
+        pass  # 成本闸异常不影响路由
+    return route
 
 
 def fallback_route(route: Route) -> Route | None:
