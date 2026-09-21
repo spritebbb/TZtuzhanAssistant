@@ -58,6 +58,7 @@ _TABLES = (
     "learning_candidates", "watches",
     "kb_documents", "kb_chunks", "unlocks",
     "tavern_sessions",
+    "situation_files",
 )
 
 _reset_lock = asyncio.Lock()

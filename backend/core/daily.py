@@ -231,6 +231,13 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     except Exception:
         logger.exception("[每日总结] 重逢日记收束失败（不影响批次）")
     await maybe_write_research_report(user_id)
+    # D9 局势档案：确定性全量重编译（零 LLM 不过成本闸；压缩段由 turn 增量路径再生）
+    try:
+        from .situation import recompile
+
+        recompile(user_id)
+    except Exception:
+        logger.exception("[每日总结] {} 的局势档案重编译失败（不影响批次）", user_id)
     # 仅 LLM 判定成功才标记当日已完成；失败保留 done_key 空缺，下次可重试补判
     if llm_ok:
         _kv_set(user_id, done_key, "1")

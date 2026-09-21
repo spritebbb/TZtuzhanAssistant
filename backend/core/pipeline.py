@@ -943,6 +943,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     event_recall_result = gathered["event_recall_result"]
     search_hits = gathered["search_hits"]
     search_report = gathered["search_report"]
+    situation_ctx = gathered["situation_ctx"]
 
     # 3.1) 长会话压缩：总消息超阈值时，把旧消息摘要成一段记忆，只保留最近的完整消息
     ctx = short_term_messages(user_id)
@@ -1067,6 +1068,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         remembered=remembered,
         facts=facts,
     )
+    # D9 局势档案：常驻世界快照，人格之后、记忆召回之前（钩子不靠检索命中）
+    if situation_ctx:
+        messages.append({"role": "system", "content": situation_ctx})
     inject_knowledge(messages, kb_hits)
     inject_activity_contexts(
         messages,

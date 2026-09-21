@@ -22,7 +22,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 42  # v42: tavern sessions（酒馆同玩剧情沉淀）
+_SCHEMA_VERSION = 43  # v43: situation files（D9 局势档案）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -459,6 +459,18 @@ CREATE TABLE IF NOT EXISTS tavern_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_tavern_sessions_user
     ON tavern_sessions(user_id, played_at);
+-- D9 局势档案：每人格一行的恒定世界快照（派生态，重编译可重建，不进关系包导出）。
+-- state_json 六节 + LLM 压缩段；turn_count 为距上次更新的轮数（触发每10轮刷新）。
+CREATE TABLE IF NOT EXISTS situation_files (
+    user_id        TEXT PRIMARY KEY,
+    format_version INTEGER NOT NULL,
+    state_json     TEXT NOT NULL,
+    char_budget    INTEGER NOT NULL DEFAULT 5000,
+    last_event_id  INTEGER,
+    turn_count     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL,
+    recompiled_at  TEXT
+);
 -- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
 CREATE TABLE IF NOT EXISTS activity_lists (
     activity_id  INTEGER PRIMARY KEY,
@@ -2145,6 +2157,7 @@ class UserDB:
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
                 "tavern_sessions",
+                "situation_files",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
