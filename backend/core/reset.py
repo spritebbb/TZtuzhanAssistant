@@ -59,9 +59,11 @@ _TABLES = (
     "kb_documents", "kb_chunks", "unlocks",
     "tavern_sessions",
     "situation_files",
-    "channel_bindings", "channel_inbox", "channel_outbox",
-    "devices", "push_subscriptions", "auth_sessions",
+    "channel_bindings", "devices",
 )
+
+# 无 user_id 列的传输态表（按整体清除——单用户产品的重置语义下等同于清渠道状态）
+_TABLES_NO_USER = ("channel_inbox", "channel_outbox", "push_subscriptions", "auth_sessions")
 
 _reset_lock = asyncio.Lock()
 _resetting = False
@@ -406,6 +408,8 @@ async def reset_everything(*, deep: bool = False) -> dict:
                     try:
                         for table in _TABLES:
                             db.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (uid,))
+                        for table in _TABLES_NO_USER:
+                            db.conn.execute(f"DELETE FROM {table}")
                         # P1-04 任务认领记录按人格作用域清理（job_runs 无 user_id 列）
                         db.conn.execute(
                             "DELETE FROM job_runs WHERE scope_key=?",
