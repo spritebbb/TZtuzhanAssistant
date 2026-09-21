@@ -85,6 +85,9 @@ FLAG_DEFAULTS = {
     # D11 离线补算：重开后把她离线期间照常过的日子逐条说给你（可跳过）；
     # 确定性重放真实行程，超限降级摘要，开场一句才用 LLM。
     "offline_recap_enabled": True,
+    # L12 公网网关：独立 gateway 进程 + Cloudflare Tunnel + Access（默认关；
+    # 设备注册/推送端点与源站 JWT 校验模块已就位，域名与 Access 配置后开启）。
+    "remote_gateway_enabled": False,
 }
 
 
