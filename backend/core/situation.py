@@ -404,8 +404,12 @@ def _render(sections: dict, compressed: str, *, char_budget: int) -> str:
     return text
 
 
-def situation_context(user_id: str) -> str:
-    """常驻注入块（flag 门控）。档案缺失时现场确定性重建一份（零 LLM）。"""
+def situation_context(user_id: str, *, persist: bool = True) -> str:
+    """常驻注入块（flag 门控）。档案缺失时现场确定性渲染一份。
+
+    persist=False（临时轮）时绝不落盘——「本轮不留痕」不能因为派生档案
+    破例；渲染结果一次性使用，不写 situation_files。
+    """
     try:
         from .features import flag
 
@@ -416,6 +420,10 @@ def situation_context(user_id: str) -> str:
     try:
         current = get_file(user_id)
         if current is None:
+            sections = rebuild_sections(user_id)
+            if not persist:
+                body = _render(sections, "", char_budget=DEFAULT_CHAR_BUDGET)
+                return f"[局势档案] 以下是你们当下的世界快照（真实记录汇编，供你自然参考）：\n{body}" if body else ""
             recompile(user_id)
             current = get_file(user_id)
         if current is None:
