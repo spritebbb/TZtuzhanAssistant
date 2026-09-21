@@ -35,6 +35,7 @@ _FLAG_LABELS = {
     "situation_enabled": "局势档案：一份常驻的世界快照让她随时记得你们正在做的事和没解开的疑问",
     "offline_recap_enabled": "离线补算：你不在的这段时间她照常过日子，回来后逐条讲给你听（可跳过）",
     "remote_gateway_enabled": "远程网关：手机等外部设备经公网安全通道访问（需域名与 Access 配置，默认关闭）",
+    "local_tts_enabled": "本地语音：用她的专属音色在本地合成朗读（需装好 GPT-SoVITS 服务与声纹，失败自动回退在线语音）",
 }
 
 
