@@ -183,12 +183,13 @@ def test_schema_v43() -> None:
     from backend.core.userdb import _SCHEMA_VERSION
 
     version = db.conn.execute("PRAGMA user_version").fetchone()[0]
-    assert _SCHEMA_VERSION == 43 and version == 43, f"schema 应为 v43，实际 {version}"
+    assert _SCHEMA_VERSION >= 43 and version == _SCHEMA_VERSION, \
+        f"schema 应跟随 _SCHEMA_VERSION（v44+），实际 {version}"
     row = db.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='situation_files'"
     ).fetchone()
     assert row is not None, "situation_files 表应存在"
-    print("[OK] schema v43：版本联动与表结构就位")
+    print(f"[OK] schema v{_SCHEMA_VERSION}：版本联动与表结构就位")
 
 
 def main() -> None:
