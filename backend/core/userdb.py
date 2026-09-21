@@ -22,7 +22,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 44  # v44: L12-L14 离线骨架（channel bindings/inbox/outbox + devices/push/auth_sessions）
+_SCHEMA_VERSION = 45  # v45: P3-03 本地声纹（voice_profiles / voice_manifests）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -544,6 +544,27 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
     revoked_at TEXT,
     created_at TEXT NOT NULL
 );
+-- P3-03 本地声纹（GPT-SoVITS）：人格→模型绑定与素材清单。
+-- 素材本体在加密工作区，voice_manifests 只存清单；两者均为运行资产不进关系导出。
+CREATE TABLE IF NOT EXISTS voice_manifests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    path         TEXT NOT NULL,               -- 加密工作区内的参考音频相对路径
+    text         TEXT NOT NULL DEFAULT '',    -- 参考音频的标注文本（prompt_text）
+    lang         TEXT NOT NULL DEFAULT 'zh',
+    sha256       TEXT NOT NULL DEFAULT '',
+    duration_sec REAL NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS voice_profiles (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    persona_id            TEXT NOT NULL,
+    provider_version      TEXT NOT NULL,      -- 协商固定：实际安装 commit/版本
+    model_hash            TEXT NOT NULL DEFAULT '',
+    reference_manifest_id INTEGER,
+    enabled               INTEGER NOT NULL DEFAULT 1,
+    created_at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_voice_profiles_persona ON voice_profiles(persona_id, enabled);
 -- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
 CREATE TABLE IF NOT EXISTS activity_lists (
     activity_id  INTEGER PRIMARY KEY,
@@ -2233,6 +2254,7 @@ class UserDB:
                 "situation_files",
                 "channel_bindings", "channel_inbox", "channel_outbox",
                 "devices", "push_subscriptions", "auth_sessions",
+                "voice_profiles", "voice_manifests",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
