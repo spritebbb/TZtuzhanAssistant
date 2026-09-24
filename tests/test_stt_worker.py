@@ -21,7 +21,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_stt_"))
-os.environ["LOCAL_STT_FFMPEG"] = "definitely-not-a-real-ffmpeg"  # 骨架测试：禁用转码探测
 
 from backend.local_stt import worker as w  # noqa: E402
 
@@ -165,14 +164,14 @@ def test_protocol_edges() -> None:
     # 没有活跃请求的 stop
     events = _session([w.encode_control_frame({"op": "stop", "request_id": "zz"})])
     assert events[0]["op"] == "error" and events[0]["code"] == "protocol"
-    # 非 PCM：骨架阶段 ffmpeg 探测失败 → transcode_unavailable
+    # 非标注格式：直通转写器（faster-whisper 自解码任意容器），不拒绝
     events = _session([
         _start("r10", format="webm-opus"),
         w.encode_audio_frame(b"\x00" * 32),
         w.encode_control_frame({"op": "stop", "request_id": "r10"}),
     ])
-    err = next(e for e in events if e["op"] == "error")
-    assert err["code"] == "transcode_unavailable", f"非 PCM 骨架应拒绝：{err}"
+    finals = [e for e in events if e["op"] == "final"]
+    assert finals and finals[0]["request_id"] == "r10", f"非标注格式应直通转写: {events}"
     print("[OK] 协议边界：迟到/重复/无主 stop/非 PCM")
 
 
