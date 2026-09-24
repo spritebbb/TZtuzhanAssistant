@@ -49,6 +49,17 @@ async def _drop_channel_later(task_id: str, delay: float = 300.0) -> None:
         pass
 
 
+def _schedule_channel_drop(task_id: str, delay: float = 300.0) -> None:
+    """调度通道延迟清理并持强引用（stream 端点对已结束任务也走这套）。"""
+    previous = _channel_cleanup_by_id.get(task_id)
+    if previous is not None and not previous.done():
+        return
+    t = asyncio.create_task(_drop_channel_later(task_id, delay))
+    _channel_cleanup_tasks.add(t)
+    _channel_cleanup_by_id[task_id] = t
+    t.add_done_callback(_channel_cleanup_tasks.discard)
+
+
 def _start_agent_task(task_id: str, *, request_epoch: int | None = None) -> asyncio.Task | None:
     """原子认领并后台启动任务，统一身份、确认、取消、reset 与 SSE 契约。"""
     from ..core.current_user import current_user_id
@@ -299,9 +310,24 @@ async def api_agent_cancel(task_id: str):
 @router.get("/tasks/{task_id}/stream")
 async def api_agent_stream(task_id: str) -> StreamingResponse:
     """SSE 通道：推送该任务的确认请求与进度事件。"""
-    queue = _channel(task_id)
+    # P2-10：不存在的任务直接 404——此前 setdefault 会为任意 id 创建一个
+    # 永不被清理的队列 + 永远 ping 的僵尸连接。
+    task = agent_session._load(task_id)
+    if task is None:
+        return JSONResponse({"ok": False, "error": "任务不存在"}, status_code=404)
+    already_finished = task.status in ("done", "cancelled", "failed")
+    if already_finished:
+        # 已结束任务若其延迟清理已跑过（重连/停留任务页超 300s），此前会重建
+        # 一个无人推送也无人清理的通道并永远 ping——合成结束帧并安排清理。
+        _channel(task_id)
+        _schedule_channel_drop(task_id)
+    else:
+        queue = _channel(task_id)
 
     async def gen() -> AsyncGenerator[str, None]:
+        if already_finished:
+            yield _sse({"type": "task_done", "task_id": task_id, "status": task.status})
+            return
         while True:
             try:
                 ev = await asyncio.wait_for(queue.get(), timeout=25)

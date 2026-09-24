@@ -523,18 +523,27 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
                 pass  # 轨迹记录失败绝不影响任务执行
 
         started_at = time.time()
-        final = await asyncio.wait_for(
-            run_tool_round(
+        async def _run_measured():
+            """在 wait_for 的子任务上下文里执行并就地读计量（P2-4）。
+
+            ContextVar 随任务复制：run_tool_round 的全部 LLM 用量写在
+            wait_for 新建的子任务副本上，父任务里 task_tokens() 恒 0——
+            结账与展示失真、预算结账判断恒未超。必须在同一上下文内读数
+            随结果一起带回。
+            """
+            result = await run_tool_round(
                 messages,
                 chat=lambda ms: chat(ms),
                 chat_native=lambda ms, tools: chat_native(ms, tools),
                 max_loops=max_rounds,
                 tool_filter=_mcp_filter_for(task.objective),
                 on_progress=_trace,
-            ),
-            timeout=TASK_TIMEOUT,
+            )
+            return result, _llm.task_tokens(), _llm.task_budget_exceeded()
+
+        final, used_tokens, budget_hit = await asyncio.wait_for(
+            _run_measured(), timeout=TASK_TIMEOUT
         )
-        used_tokens = _llm.task_tokens()
         task.log.append({
             "ts": time.time(), "type": "elapsed",
             "content": f"执行完成：{rounds['n']} 轮 / {time.time() - started_at:.1f}s / "
@@ -546,7 +555,7 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
         if fresh is not None and fresh.status == "cancelled":
             return fresh
         task.result = final
-        if _llm.task_budget_exceeded():
+        if budget_hit:
             task.result = (
                 f"{final}\n\n（成本闸门：任务 token 用量约 {used_tokens} 已达预算 "
                 f"{_cfg.agent_task_token_budget}（AGENT_TASK_TOKEN_BUDGET），"
