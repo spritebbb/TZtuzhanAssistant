@@ -690,6 +690,11 @@ async def on_message(user_id: str, text: str) -> None:
                 yesterday = today - timedelta(days=1)
                 if user["last_batch_date"]:
                     cur = date.fromisoformat(user["last_batch_date"]) + timedelta(days=1)
+                    # P2-16：last_batch_date 分支同样受 30 天补跑上限约束——
+                    # 批处理标记长期滞后（成本闸 hard/extreme 档连续 skip 不推进、
+                    # 长期停摆）时，回来第一条消息不能一次性 fan-out 数月的
+                    # 每日批次（每批含 LLM），且同步 while 会阻塞事件循环。
+                    cur = max(cur, yesterday - timedelta(days=29))
                 else:
                     with db._lock:
                         row = db.conn.execute(

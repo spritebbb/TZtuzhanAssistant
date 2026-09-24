@@ -89,9 +89,8 @@ def advance_turn(user_id: str, current_topic: str, *, turn_id: int,
             "topic_id": str(current_topic), "weight": BUMP,
             "last_seen_turn": int(turn_id), "source_version": "",
         }
-    else:
-        topics[current_topic]["weight"] = min(1.0, topics[current_topic]["weight"] + BUMP)
-        topics[current_topic]["last_seen_turn"] = int(turn_id)
+    # P2-15：已存在分支不再重复 +BUMP——上面的 for 循环已加过一次；
+    # 此前的双重加分让权重 +0.70/轮（契约 +0.35），连聊两轮即封顶。
     topics = _prune(topics)
     if not ephemeral:
         _save(user_id, topics)

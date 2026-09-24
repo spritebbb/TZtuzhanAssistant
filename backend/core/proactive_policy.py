@@ -112,7 +112,9 @@ def try_claim_active(
             if now - claim_ts < _CLAIM_STALE_SEC:
                 return None
 
-        token = uuid.uuid4().hex
+        # P3-34：把领取日编进 token——生成横跨午夜时 finish 按新的一天
+        # 找不到昨天的 claim 键会静默丢账（消息已发、当日额度不扣）。
+        token = f"{day}:{uuid.uuid4().hex}"
         _kv_set(
             user_id,
             _claim_key(day),
@@ -130,24 +132,32 @@ def finish_active_claim(
     day: str | None = None,
     now: float | None = None,
 ) -> bool:
-    """完成占位。只有 token 匹配者能释放；失败会留下短期冷却标记。"""
+    """完成占位。只有 token 匹配者能释放；失败会留下短期冷却标记。
+
+    P3-34：优先按 token 里编码的领取日对账——生成横跨午夜时调用方的
+    「今天」已变，按新日键找不到昨天的 claim 会静默 return False。
+    """
     day = day or date.today().isoformat()
     now = time.time() if now is None else now
+    token_day = token.split(":", 1)[0] if ":" in token else None
+    days = list(dict.fromkeys(d for d in (token_day, day) if d))
     with _lock:
-        raw = _kv_get(user_id, _claim_key(day))
-        try:
-            claim = json.loads(raw or "{}")
-        except (TypeError, json.JSONDecodeError):
-            claim = {}
-        if claim.get("token") != token:
-            return False
-        _kv_del(user_id, _claim_key(day))
-        if success:
-            count = active_count_today(user_id, day=day) + 1
-            _kv_set(user_id, _done_key(day), str(count))
-            _kv_set(user_id, f"initiative:{day}:{user_id}", source or "1")
-            _kv_del(user_id, _failure_key(day))
-        else:
-            _kv_set(user_id, _failure_key(day), str(now))
-        return True
+        for d in days:
+            raw = _kv_get(user_id, _claim_key(d))
+            try:
+                claim = json.loads(raw or "{}")
+            except (TypeError, json.JSONDecodeError):
+                claim = {}
+            if claim.get("token") != token:
+                continue
+            _kv_del(user_id, _claim_key(d))
+            if success:
+                count = active_count_today(user_id, day=d) + 1
+                _kv_set(user_id, _done_key(d), str(count))
+                _kv_set(user_id, f"initiative:{d}:{user_id}", source or "1")
+                _kv_del(user_id, _failure_key(d))
+            else:
+                _kv_set(user_id, _failure_key(d), str(now))
+            return True
+        return False
 

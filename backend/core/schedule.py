@@ -370,8 +370,11 @@ def advance_schedule(
         day_key = local.date().isoformat()
         if state.get("local_day") != day_key:
             state["local_day"] = day_key
-            state["energy_delta_today"] = float(
-                state.get("energy_delta_today", 0.0)) if state.get("local_day") else 0.0
+            # P2-14：日切换必须清零当日累计——旧实现把赋值放在判断前，
+            # 三元条件恒真，energy_delta_today 永不清零、mood_delta_today
+            # 连重置语句都没有，跨天无限累积。
+            state["energy_delta_today"] = 0.0
+            state["mood_delta_today"] = 0.0
             material = pick_material(user_id, local.date(),
                                      list(state.get("recent_material_ids", [])))
             if material is not None:

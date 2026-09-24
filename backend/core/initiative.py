@@ -642,9 +642,10 @@ async def poll_message_for(user_id: str) -> ProactiveMessage | None:
             return None
     except Exception:
         pass
-    # 最近在聊则不打扰
+    # 最近在聊则不打扰。P3-37：与 push 通道同口径使用 _idle_hours_for_user——
+    # 拉模式此前恒用 config 默认 6h，新用户前 3 天的 2h 档在桌面端主路径不生效
     last = _last_chat_ts(user_id)
-    if last is not None and time.time() - last < config.proactive_idle_hours * 3600:
+    if last is not None and time.time() - last < _idle_hours_for_user(user_id) * 3600:
         return None
     from .proactive_policy import finish_active_claim, try_claim_active
 
@@ -968,6 +969,10 @@ async def maybe_prepare_then_remind(user_id: str) -> str | None:
     promise = next((p for p in due if _PREPARE_CUE_RE.search(str(p.get("content") or ""))), None)
     if promise is None:
         return None
+    # P3-33：进入仲裁前即登记当日 attempt——attempt 键此前只在投递成功时
+    # 写入，LLM 持续故障的日子里每个失败冷却周期都会重跑一次 45s 工具轮，
+    # 一天最多约 90 次，违背「每日至多一次」的既定意图。
+    _prepare_attempted_today.add(key)
 
     async def produce() -> str | None:
         material = await _prepare_material(user_id, promise)
