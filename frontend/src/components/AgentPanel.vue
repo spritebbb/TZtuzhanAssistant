@@ -54,6 +54,10 @@ interface PendingConfirm {
 }
 
 let streamCtrl: AbortController | null = null
+// P1-28：记录当前流归属的任务——后端允许多任务并行，换任务运行时必须
+// 断开旧流重开新流，否则新任务的 confirm_request 无人监听（后端确认
+// 超时按拒绝处理，任务被静默逐工具拒绝且无恢复手段）。
+let streamTaskId: string | null = null
 
 const statusLabel: Record<string, string> = {
   planned: '📋 待确认',
@@ -165,7 +169,10 @@ async function createTask() {
   try {
     const body = new URLSearchParams()
     body.set('objective', text)
-    body.set('user_id', 'assistant-main')
+    // P1-33：不再硬编码 user_id='assistant-main'——后端 create 端点有
+    // `user_id or active_user_id()` 兜底，非默认人格下任务应落在当前
+    // 人格命名空间，否则列表按 active_user_id 查永远看不到新任务，
+    // 任务副作用也会写错命名空间。
     const r = await apiFetch('/api/agent/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -260,9 +267,14 @@ async function respondConfirm(requestId: string, allow: boolean) {
 }
 
 async function startStream() {
-  if (!current.value || streamCtrl) return
+  if (!current.value) return
+  if (streamCtrl) {
+    if (streamTaskId === current.value.id) return // 本任务已有流
+    cancelStream() // 换任务：旧任务的流不再占用唯一槽位（P1-28）
+  }
   const ctrl = new AbortController()
   streamCtrl = ctrl
+  streamTaskId = current.value.id
   try {
     const res = await apiFetch(`/api/agent/tasks/${current.value.id}/stream`, { signal: ctrl.signal })
     if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`)
@@ -295,13 +307,17 @@ async function startStream() {
   } catch {
     // abort/network errors are reflected by the next task status refresh
   } finally {
-    if (streamCtrl === ctrl) streamCtrl = null
+    if (streamCtrl === ctrl) {
+      streamCtrl = null
+      streamTaskId = null
+    }
   }
 }
 
 function cancelStream() {
   streamCtrl?.abort()
   streamCtrl = null
+  streamTaskId = null
   pendingConfirms.value = []
 }
 
