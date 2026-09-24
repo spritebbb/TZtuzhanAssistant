@@ -93,9 +93,9 @@ LOCAL_TTS_TIMEOUT=60
 - 服务挂/显存不足/版本不符 → 自动回退，日志 `[本地语音] ... 回退 edge-tts`；
 - 想彻底关：设置页关「本地语音」即可（零代码改动回到现状）。
 
-## 8. 本机安装实录（2026-09-23，已跑通）
+## 8. 本机安装实录（2026-09-23，已跑通；2026-09-25 用户将部署整体迁入仓库目录）
 
-部署位置 `D:\GPT-SoVITS`（仓库外独立目录）：venv=`runtime-tz`（CPython 3.12.14 + torch 2.6.0+cu124，CUDA 可用）；启动 `start-tuzhan.bat`（= `run_with_capabilities.py`，api_v2 之上挂 `/capabilities`，provider_version=仓库 commit）；底模 `download_pretrained.py`（hubert/roberta/gsv-v2final 共 1.2GB）。已验证：/capabilities 200、GET/POST /tts 200、菟菚 adapter 端到端合成+缓存命中。**当前参考音频是 edge-tts 生成的临时音色（零样本克隆），专属音色需按 §3-4 训练后重登记。**
+部署位置 `D:\TZtuzhanAssistant\GPT-SoVITS`（**用户 2026-09-25 从 `D:\GPT-SoVITS` 整体迁入**，启动脚本随之变为 `GPT-SoVITS\start-tuzhan.bat`；已在仓库 .gitignore 排除——独立项目自带 .git 且含数 GB 权重，绝不可入库）：venv=`runtime-tz`（CPython 3.12.14 + torch 2.6.0+cu124，CUDA 可用）；底模 `download_pretrained.py`（hubert/roberta/gsv-v2final 共 1.2GB）。已验证：/capabilities 200、GET/POST /tts 200、菟菚 adapter 端到端合成+缓存命中。**当前参考音频是 edge-tts 生成的临时音色（零样本克隆），专属音色需按 §3-4 训练后重登记。**
 
 三个离线数据坑（装新机必踩，全部手动经代理放置）：
 

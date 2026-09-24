@@ -63,3 +63,7 @@ data-backup-*/
 data.plaintext-*/
 data.encrypted-staging-*/
 encryption-migration.*.json
+
+# GPT-SoVITS 本地部署（2026-09-25 用户迁入仓库目录）：独立项目自带 .git，
+# 含数 GB venv/模型权重，绝不可入库
+GPT-SoVITS/
