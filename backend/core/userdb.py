@@ -2383,23 +2383,34 @@ def save_important_date(user_id: str, date_str: str, label: str, kind: str = "ot
         return True
 
 
-def get_today_important_dates(user_id: str) -> list[dict]:
+def get_today_important_dates(user_id: str, namespace: str | None = "user_real") -> list[dict]:
     """查询今天有哪些特殊日子（MM-DD 匹配）。见 get_dates_for。"""
-    return get_dates_for(user_id, date.today())
+    return get_dates_for(user_id, date.today(), namespace=namespace)
 
 
-def get_dates_for(user_id: str, day: date) -> list[dict]:
+def get_dates_for(user_id: str, day: date, namespace: str | None = "user_real") -> list[dict]:
     """查询指定日期有哪些特殊日子（MM-DD 匹配）。
 
     - birthday / anniversary：每年都过（忽略 year，带出生年份也照常触发）
     - other（一次性纪念日）：只在 year 匹配该日年份（或未标年份）时触发
+    - namespace：P2-1 默认只取 user_real——正典虚构纪念日
+      （character_fiction，如「她的醒来日」）有自己的注入通道
+      （calendar_modulation，自嘲式轻提、不索要庆祝），混进本查询会被
+      turn_prompt 当真实日子要求送心意、往 relationship_events 写虚构
+      事件、还吃心情加成。传 None 取全部命名空间。
     """
     md = day.strftime("%m-%d")
+    ns_sql = "" if namespace is None else "AND namespace = ?"
+    params: list = [user_id, md]
+    if namespace is not None:
+        params.append(namespace)
+    params.append(day.year)
     with db._lock:
         rows = db.conn.execute(
-            "SELECT * FROM important_dates WHERE user_id = ? AND date = ? "
+            f"SELECT * FROM important_dates WHERE user_id = ? AND date = ? "
+            f"{ns_sql} "
             "AND (kind IN ('birthday', 'anniversary') OR year IS NULL OR year = ?) ORDER BY kind",
-            (user_id, md, day.year),
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 

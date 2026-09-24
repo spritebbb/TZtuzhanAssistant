@@ -334,6 +334,19 @@ def import_text(user_id: str, filename: str, data: bytes, *, fmt: str | None = N
 
 _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
+# 在飞 worker 线程注册表（P2-3）：reset 的 quiesce 要能等到它们真正结束，
+# 否则清完 kb 表之后导入线程继续回写，知识库「复活」。
+_WORKERS: set = set()
+
+
+def wait_url_import_workers(timeout: float = 30.0) -> bool:
+    """等待全部在飞导入线程结束（reset quiesce 用）。返回是否全部结束。"""
+    with _JOBS_LOCK:
+        threads = [t for t in _WORKERS if t.is_alive()]
+    for t in threads:
+        t.join(timeout=timeout)
+    with _JOBS_LOCK:
+        return all(not t.is_alive() for t in _WORKERS)
 
 
 def _set_job(job_id: str, **fields) -> None:
@@ -389,27 +402,43 @@ def start_url_import(user_id: str, url: str, *, fetch=None) -> dict:
     with _JOBS_LOCK:
         _JOBS[job_id] = {"job_id": job_id, "status": "pending", "cancel": False}
 
+    from .reset import epoch_is_current, reset_epoch
+
+    start_epoch = reset_epoch()
+
     def _worker() -> None:
-        if (job_state(job_id) or {}).get("cancel"):
-            return
-        _set_job(job_id, status="running")
+        thread = threading.current_thread()
+        with _JOBS_LOCK:
+            _WORKERS.add(thread)
         try:
-            final_url, html = fetch_html(checked, fetch=fetch)
-            if (job_state(job_id) or {}).get("cancel"):
+            if not epoch_is_current(start_epoch) or (job_state(job_id) or {}).get("cancel"):
                 return
-            text = html_to_text(html)
-            if not text:
-                raise DocumentImportError("网页没有可读正文")
-            if len(text) > MAX_TEXT_CHARS:
-                raise DocumentImportError("网页正文超过 200 万字符上限")
-            data = text.encode("utf-8")
-            doc = import_text(user_id, f"{Path(urlsplit(final_url).path).name or '网页'}.txt",
-                              data, source_url=final_url,
-                              segments=build_segments(text))
-            _set_job(job_id, status="succeeded", document_id=int(doc["id"]))
-        except Exception as exc:
-            logger.warning("[文档摄入] URL 导入失败：{}", exc)
-            _set_job(job_id, status="failed", error=str(exc)[:200])
+            _set_job(job_id, status="running")
+            try:
+                final_url, html = fetch_html(checked, fetch=fetch)
+                if not epoch_is_current(start_epoch) or (job_state(job_id) or {}).get("cancel"):
+                    return
+                text = html_to_text(html)
+                if not text:
+                    raise DocumentImportError("网页没有可读正文")
+                if len(text) > MAX_TEXT_CHARS:
+                    raise DocumentImportError("网页正文超过 200 万字符上限")
+                data = text.encode("utf-8")
+                # 重置窗口检查：reset 清完 kb 表后回写会让「彻底失忆」后
+                # 知识库复活。quiesce 只能等到已启动的线程，新启动的靠这里拦。
+                if not epoch_is_current(start_epoch):
+                    logger.info("[文档摄入] URL 导入因重置中止：job={}", job_id)
+                    return
+                doc = import_text(user_id, f"{Path(urlsplit(final_url).path).name or '网页'}.txt",
+                                  data, source_url=final_url,
+                                  segments=build_segments(text))
+                _set_job(job_id, status="succeeded", document_id=int(doc["id"]))
+            except Exception as exc:
+                logger.warning("[文档摄入] URL 导入失败：{}", exc)
+                _set_job(job_id, status="failed", error=str(exc)[:200])
+        finally:
+            with _JOBS_LOCK:
+                _WORKERS.discard(thread)
 
     threading.Thread(target=_worker, name=f"doc-import-{job_id}", daemon=True).start()
     return {"job_id": job_id, "status": "pending", "source": checked}

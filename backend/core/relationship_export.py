@@ -431,6 +431,16 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     if table == "companion_requests":
                         # 同上：回应消息不在包内，清空编号。
                         values["response_message_id"] = None
+                    if table == "user_meta":
+                        # P2-17：消息游标是旧库的全局编号，新库消息 id 从 1 重新
+                        # 计数——原样带入会让事实/画像提炼永远取不到新消息
+                        # （unseen 为负、调度条件永不满足），提炼永久停摆。
+                        values["last_fact_msg_id"] = 0
+                        values["last_profile_msg_id"] = 0
+                    if table == "facts":
+                        # P3-45：与 memory_policy 同口径——来源消息不在包内，
+                        # 旧编号会让锚点时间反查错配。
+                        values["source_message_ids"] = "[]"
                     # 导入的是历史，不得让旧重逢弧在新命名空间继续等待回应。
                     if table == "reunion_arcs":
                         values["state"] = "closed"
