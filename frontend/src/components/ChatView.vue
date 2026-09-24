@@ -68,10 +68,15 @@ function schedulePortraitRefresh() {
 // 后端已持久化该问候到会话历史，这里只负责当场显示，刷新后仍能读到。
 async function checkGreeting(sessionId: string | null) {
   if (!sessionId) return
+  const seq = loadSeq
   try {
     const r = await apiFetch(`/api/greeting?session_id=${encodeURIComponent(sessionId)}`)
     const d = await r.json()
     if (d.ok && d.greeting) {
+      // P3-48：问候请求要等后端 LLM 生成（可达数秒）——归档/切会话
+      // （loadSeq 已变）或正在流式回复时不再直接插入视图；消息已落库，
+      // 重开会话仍可见，避免旧会话的问候插进刚清空的新视图。
+      if (seq !== loadSeq || busy.value || streaming.value) return
       const message: Message = { role: 'bot', content: d.greeting, ts: Date.now() / 1000 }
       messages.value.push(message)
       autoPlayTts(message.content, ttsKey(message, messages.value.length - 1))

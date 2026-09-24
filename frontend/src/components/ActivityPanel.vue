@@ -537,9 +537,12 @@ function openWriting(item: CoWriting) {
   error.value = ''
 }
 
-function submitTurn() {
-  if (!currentWriting.value || !writingTurnDraft.value.trim()) return
-  void runWriting(() => addWritingTurn(currentWriting.value!.id, writingTurnDraft.value), '这一段写下去了')
+// P2-18：先 await 请求结果、成功才清稿——旧实现同步前缀刚置 error 空就
+// 挂起，下一行立即判空清稿，失败时用户刚写的话已经丢了
+async function submitTurn() {
+  if (!currentWriting.value || busy.value || !writingTurnDraft.value.trim()) return
+  const text = writingTurnDraft.value
+  await runWriting(() => addWritingTurn(currentWriting.value!.id, text), '这一段写下去了')
   if (!error.value) writingTurnDraft.value = ''
 }
 
@@ -595,12 +598,16 @@ function openList(item: SharedList) {
   error.value = ''
 }
 
-function submitItem() {
-  if (!currentList.value || !itemTitle.value.trim()) return
-  void runList(() => addListItem(currentList.value!.id, {
-    title: itemTitle.value,
-    creator: itemCreator.value,
-    note: itemNote.value,
+// P2-18：同 submitTurn——await 后按结果决定是否清空三个输入
+async function submitItem() {
+  if (!currentList.value || busy.value || !itemTitle.value.trim()) return
+  const title = itemTitle.value
+  const creator = itemCreator.value
+  const note = itemNote.value
+  await runList(() => addListItem(currentList.value!.id, {
+    title,
+    creator,
+    note,
   }), '加进清单了')
   if (!error.value) {
     itemTitle.value = ''
