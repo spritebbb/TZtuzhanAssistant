@@ -244,7 +244,7 @@ def complete_list(user_id: str, activity_id: int, *, create_artifact: bool = Tru
             )
         from .relationship_events import record
 
-        record(
+        event_id = record(
             user_id,
             "list_completed",
             "activity",
@@ -257,6 +257,11 @@ def complete_list(user_id: str, activity_id: int, *, create_artifact: bool = Tru
             commit=False,
         )
         db.conn.commit()
+        # P1-5：钩子（气质证据/初历）必须在事件真正提交之后登记
+        if event_id is not None:
+            from .relationship_events import register_event_hooks
+
+            register_event_hooks(user_id, event_id, "list_completed", occurred_at=now)
         return _detail_locked(user_id, activity_id)  # type: ignore[return-value]
 
 

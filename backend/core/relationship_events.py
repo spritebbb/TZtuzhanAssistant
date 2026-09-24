@@ -47,6 +47,45 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def register_event_hooks(user_id: str, event_id: int, event_type: str, *,
+                         occurred_at: str | None = None) -> None:
+    """事件真正落库后的下游登记（幂等、逐项尽力而为，失败不外溢）：
+
+    - L03 气质证据（relationship_style.record_evidence）
+    - G01 初历标记 + 锚点重评（memory_salience）
+
+    P1-5：此前挂点只在 record() 自带 commit 的路径触发——五个生产者
+    （共读/专注/共创/目标/清单）走 commit=False 随外层事务提交，事件落库
+    成功但这三个挂点永不执行，气质证据与初历永远缺失。现在由生产者在
+    自己的外层 commit 之后显式调用本函数（钩子内部有自身 commit，不能在
+    外层事务未提交时运行，否则会把半截事务提前落库）。
+    """
+    if event_id is None:
+        return
+    try:
+        from . import relationship_style
+
+        relationship_style.record_evidence(user_id, event_id, event_type,
+                                           occurred_at=occurred_at)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "[关系气质] 证据登记失败（不影响事件）: event=%s", event_id)
+    try:
+        from . import memory_salience
+
+        memory_salience.note_event_for_first_occurrence(
+            user_id, event_id, event_type)
+        memory_salience.reevaluate_recent_facts_after_event(
+            user_id, occurred_at=occurred_at)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "[记忆显著度] 事件来源登记失败（不影响事件）: event=%s", event_id)
+
+
 def record(
     user_id: str,
     event_type: str,
@@ -62,10 +101,15 @@ def record(
     expires_at: str | None = None,
     commit: bool = True,
     refresh_on_conflict: bool = False,
+    hooks: bool | None = None,
 ) -> int | None:
     """幂等写入一条事件。返回事件 id；重复且不刷新时返回 None。
 
     refresh_on_conflict 用于按年重复的日子：同一条 active 事件刷新发生时间与有效期。
+    hooks：下游登记（气质证据/初历/锚点重评）开关。None（默认）= 跟随 commit——
+    commit=True 的自带事务路径落库即登记；commit=False 的试探路径不登记。
+    随外层事务提交的生产者应传 commit=False, hooks=True，并在自己的
+    db.conn.commit() 之后调用 register_event_hooks（见函数文档）。
     """
     if event_type not in EVENT_TYPES:
         raise RelationshipEventError(f"未注册的关系事件类型：{event_type}")
@@ -106,30 +150,9 @@ def record(
             db.conn.commit()
 
     # L03 气质证据 + G01 初历标记 + G01 锚点重评：事件落库成功后统一登记
-    # （幂等；commit=False 的试探路径不登记——与事务提交语义保持一致）。
-    if commit and event_id is not None:
-        try:
-            from . import relationship_style
-
-            relationship_style.record_evidence(user_id, event_id, event_type,
-                                               occurred_at=occurred)
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "[关系气质] 证据登记失败（不影响事件）: event=%s", event_id)
-        try:
-            from . import memory_salience
-
-            memory_salience.note_event_for_first_occurrence(
-                user_id, event_id, event_type)
-            memory_salience.reevaluate_recent_facts_after_event(
-                user_id, occurred_at=occurred)
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "[记忆显著度] 事件来源登记失败（不影响事件）: event=%s", event_id)
+    # （幂等；commit=False 且未显式 hooks=True 的试探路径不登记）。
+    if (commit if hooks is None else hooks) and event_id is not None:
+        register_event_hooks(user_id, event_id, event_type, occurred_at=occurred)
     return event_id
 
 

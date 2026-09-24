@@ -171,11 +171,11 @@ def wrapup_eligible(detail: dict) -> bool:
     )
 
 
-def _record_focus_finished_locked(user_id: str, activity_id: int, detail: dict, now: str) -> None:
+def _record_focus_finished_locked(user_id: str, activity_id: int, detail: dict, now: str) -> int | None:
     """幂等写入 focus_finished 事件（同一活动只留一条 active 事件）。"""
     from .relationship_events import record
 
-    record(
+    return record(
         user_id,
         "focus_finished",
         "activity",
@@ -215,10 +215,15 @@ def complete_focus(user_id: str, activity_id: int) -> dict:
             (remaining, now, now, activity_id),
         )
         detail = _row_to_detail(_get_row_locked(user_id, activity_id))
-        _record_focus_finished_locked(user_id, activity_id, detail, now)
+        event_id = _record_focus_finished_locked(user_id, activity_id, detail, now)
         # F04：完成事件先写，收尾消息同事务入箱（后台重试，不占主动额度）
         _enqueue_wrapup_locked(user_id, activity_id, detail, now)
         db.conn.commit()
+        # P1-5：钩子（气质证据/初历）必须在事件真正提交之后登记
+        if event_id is not None:
+            from .relationship_events import register_event_hooks
+
+            register_event_hooks(user_id, event_id, "focus_finished", occurred_at=now)
     return detail
 
 
@@ -313,8 +318,13 @@ def current_focus(user_id: str, *, settle: bool = True) -> tuple[dict | None, bo
                 (now, now, activity_id),
             )
             detail = _row_to_detail(_get_row_locked(user_id, activity_id))
-            _record_focus_finished_locked(user_id, activity_id, detail, now)
+            event_id = _record_focus_finished_locked(user_id, activity_id, detail, now)
             db.conn.commit()
+            # P1-5：钩子（气质证据/初历）必须在事件真正提交之后登记
+            if event_id is not None:
+                from .relationship_events import register_event_hooks
+
+                register_event_hooks(user_id, event_id, "focus_finished", occurred_at=now)
             return detail, True
         return _row_to_detail(row), just_finished
 
