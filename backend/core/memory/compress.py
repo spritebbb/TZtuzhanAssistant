@@ -152,6 +152,10 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
                 "最近状态": "",
             }
             summary = _format_section_summary(data)
+            # P3-15：mock/演示轮只走流程不落库——mock 摘要写进真实 kv 并推进
+            # 游标会让真实旧消息被跳过、永不再参与压缩。
+            keep = [{"role": r["role"], "content": r["content"]} for r in rows[-recent_count:]]
+            return summary, keep
         else:
             prev = load_compact_summary(user_id)
             prev_block = (
@@ -181,7 +185,11 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
                 max_tokens=400,
             )
             data = _parse_compact_json(summary)
-            summary = _format_section_summary(data) if data else _strip_parens(summary).strip()
+            # P2-11：解析失败（非空但不是有效 JSON 的杂text）一律视为失败——
+            # 旧实现把 _strip_parens 后的原始输出持久化为摘要并推进游标：
+            # 杂text 进入跨会话注入并被滚动合并进后续摘要，且「下次重试」
+            # 语义因游标推进而落空。
+            summary = _format_section_summary(data) if data else ""
             if not summary:
                 # LLM 返回了但解析不出有效摘要：视为失败，记冷却期（不推进 cursor）
                 import time as _time

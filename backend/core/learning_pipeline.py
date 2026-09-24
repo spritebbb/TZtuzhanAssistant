@@ -280,6 +280,30 @@ def revoke(user_id: str, candidate_id: int) -> dict:
                     if h["reason"] == "learning_pipeline" and not h["reverted"]]
             if logs:
                 revert(user_id, logs[-1]["id"])
+        elif row["type"] == "expression_preference":
+            # P2-13：表达偏好的确认落点（user_preferences comfort 类）也要撤销。
+            # 此前 revoke 只处理 glossary 与 behavior_feedback，拒绝候选后
+            # 落点仍 active、继续被 resolver 注入——「拒绝学习」对该类候选无效。
+            from .user_preferences import revoke_preference
+
+            pref = str(value.get("preference") or "")[:60]
+            encoded = json.dumps({"style": pref}, ensure_ascii=False, sort_keys=True)
+            from .userdb import db
+
+            with db._lock:
+                target = db.conn.execute(
+                    "SELECT id FROM user_preferences "
+                    "WHERE user_id=? AND category='comfort' AND origin='user_teaching' "
+                    "AND value_json=? AND status='active' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (user_id, encoded),
+                ).fetchone()
+            if target is not None:
+                try:
+                    revoke_preference(user_id, int(target["id"]))
+                except Exception as exc:
+                    logger.warning("[学习] 表达偏好落点撤销失败（pref #{}）：{}",
+                                   target["id"], exc)
     return {"id": int(candidate_id), "status": "revoked"}
 
 
