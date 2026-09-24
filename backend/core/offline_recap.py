@@ -32,18 +32,26 @@ _LAST_RECAP_KEY = "offline:last_recap"
 _DETERMINISTIC_OPENING = "（这段时间我照常过自己的日子。挑几件说给你听——）"
 
 
+def _aware(dt: datetime) -> datetime:
+    """统一为 aware 本地时区（P1-4：messages.ts 是 naive 本地时间，混比必 TypeError）。"""
+    return dt if dt.tzinfo else dt.astimezone()
+
+
 def _last_activity(user_id: str) -> datetime:
     """离线窗口的起点：最近一条消息 / 上次回放 / 上次批处理，取最新。"""
     from .userdb import db, kv_get
 
-    moments = [datetime.now().astimezone() - timedelta(days=365)]
+    # 全部归一为 aware 再比较：messages.ts 以 naive 本地时间落库（userdb），
+    # last_recap 的 to 是 aware isoformat——此前 naive/aware 混进同一个 max()
+    # 只要用户有任何消息就抛 TypeError，离线补算整体失效。
+    moments = [_aware(datetime.now()) - timedelta(days=365)]
     try:
         with db._lock:
             row = db.conn.execute(
                 "SELECT MAX(ts) FROM messages WHERE user_id = ?", (user_id,)
             ).fetchone()
         if row and row[0]:
-            moments.append(datetime.fromisoformat(str(row[0])))
+            moments.append(_aware(datetime.fromisoformat(str(row[0]))))
     except Exception:
         pass
     for key in (_LAST_RECAP_KEY,):
@@ -51,7 +59,7 @@ def _last_activity(user_id: str) -> datetime:
         if raw:
             try:
                 data = json.loads(raw)
-                moments.append(datetime.fromisoformat(str(data.get("to") or "")))
+                moments.append(_aware(datetime.fromisoformat(str(data.get("to") or ""))))
             except Exception:
                 pass
     return max(moments)
@@ -64,9 +72,6 @@ def plan(user_id: str, from_dt: datetime, to_dt: datetime) -> list[dict]:
     连续落在同一行程块的采样点只保留第一个（不逐小时罗列同一件事）。
     """
     from .schedule import current_activity
-
-    def _aware(dt: datetime) -> datetime:
-        return dt if dt.tzinfo else dt.astimezone()
 
     from_dt, to_dt = _aware(from_dt), _aware(to_dt)
     long_gap = (to_dt - from_dt) > _LONG_GAP
@@ -148,7 +153,9 @@ async def _opening_line(
         situation_text = situation_context(user_id)
     except Exception:
         pass
-    material = "\n".join(f"- [{e['at'][-14:-9]}] {e['text']}" for e in events[:8])
+    # P3-36：at 是 aware isoformat（如 2026-09-25T21:00+08:00），时间在
+    # 定长第 11-16 位；旧的 [-14:-9] 负索引会切出 "25T21" 这种错值。
+    material = "\n".join(f"- [{e['at'][11:16]}] {e['text']}" for e in events[:8])
     prompt = (
         "你一个人过了几天，现在对方回来了。下面是你这段时间真实做过的事"
         "（确定性记录，不是创作素材）和你们的世界快照。"
