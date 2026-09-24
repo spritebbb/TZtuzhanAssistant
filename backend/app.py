@@ -492,7 +492,15 @@ def create_app() -> FastAPI:
         """创建后台任务并持有强引用（无引用的 task 可能被 GC 静默取消）。"""
         task = asyncio.create_task(coro)
         _bg_tasks.add(task)
-        task.add_done_callback(_bg_tasks.discard)
+
+        def _consume_exc(done: asyncio.Task) -> None:
+            _bg_tasks.discard(done)
+            # P3-13：不取异常会在 GC 时才以 "exception was never retrieved"
+            # 浮现——存量迁移这类任务失败就完全无日志。
+            if not done.cancelled() and done.exception() is not None:
+                logger.error("[后台] 任务异常：{}", done.exception())
+
+        task.add_done_callback(_consume_exc)
 
     async def _restore_mcp() -> None:
         try:

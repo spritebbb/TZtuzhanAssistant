@@ -290,6 +290,16 @@ def rebuild_all(reason: str = "") -> int:
         from .migration import migrate
 
         stats = migrate()
+        if stats.get("skipped"):
+            # P1-2/P1-3：删除已发生而重灌未发生——必须显式告警。SQLite 是权威
+            # 源且 _needs_migration 会在下次启动判定缺口并补灌，但运维要知道
+            # 「此刻检索是空的」。
+            logger.warning(
+                "[向量] 重建重灌被跳过（{}）；向量库暂为空，SQLite 数据完好，"
+                "下次启动/解锁后会自动补灌",
+                reason[:80] or "库不可读或 embedding 未就绪",
+            )
+            return -1
         migrated = sum(v for v in stats.values() if isinstance(v, int))
         logger.info("[向量] 自动重建完成：重灌 {} 条（明细：{}）", migrated, stats)
         return migrated
@@ -574,6 +584,35 @@ def count(kind: str | None = None) -> int:
             if col is not None:
                 total += col.count()
         return total
+    except Exception:
+        return 0
+
+
+def count_under(kind: str, max_rid: int) -> int:
+    """某分区中 record_id < max_rid 的向量数（P3-16 精确计数用）。
+
+    topic 分区混有 topic_memory 的 1e9+ 偏移 id 向量，整仓 count 会让
+    「important_dates 向量缺失」被误判为已齐全。拉全量 id 按 rid 上界过滤
+    （分区量级千条内，代价可接受）。
+    """
+    if not enabled() or kind not in _KINDS:
+        return 0
+    col = _collection(kind)
+    if col is None:
+        return 0
+    try:
+        with _CHROMA_LOCK:
+            got = col.get()
+        n = 0
+        for row_id in got.get("ids") or []:
+            parts = str(row_id).split("|")
+            try:
+                rid = int(parts[2]) if len(parts) >= 3 else -1
+            except ValueError:
+                continue
+            if 0 <= rid < max_rid:
+                n += 1
+        return n
     except Exception:
         return 0
 

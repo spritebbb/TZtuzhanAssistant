@@ -34,6 +34,10 @@ from ..storage.migration import (
 
 router = APIRouter(prefix="/api/encryption", tags=["encryption"])
 
+# 后台重建任务强引用（P3-23：无引用的 pending task 挂起点上可能被 GC 静默回收，
+# 向量重建静默消失且无日志——SQLite 权威数据不受损，但检索退化无从察觉）
+_rebuild_tasks: set = set()
+
 
 class EnableBody(BaseModel):
     passphrase: str | None = None
@@ -93,7 +97,9 @@ async def enable_encryption(body: EnableBody) -> JSONResponse:
         runtime.release_migration_gate()
 
     # 向量索引：chroma 未随迁（可重建）——后台从 SQLite 全量重灌
-    asyncio.create_task(_rebuild_vectors())
+    _t = asyncio.create_task(_rebuild_vectors())
+    _rebuild_tasks.add(_t)
+    _t.add_done_callback(_rebuild_tasks.discard)
 
     logger.info("[加密] 启用完成，明文目录保留于 {}", journal.get("plaintext_keep"))
     return JSONResponse({"ok": True, "journal": journal})

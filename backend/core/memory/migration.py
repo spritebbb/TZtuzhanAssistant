@@ -20,6 +20,28 @@ from ...storage.connect import connect_database
 _BATCH = 64
 
 
+_BATCH = 64
+# topic 分区的 topic_memory 偏移 id 起点（与 topic_memory._TOPIC_VEC_ID_BASE 一致）
+_TOPIC_VEC_ID_BASE = 1_000_000_000
+
+
+def _connect_bot(*, row_factory: bool = False, timeout: float = 5.0):
+    """连接 bot.db（P1-2：加密模式注入 runtime MK；锁定态抛 DatabaseLockedError）。
+
+    此前三处 connect_database 均不带 key：加密态下首查即抛
+    「file is not a database」，_needs_migration 把它当「无需迁移」吞掉——
+    存量迁移静默不跑，rebuild 先删后灌失败时连正常向量也一并不复。
+    """
+    from ...storage import runtime
+
+    return connect_database(
+        config.data_dir / "bot.db",
+        encrypted_key=runtime.database_key_or_none(),
+        timeout=timeout,
+        row_factory=row_factory,
+    )
+
+
 def _needs_migration() -> bool:
     """是否还有未灌入向量库的存量记忆（按表精确比较，半途失败可续迁）。"""
     try:
@@ -27,7 +49,7 @@ def _needs_migration() -> bool:
 
         if not vec.enabled():
             return False
-        conn = connect_database(config.data_dir / "bot.db", row_factory=True)
+        conn = _connect_bot(row_factory=True)
         # 各源表行数 → 对应向量分区
         table_kinds = {
             "long_memory": "lm",
@@ -36,6 +58,7 @@ def _needs_migration() -> bool:
             "user_profile": "profile",
             "important_dates": "topic",
             "manager_memories": "mem",
+            "kb_chunks": "kb",
         }
         total = 0
         missing = False
@@ -47,17 +70,25 @@ def _needs_migration() -> bool:
             )
             cnt = conn.execute(f"SELECT COUNT(*) AS c FROM {table}{where}").fetchone()["c"] or 0
             total += cnt
-            if cnt and vec.count(kind) < cnt:
+            # P3-16：topic 分区混有 topic_memory 的 1e9+ 偏移向量，整仓计数
+            # 会把「日期向量缺失」误判为齐全——按 id 上界精确计数。
+            have = (
+                vec.count_under(kind, _TOPIC_VEC_ID_BASE)
+                if kind == "topic"
+                else vec.count(kind)
+            )
+            if cnt and have < cnt:
                 missing = True
         conn.close()
         logger.info("[迁移] 存量记忆 {} 条，{}", total, "存在未灌入分区，需要迁移" if missing else "向量库已齐全")
         return missing
-    except Exception:
+    except Exception as exc:
+        logger.debug("[迁移] 迁移判定跳过：{}", exc)
         return False
 
 
 def _sqlite_rows(table: str) -> list[sqlite3.Row]:
-    conn = connect_database(config.data_dir / "bot.db", timeout=10, row_factory=True)
+    conn = _connect_bot(timeout=10, row_factory=True)
     where = (
         " WHERE status = 'active' AND surface_policy != 'never_surface' "
         "AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))"
@@ -74,6 +105,14 @@ def migrate(progress_cb=None) -> dict:
 
     if not vec.enabled():
         logger.warning("[迁移] Chroma 不可用，跳过迁移（向量检索降级为 TF-IDF）")
+        return {"skipped": True}
+
+    # P1-2：加密模式下库锁定（MK 不在内存）时无法读取源表，明确跳过并留痕，
+    # 让 rebuild/启动流程知晓「本次重灌没有发生」而不是拿到空统计。
+    try:
+        _connect_bot().close()
+    except Exception as exc:
+        logger.warning("[迁移] 数据库当前不可读（锁定态？），迁移跳过：{}", type(exc).__name__)
         return {"skipped": True}
 
     # 维度锁防线：embedding 模型未就绪时（过渡期哈希回退）不迁移——
@@ -126,7 +165,7 @@ def migrate(progress_cb=None) -> dict:
     )
     # 6) 摘要 → summary（kv_store 的 compact_summary）
     try:
-        conn = connect_database(config.data_dir / "bot.db")
+        conn = _connect_bot()
         rows = conn.execute(
             "SELECT user_id, value FROM kv_store WHERE key='compact_summary'"
         ).fetchall()
@@ -147,6 +186,33 @@ def migrate(progress_cb=None) -> dict:
         "manager_memories", "mem", lambda r: r["content"], stats, progress_cb,
         rid_fn=lambda r: r["rid"],
     )
+
+    # 8) kb_chunks → kb（P1-3：rebuild 删除 kb 分区后原本没有任何重灌路径，
+    #    文档列表还在、chunk_count 正常，但召回永远为空——「读过却想不起」。
+    #    doc_id/filename 是 recall_knowledge 出参的一部分，必须随行补回。）
+    try:
+        conn = _connect_bot(row_factory=True)
+        kb_rows = conn.execute(
+            "SELECT c.id, c.user_id, c.text, d.filename, d.id AS doc_id "
+            "FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id AND d.user_id = c.user_id "
+            "ORDER BY c.id"
+        ).fetchall()
+        conn.close()
+        done_kb = 0
+        for r in kb_rows:
+            text = r["text"]
+            if not text or not text.strip():
+                continue
+            if vec.add(
+                r["user_id"], "kb", r["id"], text,
+                extra={"doc_id": r["doc_id"], "filename": r["filename"]},
+                _allow_during_rebuild=True,
+            ):
+                done_kb += 1
+        stats["kb_chunks"] = done_kb
+        count += done_kb
+    except Exception:
+        logger.warning("[迁移] kb_chunks 重灌失败（下次启动自动补灌）")
 
     logger.info("[迁移] 完成，共灌入 {} 条", count)
     return stats
