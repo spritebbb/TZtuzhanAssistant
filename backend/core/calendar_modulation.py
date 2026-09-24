@@ -65,12 +65,28 @@ def natural_season_of(day: date) -> str:
 
 
 def _delta(day: date, md: str) -> int:
-    """今天距目标 MM-DD 的天数（同年内；跨年由日期算术自然处理）。"""
+    """今天距目标 MM-DD 的天数。
+
+    P3-35：跨年预热窗——12 月底对 01-0x 的日子，今年目标已过（diff 为
+    大负数），但明年目标近在眼前；若落在预热窗内则返回明年的正天数，
+    让 1 月初的日子照常获得 pre 阶段（旧实现固定取「今年」导致跨年预热
+    全丢）。其余负值维持「今年已过 → post 恢复」语义不变。
+    """
+    parts = md.split("-")
     try:
-        target = date(day.year, *(int(x) for x in md.split("-")))
+        target = date(day.year, *(int(x) for x in parts))
     except ValueError:
         return 999  # 非法日期（如平年 02-29 目标）：本年不触发
-    return (target - day).days
+    diff = (target - day).days
+    if diff < 0:
+        try:
+            next_target = date(day.year + 1, *(int(x) for x in parts))
+        except ValueError:
+            return diff  # 平年 02-29 无明年目标：维持已过语义
+        next_diff = (next_target - day).days
+        if 0 <= next_diff <= PREHEAT_DAYS:
+            return next_diff
+    return diff
 
 
 def _row_phase(row: dict, day: date) -> CalendarPhase | None:
