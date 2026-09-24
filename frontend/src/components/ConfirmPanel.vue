@@ -23,17 +23,25 @@ const responding = ref<Set<string>>(new Set())
 const remain = ref<Record<string, number>>({})
 const timers = new Map<string, ReturnType<typeof setInterval>>()
 
-async function respond(requestId: string, allow: boolean) {
+// 高危操作不提供「限时免确认」选项（§24.3-3：high/critical 永不豁免）
+const GRACE_MINUTES = 30
+function graceable(danger: string): boolean {
+  return danger !== 'high' && danger !== 'critical'
+}
+
+async function respond(requestId: string, allow: boolean, graceMinutes = 0) {
   responding.value.add(requestId)
   try {
+    const body: Record<string, string> = { request_id: requestId, allow: String(allow) }
+    if (allow && graceMinutes > 0) body.grace_minutes = String(graceMinutes)
     const r = await apiFetch('/api/confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ request_id: requestId, allow: String(allow) }).toString(),
+      body: new URLSearchParams(body).toString(),
     })
     const data = await r.json()
     if (data.ok) {
-      emit('resolve', requestId, allow, false)
+      emit('resolve', requestId, allow, graceMinutes > 0)
     }
   } catch {
     emit('resolve', requestId, false, false)
@@ -114,6 +122,13 @@ function dangerLabel(d: string): string {
           :disabled="responding.has(pr.request_id)"
           @click="respond(pr.request_id, true)"
         >允许</button>
+        <button
+          v-if="graceable(pr.danger)"
+          class="cf-btn grace"
+          :disabled="responding.has(pr.request_id)"
+          :title="`本会话内 ${pr.tool} 接下来 ${GRACE_MINUTES} 分钟不再询问（可在设置撤销）`"
+          @click="respond(pr.request_id, true, GRACE_MINUTES)"
+        >允许并 {{ GRACE_MINUTES }} 分钟免问</button>
       </div>
     </div>
   </div>
@@ -217,4 +232,12 @@ function dangerLabel(d: string): string {
   border: 1px solid var(--border-light);
 }
 .cf-btn.allow:hover { background: var(--primary); color: var(--text-invert); }
+.cf-btn.grace {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px dashed var(--border-light);
+  font-weight: 500;
+  font-size: 0.78rem;
+}
+.cf-btn.grace:hover { color: var(--primary-text); border-color: var(--edge-active); background: var(--primary-soft); }
 </style>
