@@ -589,11 +589,11 @@ def _upsert_book_summary_locked(
 
 def _record_reading_finished_locked(
     user_id: str, activity_id: int, detail: dict, now: str
-) -> None:
+) -> int | None:
     """幂等写入 reading_finished 事件（统一走关系事件服务，不提交，随外层事务）。"""
     from .relationship_events import record
 
-    record(
+    return record(
         user_id,
         "reading_finished",
         "activity",
@@ -627,8 +627,13 @@ def complete_activity(user_id: str, activity_id: int) -> dict:
         )
         detail["status"] = "completed"
         _upsert_book_summary_locked(user_id, activity_id, detail, now)
-        _record_reading_finished_locked(user_id, activity_id, detail, now)
+        event_id = _record_reading_finished_locked(user_id, activity_id, detail, now)
         db.conn.commit()
+        # P1-5：钩子（气质证据/初历）必须在事件真正提交之后登记
+        if event_id is not None:
+            from .relationship_events import register_event_hooks
+
+            register_event_hooks(user_id, event_id, "reading_finished", occurred_at=now)
         result = _detail_locked(user_id, activity_id)
     if result is None:
         raise ActivityError("共读记录不存在")
