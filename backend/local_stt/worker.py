@@ -20,7 +20,7 @@
     {"op": "error",   "request_id": "...", "code": "...", "message": "..."}
 
 边界（L09 任务书）：
-- 16kHz 单声道 PCM16；非 PCM 需先转码（骨架：ffmpeg 缺失时拒绝该段，不假装成功）；
+- 音频格式直通：faster-whisper 经 PyAV 自解码任意容器（wav/mp3/webm…），无需 ffmpeg；
 - 单段 ≤60 秒 / ≤10MB，超限即 error(limit_exceeded) 并清空缓冲；
 - 模型只能从固定清单取名字（renderer 不能传任意路径），模型目录缺失 → model_missing；
 - cancel/stop 后缓冲立即清空（RAM 清理），迟到音频按协议错误处理；
@@ -33,7 +33,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shutil
 import struct
 import sys
 from pathlib import Path
@@ -103,29 +102,8 @@ def resolve_model_path(model_ref: str, models_dir: Path) -> Path:
     return models_dir / model_ref
 
 
-def _ffmpeg_path() -> str | None:
-    override = os.environ.get("LOCAL_STT_FFMPEG", "").strip()
-    if override:
-        return override if shutil.which(override) else None
-    return shutil.which("ffmpeg")
-
-
-def _transcode_to_pcm(audio: bytes) -> bytes:
-    """非 PCM 输入先转码（骨架：需要本机 ffmpeg；缺失即拒绝，不假装成功）。
-
-    生产实现应把音频写进受控随机临时目录、ffmpeg 转 16k 单声道 PCM16 后在
-    finally 里删除临时文件；骨架阶段仅探测能力并给出确定性错误。
-    """
-    if not _ffmpeg_path():
-        raise WorkerError(
-            "transcode_unavailable",
-            "当前音频不是 16kHz 单声道 PCM，且本机未配置 ffmpeg 转码",
-        )
-    raise WorkerError("transcode_unavailable", "转码尚未实装（骨架阶段仅探测能力）")
-
-
 Transcriber = Callable[[bytes, str, str], str]
-"""转写器： (pcm16 音频, language, 模型目录路径) -> 文本。"""
+"""转写器： (音频字节, language, 模型目录路径) -> 文本。"""
 
 
 def _real_transcriber(audio: bytes, language: str, model_path: str) -> str:
@@ -137,8 +115,14 @@ def _real_transcriber(audio: bytes, language: str, model_path: str) -> str:
         raise WorkerError(
             "model_missing", "本机未安装 faster-whisper 运行库，无法本地转写"
         ) from exc
+    import io
+
     model = WhisperModel(model_path, device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(audio, language=language or None)
+    # faster-whisper 经 PyAV 自解码任意容器（wav/mp3/webm…），无需 ffmpeg 预转码
+    segments, _info = model.transcribe(
+        io.BytesIO(audio), language=language or None,
+        vad_filter=True, beam_size=1,
+    )
     return "".join(seg.text for seg in segments).strip()
 
 
@@ -238,14 +222,13 @@ def run_loop(
                 reset()
                 continue
             audio = bytes(buf)
-            fmt, model_path = active_format, str(active_model_path)
+            model_path = str(active_model_path)
             lang = active_language
             try:
-                if fmt != "pcm16":
-                    audio = _transcode_to_pcm(audio)
                 reset()  # 转写前清缓冲：长转写期间不占 RAM 保存原音频
                 if not audio:
                     raise WorkerError("bad_request", "本段没有音频数据")
+                # 格式直通：faster-whisper 经 PyAV 自解码任意容器，无需预转码
                 text = transcriber(audio, lang, model_path)
                 send({"op": "final", "request_id": rid, "text": text})
             except WorkerError as exc:
