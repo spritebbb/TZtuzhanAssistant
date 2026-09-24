@@ -31,8 +31,8 @@ export interface PetWindowDeps {
   resolveUrl: () => string
   loadPrefs: () => PetDisplayPrefs | null
   savePrefs: (prefs: PetDisplayPrefs) => void
-  /** Windows 前台 helper（骨架未实装：null = mock 模式，避让决策不隐藏） */
-  foregroundProbe?: (() => { fullscreen: boolean; displayId?: string }) | null
+  /** 前台全屏探测（L10：经后端 /api/desktop/fullscreen；返回 null=探测失败→保守隐藏） */
+  foregroundProbe?: (() => Promise<{ fullscreen: boolean; displayId?: string } | null>) | null
   userExcluded?: () => boolean
 }
 
@@ -89,18 +89,19 @@ export function createPetWindowManager(deps: PetWindowDeps): PetWindowManager {
   }
 
   function startAvoidancePolling(): void {
-    if (!deps.foregroundProbe) return // mock 模式：骨架未实装 helper，不做避让
+    if (!deps.foregroundProbe) return // 未配探测：不启用避让（保留窗口常显）
     const probe = deps.foregroundProbe
     let probeError = false
-    const tick = () => {
+    const tick = async () => {
       if (!win || win.isDestroyed()) return
       let result: { fullscreen: boolean; displayId?: string } | null = null
       try {
-        result = probe()
+        result = await probe()
         probeError = false
       } catch {
         probeError = true
       }
+      if (!win || win.isDestroyed()) return
       const decision = avoidanceDecision({
         helperConfigured: true,
         probe: result,
@@ -115,7 +116,7 @@ export function createPetWindowManager(deps: PetWindowDeps): PetWindowManager {
       if (avoidanceTimer) clearTimeout(avoidanceTimer)
       avoidanceTimer = setTimeout(tick, pollIntervalMs(win.isVisible()))
     }
-    tick()
+    void tick()
   }
 
   async function open(): Promise<boolean> {
