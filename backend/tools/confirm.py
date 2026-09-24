@@ -137,16 +137,26 @@ _SENSITIVE = ("api_key", "token", "password", "secret", "authorization", "key")
 
 
 def _display_args(args: dict) -> dict:
-    """确认框展示用参数：敏感键脱敏、超长值截断。"""
-    out: dict = {}
-    for k, v in (args or {}).items():
-        if any(s in str(k).lower() for s in _SENSITIVE):
-            out[str(k)] = "****"
-        elif isinstance(v, str) and len(v) > 200:
-            out[str(k)] = v[:200] + f"...({len(v)}字符)"
-        else:
-            out[str(k)] = v
-    return out
+    """确认框展示用参数：递归敏感键脱敏、超长值截断（P3-22 同 audit）。"""
+
+    def _walk(value, depth: int = 0):
+        if depth > 6:
+            return "…"
+        if isinstance(value, dict):
+            out: dict = {}
+            for k, v in value.items():
+                if any(s in str(k).lower() for s in _SENSITIVE):
+                    out[str(k)] = "****"
+                else:
+                    out[str(k)] = _walk(v, depth + 1)
+            return out
+        if isinstance(value, list):
+            return [_walk(v, depth + 1) for v in value[:20]]
+        if isinstance(value, str) and len(value) > 200:
+            return value[:200] + f"...({len(value)}字符)"
+        return value
+
+    return _walk(args or {})
 
 
 def _human_message(tool: str, args: dict) -> str:

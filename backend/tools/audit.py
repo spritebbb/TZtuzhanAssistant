@@ -33,18 +33,32 @@ _RESULT_SUMMARY = 200
 
 
 def _mask_args(args: dict) -> dict:
-    """参数摘要：敏感键脱敏、超长值截断。"""
+    """参数摘要：递归敏感键脱敏、超长值截断。
+
+    P3-22：MCP 工具普遍用嵌套 object 参数，只看顶层键会让嵌套层里的
+    api_key/token 明文落进 data/tool_log.jsonl。
+    """
+
+    def _walk(value, depth: int = 0):
+        if depth > 6:
+            return "…"
+        if isinstance(value, dict):
+            out: dict = {}
+            for k, v in value.items():
+                if any(s in str(k).lower() for s in _SENSITIVE_KEYS):
+                    out[str(k)] = "****"
+                else:
+                    out[str(k)] = _walk(v, depth + 1)
+            return out
+        if isinstance(value, list):
+            return [_walk(v, depth + 1) for v in value[:20]]
+        if isinstance(value, str) and len(value) > 120:
+            return value[:120] + f"...({len(value)}字符)"
+        return value
+
     if not isinstance(args, dict):
         return {"_": str(args)[:100]}
-    out: dict = {}
-    for k, v in args.items():
-        if any(s in str(k).lower() for s in _SENSITIVE_KEYS):
-            out[str(k)] = "****"
-        elif isinstance(v, str) and len(v) > 120:
-            out[str(k)] = v[:120] + f"...({len(v)}字符)"
-        else:
-            out[str(k)] = v
-    return out
+    return _walk(args)
 
 
 def _result_summary(output: str) -> str:
