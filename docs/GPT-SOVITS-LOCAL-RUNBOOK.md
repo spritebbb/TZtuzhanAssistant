@@ -92,3 +92,15 @@ LOCAL_TTS_TIMEOUT=60
 
 - 服务挂/显存不足/版本不符 → 自动回退，日志 `[本地语音] ... 回退 edge-tts`；
 - 想彻底关：设置页关「本地语音」即可（零代码改动回到现状）。
+
+## 8. 本机安装实录（2026-09-23，已跑通）
+
+部署位置 `D:\GPT-SoVITS`（仓库外独立目录）：venv=`runtime-tz`（CPython 3.12.14 + torch 2.6.0+cu124，CUDA 可用）；启动 `start-tuzhan.bat`（= `run_with_capabilities.py`，api_v2 之上挂 `/capabilities`，provider_version=仓库 commit）；底模 `download_pretrained.py`（hubert/roberta/gsv-v2final 共 1.2GB）。已验证：/capabilities 200、GET/POST /tts 200、菟菚 adapter 端到端合成+缓存命中。**当前参考音频是 edge-tts 生成的临时音色（零样本克隆），专属音色需按 §3-4 训练后重登记。**
+
+三个离线数据坑（装新机必踩，全部手动经代理放置）：
+
+1. **hf-mirror 不可用**：它对本仓库 308 回源且剥元数据头 → huggingface_hub 报 FileMetadataError。解法：本机代理可直连 huggingface.co，去掉 HF_ENDPOINT 直连下载（download_pretrained.py 已改）。
+2. **fast_langdetect**：首次 /tts 需要 `lid.176.bin`，其内置下载器不走代理——手动下载放进 `GPT_SoVITS/pretrained_models/fast_langdetect/`（源 dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin，131MB，curl 走代理可下）。
+3. **nltk 数据**（g2p_en 英文处理，中英混句必触）：内置下载器不走代理且报 SSRF——手动放 `runtime-tz/nltk_data/`（源 nltk/nltk_data gh-pages）：`taggers/averaged_perceptron_tagger` + `averaged_perceptron_tagger_eng`（新版 nltk 拆名，两个都要）、`tokenizers/punkt` + `punkt_tab`、`corpora/cmudict`；`run_with_capabilities.py` 已设 `NLTK_DATA` 指向该目录。
+
+两个编译坑（无 MSVC 环境）：`pyopenjtalk`（仅日语，缺失无碍中文）与 `jieba_fast`（硬导入）——后者在 venv site-packages 放了 jieba 转发垫片（`jieba_fast/__init__.py` 与 `posseg.py`），上游升级后若报缺函数按需补。requirements 实际安装清单在 `D:\GPT-SoVITS\requirements-tz.txt`（剔除上两项与 `--no-binary=opencc`，opencc 有现成 wheel）。
