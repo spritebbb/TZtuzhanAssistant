@@ -32,6 +32,22 @@ from .log import logger
 from ..storage.connect import connect_database
 from .userdb import db
 
+
+def _connect_reset(path, *, timeout: float = 10.0):
+    """P2-2：加密态下用 runtime 密钥连接。
+
+    此前图片清扫/引用扫描/物理回收用不带 key 的 connect_database 打开
+    SQLCipher 文件——连接是惰性的，connect 本身不报错，首条 SQL 抛
+    「file is not a database」被按表粒度的 except sqlite3.Error 吞掉，
+    导致清扫删 0 张图、VACUUM 失败，重置却报告成功。明文模式 key=None，
+    行为与此前一致。
+    """
+    from ..storage import runtime
+
+    return connect_database(
+        path, timeout=timeout, encrypted_key=runtime.database_key_or_none()
+    )
+
 # userdb 中需要清空的全部业务表（与 userdb.reset() 降级分支保持一致）
 _TABLES = (
     "affection_log", "mood_log", "long_memory", "facts", "user_meta", "messages",
@@ -146,6 +162,16 @@ async def _quiesce_user_writers() -> None:
             if exc is not None:
                 logger.warning("[重置] 后台记忆任务以异常结束：{}", exc)
 
+    # P2-3：URL 导入 worker 是裸 threading.Thread，不在任何任务集合里——
+    # 不等它结束就会在清表后回写，「彻底失忆」后知识库复活。
+    from . import document_import
+
+    def _join_workers() -> None:
+        if not document_import.wait_url_import_workers(timeout=_QUIESCE_TIMEOUT):
+            raise TimeoutError("URL 导入线程未结束，请稍后重试")
+
+    await asyncio.to_thread(_join_workers)
+
 
 # ---- 媒体文件清扫：只删「本次被删行引用、删除后无人引用」的图片 ----
 
@@ -184,7 +210,7 @@ def _collect_user_media(
         if not path.exists():
             continue
         try:
-            conn = connect_database(path, timeout=10.0)
+            conn = _connect_reset(path, timeout=10.0)
         except sqlite3.Error:
             logger.warning("[重置] {} 打开失败，图片引用记录不完整", db_name)
             continue
@@ -286,7 +312,7 @@ def _sweep_user_media(user_names: set[str]) -> int:
             if not path.exists():
                 continue
             try:
-                conns.append(connect_database(path, timeout=10.0))
+                conns.append(_connect_reset(path, timeout=10.0))
             except sqlite3.Error:
                 logger.warning("[重置] {} 打开失败，图片引用只按其余库判定", name)
         if not conns:
@@ -342,7 +368,7 @@ def _compact() -> str:
         if not path.exists():
             continue
         try:
-            conn = connect_database(path, timeout=30)
+            conn = _connect_reset(path, timeout=30)
             try:
                 conn.execute("PRAGMA busy_timeout=30000")
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
