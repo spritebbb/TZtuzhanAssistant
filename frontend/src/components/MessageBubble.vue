@@ -48,10 +48,13 @@ async function togglePin(item: { lifecycle?: MemoryLifecycle }) {
   }
 }
 
+const lifecycleDeleteError = ref('')
+
 async function forgetFact(item: { lifecycle?: MemoryLifecycle; text?: string }) {
   const meta = item.lifecycle
   if (!meta?.fact_id || lifecycleBusy.value) return
   lifecycleBusy.value = true
+  lifecycleDeleteError.value = ''
   try {
     const { deleteFact } = await import('../api/memory')
     await deleteFact(meta.fact_id, meta.version)
@@ -61,6 +64,9 @@ async function forgetFact(item: { lifecycle?: MemoryLifecycle; text?: string }) 
     const message = e instanceof Error ? e.message : ''
     if (message.includes('不存在') || message.includes('404')) {
       lifecycleGoneIds.value = [...lifecycleGoneIds.value, meta.fact_id]
+    } else {
+      // P3-50：其余失败（网络/500）此前被静默吞掉，按钮像没反应
+      lifecycleDeleteError.value = message || '删除失败，请重试'
     }
   } finally {
     lifecycleBusy.value = false
@@ -288,6 +294,7 @@ const whySummary = computed(() => {
                 <button class="lc-btn danger" :disabled="lifecycleBusy" @click="forgetFact(item)">删掉</button>
               </template>
               <em v-if="lifecycleGone(item)" class="lc-gone">已删除</em>
+              <em v-if="lifecycleDeleteError" class="lc-gone" :title="lifecycleDeleteError">删除失败</em>
             </span>
           </div>
         </div>

@@ -28,24 +28,30 @@ const searchResult = ref<ArchiveSearchResult[]>([])
 const searching = ref(false)
 const searchMsg = ref('')
 
+let searchSeq = 0
+
 async function searchArchives() {
   const q = searchQuery.value.trim()
   if (!q) {
     searchResult.value = []
     return
   }
+  // P3-49：Enter 不受按钮 disabled 保护——序号守卫丢弃过期响应，
+  // 快速连搜时旧请求晚到不再覆盖新结果
+  const seq = ++searchSeq
   searching.value = true
   searchMsg.value = ''
   try {
     // 后端一次 LIKE 查询命中标题 + 内容，返回摘要列表（标题/条数/预览），
     // 替代「拉全量列表 + 逐个拉详情」的 N+1 模式；点进再拉完整详情。
     const details = await apiSearchArchives(q)
+    if (seq !== searchSeq) return
     searchResult.value = details
     searchMsg.value = details.length ? `找到 ${details.length} 个相关归档` : '未找到匹配结果'
   } catch {
-    searchMsg.value = '搜索失败'
+    if (seq === searchSeq) searchMsg.value = '搜索失败'
   } finally {
-    searching.value = false
+    if (seq === searchSeq) searching.value = false
   }
 }
 
