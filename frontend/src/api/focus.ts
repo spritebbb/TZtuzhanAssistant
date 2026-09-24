@@ -1,4 +1,4 @@
-import { apiFetch } from './index'
+import { apiFetch, getApiUrl } from './index'
 
 export type FocusStatus = 'active' | 'paused' | 'completed' | 'cancelled'
 
@@ -57,5 +57,6 @@ export function cancelFocus(activityId: number): Promise<FocusSession> {
 }
 
 export function exportFocusUrl(activityId: number): string {
-  return `/api/focus/${activityId}/export?format=md`
+  // 绝对地址 + query token：`<a href>` 原生导航不带 Authorization 头（P2-20）
+  return getApiUrl(`/api/focus/${activityId}/export?format=md`, true)
 }

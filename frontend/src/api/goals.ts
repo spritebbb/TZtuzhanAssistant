@@ -1,3 +1,5 @@
+import { apiFetch, getApiUrl } from './index'
+
 export type GoalStatus = 'active' | 'paused' | 'completed' | 'cancelled'
 export type GoalSupportMode = 'companion' | 'reminder'
 
@@ -25,8 +27,11 @@ export interface SharedGoal {
   review: string
 }
 
+// P1-11：此前本模块整文件用裸 fetch（全仓唯一），丢失 apiFetch 的
+// baseUrl 与 Authorization 注入——远程 token 模式全 401、Vite dev 模式
+// 全 404、后端 423 锁定也不会触发全局锁屏。
 async function goalRequest(path: string, init?: RequestInit): Promise<SharedGoal> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
@@ -36,7 +41,7 @@ async function goalRequest(path: string, init?: RequestInit): Promise<SharedGoal
 }
 
 export async function listGoals(): Promise<SharedGoal[]> {
-  const response = await fetch('/api/goals')
+  const response = await apiFetch('/api/goals')
   const data = await response.json()
   if (!response.ok || !data.ok) throw new Error(data.error || '共同目标读取失败')
   return data.goals as SharedGoal[]
@@ -79,5 +84,6 @@ export function completeGoal(goalId: number, createArtifact: boolean): Promise<S
 }
 
 export function exportGoalUrl(goalId: number): string {
-  return `/api/goals/${goalId}/export?format=md`
+  // 绝对地址 + query token：`<a href>` 原生导航不带 Authorization 头（P2-20）
+  return getApiUrl(`/api/goals/${goalId}/export?format=md`, true)
 }

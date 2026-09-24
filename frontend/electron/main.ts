@@ -34,11 +34,17 @@ interface ProactiveMessage {
   image?: string | null
 }
 
+let initiativeInFlight = false  // P3-52：后端挂起时 30s 轮询会堆积请求
+
 /** 拉取当前会话的菟菚主动消息（轮询后端 /api/initiative） */
 async function pollInitiative(): Promise<void> {
-  if (!activeSessionId) return
+  if (!activeSessionId || initiativeInFlight) return
+  initiativeInFlight = true
   try {
-    const resp = await fetch(`${BACKEND_HOST}/api/initiative?session_id=${encodeURIComponent(activeSessionId)}`)
+    // P3-52：带超时（AbortSignal），后端 hang 时不让请求无限悬挂
+    const resp = await fetch(`${BACKEND_HOST}/api/initiative?session_id=${encodeURIComponent(activeSessionId)}`, {
+      signal: AbortSignal.timeout(10_000),
+    })
     const data = await resp.json()
     const fallbackText: unknown = data?.initiative
     const rawMessage: unknown = data?.message
@@ -67,6 +73,8 @@ async function pollInitiative(): Promise<void> {
     }
   } catch {
     // 后端未就绪/网络抖动：静默，下次轮询再试
+  } finally {
+    initiativeInFlight = false
   }
 }
 
@@ -94,11 +102,25 @@ function checkBackend(): Promise<boolean> {
   })
 }
 
-/** 是否是应用自身的页面（后端同源页 / 开发服务器 / data: 兜底页）。 */
+/** 是否是应用自身的页面（后端同源页 / 开发服务器）。 */
 function isInternalUrl(url: string): boolean {
-  if (url.startsWith(BACKEND_HOST) || url.startsWith('data:')) return true
+  // data: 不再视为内链（P2：data: 放行 will-navigate 与「外链交系统浏览器」
+  // 相悖；内部兜底页经 loadURL 加载，本就不触发 will-navigate）
+  if (url.startsWith(BACKEND_HOST)) return true
   const dev = process.env.VITE_DEV_SERVER_URL
   return !!dev && url.startsWith(dev)
+}
+
+/** 外链协议白名单（P2 纵深防御）：只放行 web/邮件协议，file:、ms-*:、
+ * 自定义协议与 data: 一律不交 shell.openExternal——渲染层 markdown 白名单
+ * 之外的第二道防线。 */
+function isSafeExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:'
+  } catch {
+    return false
+  }
 }
 
 /** 启动后端 Python 进程。
@@ -261,13 +283,21 @@ function createWindow(backendReady = true): void {
   // 外链一律交给系统浏览器：既不把聊天界面顶掉（窗口内导航没有后退入口，
   // 用户会卡在外部页面），也不在应用里另开一个无地址栏的窗口。
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!isInternalUrl(url)) void shell.openExternal(url)
+    if (isInternalUrl(url)) {
+      // P1-10：内链 target=_blank（纪念册/五种导出/下载原图）此前 deny 且
+      // 不做任何事——点击静默无效。转交主进程走下载（URL 已带 query token）。
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        mainWindow?.webContents.downloadURL(url)
+      }
+      return { action: 'deny' }
+    }
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (isInternalUrl(url)) return
     event.preventDefault()
-    void shell.openExternal(url)
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
 
   // 关闭按钮 = 隐藏到托盘（任务栏常驻）；只有托盘菜单"退出"才真正退出。

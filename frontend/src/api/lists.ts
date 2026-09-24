@@ -1,4 +1,4 @@
-import { apiFetch } from './index'
+import { apiFetch, getApiUrl } from './index'
 
 export interface ListItem {
   id: number
@@ -81,5 +81,6 @@ export function completeList(activityId: number): Promise<SharedList> {
 }
 
 export function exportListUrl(activityId: number): string {
-  return `/api/lists/${activityId}/export?format=md`
+  // 绝对地址 + query token：`<a href>` 原生导航不带 Authorization 头（P2-20）
+  return getApiUrl(`/api/lists/${activityId}/export?format=md`, true)
 }

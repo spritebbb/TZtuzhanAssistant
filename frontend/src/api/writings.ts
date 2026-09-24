@@ -1,4 +1,4 @@
-import { apiFetch } from './index'
+import { apiFetch, getApiUrl } from './index'
 
 export interface WritingTurn {
   id: number
@@ -81,7 +81,8 @@ export function completeWriting(activityId: number, createArtifact: boolean): Pr
 }
 
 export function exportWritingUrl(activityId: number): string {
-  return `/api/writings/${activityId}/export?format=md`
+  // 绝对地址 + query token：`<a href>` 原生导航不带 Authorization 头（P2-20）
+  return getApiUrl(`/api/writings/${activityId}/export?format=md`, true)
 }
 
 /** L02 结构化大纲（世界观/角色设定）。 */
