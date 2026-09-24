@@ -56,6 +56,7 @@ class ConfirmService:
             "decision": None,
             "tool": tool,
             "args": args,
+            "danger_level": getattr(spec, "danger_level", ""),
             "ts": time.time(),
         }
         async with cls._lock:
@@ -84,15 +85,26 @@ class ConfirmService:
                 cls._pending.pop(rid, None)
 
     @classmethod
-    async def resolve(cls, request_id: str, allow: bool) -> bool:
-        """用户对某请求做出决定：唤醒挂起的工具执行。返回是否找到该请求。"""
+    async def resolve(cls, request_id: str, allow: bool,
+                      grace_minutes: int = 0) -> bool:
+        """用户对某请求做出决定：唤醒挂起的工具执行。返回是否找到该请求。
+
+        allow=True 且 grace_minutes>0 时，为该工具授予限时免确认（§24.3-3）；
+        高危工具（high/critical）由 grace.grant 内部拒绝。
+        """
         async with cls._lock:
             state = cls._pending.get(request_id)
             if state is None:
                 return False
             state["decision"] = "allow" if allow else "deny"
+            danger_level = str(state.get("danger_level") or "")
             state["event"].set()
-            return True
+        if allow and int(grace_minutes or 0) > 0:
+            from .grace import grant
+
+            grant(str(state.get("tool") or ""), int(grace_minutes),
+                  danger_level=danger_level)
+        return True
 
     @classmethod
     def pending_count(cls) -> int:
@@ -198,6 +210,15 @@ async def default_confirm_hook(name: str, args: dict, spec: Any, ctx: dict) -> s
         return "allow"
     if not config.agent_confirm_enabled:
         return "allow"
+    # §24.3-3 权限中间态：该工具在有效限时免确认期内 → 直接放行（审计日志标记）
+    try:
+        from .grace import granted
+
+        if granted(name, getattr(spec, "danger_level", "")):
+            logger.info("[确认] {} 在限时免确认期内，自动放行（grace）", name)
+            return "allow"
+    except Exception:
+        logger.exception("[确认] grace 判定异常，按正常确认流程处理")
     push = current_sse_push.get()
     if push is None:
         if getattr(config, "agent_confirm_no_channel", "deny") == "allow":
