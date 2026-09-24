@@ -18,11 +18,12 @@ import time
 from datetime import date, datetime, timedelta
 
 from .config import config
+from .log import logger
 from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_current
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 45  # v45: P3-03 本地声纹（voice_profiles / voice_manifests）
+_SCHEMA_VERSION = 46  # v46: P0-1 fallback 管理记忆权威表（manager_memories）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -66,6 +67,17 @@ CREATE TABLE IF NOT EXISTS long_memory (
     ts      TEXT NOT NULL,
     pinned  INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS manager_memories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    rid         INTEGER NOT NULL,          -- 内容 md5 截断（去重键，与向量 id 一致）
+    content     TEXT NOT NULL,
+    importance  REAL NOT NULL DEFAULT 0.5,
+    created_at  TEXT NOT NULL,
+    UNIQUE(user_id, rid)
+);
+CREATE INDEX IF NOT EXISTS idx_manager_memories_user
+    ON manager_memories(user_id, created_at);
 CREATE TABLE IF NOT EXISTS affection_log (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -1769,6 +1781,71 @@ class UserDB:
             )
             self.conn.commit()
         return removed
+
+    # ---- manager memories（P0-1：fallback 管理记忆的权威副本 ----
+    # Mem0 降级期的记忆此前只写 Chroma mem 分区，任何 rebuild 都会整库删除
+    # 且 migrate 不重灌 → 永久丢失。现在 SQLite 是权威源，向量只做检索索引。
+    @_locked
+    def save_manager_memory(self, user_id: str, rid: int, content: str,
+                            importance: float = 0.5, created_at: str | None = None) -> bool:
+        try:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO manager_memories "
+                "(user_id, rid, content, importance, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, int(rid), content, float(importance),
+                 created_at or datetime.now().isoformat(timespec="seconds")),
+            )
+            self.conn.commit()
+            return True
+        except Exception as exc:
+            logger.warning("[userdb] 管理记忆落库失败：{} rid={}：{}", user_id, rid, exc)
+            return False
+
+    @_locked
+    def list_manager_memory_rows(self, user_id: str) -> list:
+        """按创建时间升序返回该用户的全部管理记忆（rid/content/importance/created_at）。"""
+        return self.conn.execute(
+            "SELECT rid, content, importance, created_at FROM manager_memories "
+            "WHERE user_id=? ORDER BY created_at, rid",
+            (user_id,),
+        ).fetchall()
+
+    @_locked
+    def manager_memory_existing_rids(self, user_id: str, rids: list[int]) -> set[int]:
+        """权威存在性闸门：返回 rids 中在表内仍存在的子集（检索过滤向量孤儿用）。"""
+        if not rids:
+            return set()
+        marks = ",".join("?" for _ in rids)
+        rows = self.conn.execute(
+            f"SELECT rid FROM manager_memories WHERE user_id=? AND rid IN ({marks})",
+            (user_id, *[int(r) for r in rids]),
+        ).fetchall()
+        return {r["rid"] for r in rows}
+
+    @_locked
+    def delete_manager_memory(self, user_id: str, rids: list[int]) -> int:
+        if not rids:
+            return 0
+        marks = ",".join("?" for _ in rids)
+        cur = self.conn.execute(
+            f"DELETE FROM manager_memories WHERE user_id=? AND rid IN ({marks})",
+            (user_id, *[int(r) for r in rids]),
+        )
+        self.conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    @_locked
+    def clear_manager_memories(self, user_id: str) -> int:
+        cur = self.conn.execute(
+            "DELETE FROM manager_memories WHERE user_id=?", (user_id,)
+        )
+        self.conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    @_locked
+    def count_manager_memory_rows(self) -> int:
+        """全部用户的管理记忆总数（migration 增量判定用）。"""
+        return int(self.conn.execute("SELECT COUNT(*) AS c FROM manager_memories").fetchone()["c"])
 
     @_locked
     def search_long_memory(self, user_id: str, query: str, top_k: int):

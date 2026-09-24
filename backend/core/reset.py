@@ -57,6 +57,7 @@ _TABLES = (
     "persona_evolution_log", "experience_metrics",
     "learning_candidates", "watches",
     "kb_documents", "kb_chunks", "unlocks",
+    "manager_memories",
     "tavern_sessions",
     "situation_files",
     "channel_bindings", "devices",

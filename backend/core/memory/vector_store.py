@@ -453,19 +453,32 @@ def clear_user(user_id: str) -> int:
         return 0
     removed = 0
     for kind in sorted(_KINDS):
-        col = _collection(kind)
-        if col is None:
-            continue
-        try:
-            with _CHROMA_LOCK:
-                got = col.get(where={"user_id": user_id})
-                ids = list(got.get("ids") or [])
-                if ids:
-                    col.delete(ids=ids)
-                    removed += len(ids)
-        except Exception:
-            logger.warning("[向量] 清理用户失败：{}:{}", user_id, kind)
+        removed += clear_user_kind(user_id, kind)
     return removed
+
+
+def clear_user_kind(user_id: str, kind: str) -> int:
+    """删除单个用户在单个 kind 分区的全部向量，返回删除条数。
+
+    与 clear_user 同样的 get→delete 序列，但限定一个分区；供 fallback
+    管理记忆等「只想清自己分区」的调用方使用（直接拿裸 collection 对象
+    绕过 _CHROMA_LOCK 会与并发写撞底层 SQLite 单写者锁）。
+    """
+    if not enabled() or not user_id or kind not in _KINDS:
+        return 0
+    col = _collection(kind)
+    if col is None:
+        return 0
+    try:
+        with _CHROMA_LOCK:
+            got = col.get(where={"user_id": user_id})
+            ids = list(got.get("ids") or [])
+            if ids:
+                col.delete(ids=ids)
+        return len(ids)
+    except Exception:
+        logger.warning("[向量] 清理用户分区失败：{}:{}", user_id, kind)
+        return 0
 
 
 def migrate_user_id(old: str, new: str) -> int:
