@@ -347,6 +347,12 @@ class _FallbackManager:
     - 重要性评分：每条记忆附带重要性分数（0~1）
     - 自动遗忘：超过上限时移除最不重要的记忆
     - 过期清理：超过最大天数/用户上限时清理
+
+    P0-1 权威分层：manager_memories 表（bot.db）是唯一权威副本，Chroma 的
+    mem 分区只是检索索引。此前记忆只写向量库，任何 rebuild（embedding 维度
+    变化/加密迁移/关系包恢复）都会整库删除且 migrate 不重灌 mem 源 → 永久
+    丢失。现在 add 先落 SQLite、向量尽力而为（失败由 migration 按表计数补灌），
+    检索结果按权威表过滤孤儿向量。
     """
 
     def __init__(self):
@@ -359,66 +365,57 @@ class _FallbackManager:
             self._store = vs
         return self._store
 
-    def _mem_collection(self):
-        store = self._get_store()
-        return getattr(store, "_collection", lambda k: None)("mem")
+    def _db(self):
+        from .. import userdb
+
+        return userdb.db
 
     def _prune(self, user_id: str, *, max_age_days: int | None = None) -> int:
-        """清理 mem 集合：按超龄（可选）与每用户上限淘汰最旧，返回删除条数。
+        """清理管理记忆：按超龄（可选）与每用户上限淘汰最旧，返回删除条数。
 
-        让 _FALLBACK_MAX_PER_USER / _FALLBACK_MAX_AGE_DAYS 真正生效——
-        Mem0 故障期间 fallback 记忆不再无限累积。
+        以权威表为淘汰依据，向量随行删除；避免 Mem0 故障期间无限累积。
         """
-        col = self._mem_collection()
-        if col is None:
-            return 0
+        db = self._db()
         try:
-            data = col.get(where={"user_id": user_id})
+            rows = db.list_manager_memory_rows(user_id)
         except Exception:
             return 0
-        ids = data.get("ids") or []
-        metas = data.get("metadatas") or []
+        if not rows:
+            return 0
         now = datetime.now()
-        removed = 0
-
-        # 1) 超龄清理
-        if max_age_days is not None:
-            for i, iid in enumerate(ids):
-                meta = metas[i] if isinstance(metas, list) and i < len(metas) else {}
-                ts_raw = (meta or {}).get("ts", "")
-                try:
-                    ts = datetime.fromisoformat(str(ts_raw)) if ts_raw else None
-                except Exception:
-                    ts = None
-                if ts is not None and (now - ts).days > max_age_days:
-                    try:
-                        col.delete(ids=[iid])
-                        removed += 1
-                    except Exception:
-                        pass
-            # 删除后重新拉取，再做容量淘汰
+        victims: list[int] = []
+        survivors: list[int] = []
+        for r in rows:
+            rid = int(r["rid"])
+            ts_raw = r["created_at"] or ""
             try:
-                data = col.get(where={"user_id": user_id})
+                ts = datetime.fromisoformat(str(ts_raw)) if ts_raw else None
             except Exception:
-                return removed
-            ids = data.get("ids") or []
-            metas = data.get("metadatas") or []
-
-        # 2) 每用户上限：按 ts 升序删最旧（无 ts 的按空串排最前，视为最旧）
-        if len(ids) > _FALLBACK_MAX_PER_USER:
-            indexed = []
-            for i, iid in enumerate(ids):
-                meta = metas[i] if isinstance(metas, list) and i < len(metas) else {}
-                indexed.append((str((meta or {}).get("ts", "")), iid))
-            indexed.sort()
-            overflow = indexed[: len(indexed) - _FALLBACK_MAX_PER_USER]
-            for _, iid in overflow:
-                try:
-                    col.delete(ids=[iid])
-                    removed += 1
-                except Exception:
-                    pass
-        return removed
+                ts = None
+            if (
+                max_age_days is not None
+                and ts is not None
+                and (now - ts).days > max_age_days
+            ):
+                victims.append(rid)
+            else:
+                survivors.append(rid)
+        # 容量淘汰：survivors 已按 created_at 升序，超出上限删最旧
+        if len(survivors) > _FALLBACK_MAX_PER_USER:
+            victims.extend(survivors[: len(survivors) - _FALLBACK_MAX_PER_USER])
+        if not victims:
+            return 0
+        try:
+            db.delete_manager_memory(user_id, victims)
+        except Exception:
+            return 0
+        # 向量随行删除（尽力而为；失败留下的孤儿会被检索闸门过滤、
+        # 并在下次 rebuild 时随整库重灌消失）
+        try:
+            self._get_store().delete_many(user_id, "mem", victims)
+        except Exception:
+            pass
+        return len(victims)
 
     def add(self, user_id: str, text: str, metadata: dict | None = None) -> bool:
         store = self._get_store()
@@ -432,24 +429,41 @@ class _FallbackManager:
             "importance": 0.5,
             **(metadata or {}),
         }
+        # 先落权威表：表失败即整体失败（没有权威副本的记忆宁可不收，
+        # 也不能只进向量库等一次 rebuild 蒸发）。
+        if not self._db().save_manager_memory(
+            user_id, rid, text, float(meta.get("importance") or 0.5), meta.get("ts")
+        ):
+            return False
         # 独立 kind="mem"：与 pipeline 的 long_memory（kind="lm"）分开存放，
         # 避免 fallback 管理记忆与对话原文记忆混在同一 collection（互相污染检索）。
         # Chroma id 本身含 user_id（{user_id}|mem|{rid}），不同用户不会互相覆盖。
-        ok = store.add(user_id, "mem", rid, text, extra=meta)
-        if ok:
-            # 写入后立即按上限/超龄淘汰，防止 Mem0 故障期间无限累积
-            self._prune(user_id, max_age_days=_FALLBACK_MAX_AGE_DAYS)
-        return ok
+        # 向量写入尽力而为：embedding 未就绪/写入失败时由 migration 按表计数补灌。
+        store.add(user_id, "mem", rid, text, extra=meta)
+        # 写入后立即按上限/超龄淘汰，防止 Mem0 故障期间无限累积
+        self._prune(user_id, max_age_days=_FALLBACK_MAX_AGE_DAYS)
+        return True
 
     def search(self, user_id: str, query: str, limit: int = 5) -> list[dict]:
         store = self._get_store()
         # 只检索本 fallback 自管的 mem kind，不再混入 pipeline 的 lm 原文记忆
         hits = store.search(user_id, query, top_k=limit, kind="mem")
+        if not hits:
+            return []
+        # 权威闸门：过滤权威表已删除的向量孤儿（与 facts 的
+        # recallable_fact_ids 同一模式），杜绝「删掉的记忆还在召回」。
+        try:
+            existing = self._db().manager_memory_existing_rids(
+                user_id, [h.record_id for h in hits]
+            )
+        except Exception:
+            existing = {h.record_id for h in hits}
         out = []
         for h in hits:
+            if h.record_id not in existing:
+                continue
             out.append({
-                # 返回可直接用于 update/delete 的完整 id（user_id|kind|record_id），
-                # 修复旧版"search 返回纯 int id、update/delete 却要 a|b|c"的格式错配
+                # 返回可直接用于 update/delete 的完整 id（user_id|kind|record_id）
                 "id": f"{user_id}|mem|{h.record_id}",
                 "text": h.text,
                 "score": 1.0 - h.distance,
@@ -458,51 +472,50 @@ class _FallbackManager:
         return out
 
     def get_all(self, user_id: str) -> list[dict]:
-        """获取用户全部记忆（从 Chroma 拉取）。"""
-        store = self._get_store()
-        all_memories: list[dict] = []
-        col = getattr(store, "_collection", lambda k: None)("mem")
-        if col is None:
-            return all_memories
+        """获取用户全部记忆（以权威表为准）。"""
         try:
-            data = col.get(where={"user_id": user_id})
-            ids = data.get("ids") or []
-            docs = data.get("documents") or []
-            metas = data.get("metadatas") or []
-            for i in range(len(ids)):
-                all_memories.append({
-                    "id": ids[i],
-                    "text": docs[i] if isinstance(docs, list) else docs,
-                    "metadata": metas[i] if isinstance(metas, list) else metas or {},
-                })
+            rows = self._db().list_manager_memory_rows(user_id)
         except Exception:
-            pass
-        return all_memories
+            return []
+        return [
+            {
+                "id": f"{user_id}|mem|{r['rid']}",
+                "text": r["content"],
+                "metadata": {
+                    "ts": r["created_at"],
+                    "importance": r["importance"],
+                },
+            }
+            for r in rows
+        ]
 
     def update(self, user_id: str, memory_id: str, text: str) -> bool:
-        """更新：先删后加（Chroma upsert 直接覆盖）。"""
-        store = self._get_store()
-        # 解析 memory_id 格式
+        """更新：删旧（权威表+向量）再按新文本写入（rid 随新内容哈希变化）。
+
+        只接受本管理器自管 mem 分区的 id——拿着 lm/facts 等分区的 id 来
+        update 会改写不属于本管理器的向量，与 SQLite 源表脱钩。
+        """
         parts = memory_id.split("|")
-        if len(parts) >= 3:
-            kind = parts[1]
-            try:
-                rid = int(parts[2])
-            except ValueError:
-                return False
-            return store.add(user_id, kind, rid, text)
-        return False
+        if len(parts) < 3 or parts[1] != "mem":
+            return False
+        try:
+            rid = int(parts[2])
+        except ValueError:
+            return False
+        self._db().delete_manager_memory(user_id, [rid])
+        self._get_store().delete(user_id, "mem", rid)
+        return self.add(user_id, text)
 
     def delete(self, user_id: str, memory_id: str) -> bool:
         parts = memory_id.split("|")
-        if len(parts) >= 3:
-            kind = parts[1]
+        if len(parts) >= 3 and parts[1] == "mem":
             try:
                 rid = int(parts[2])
             except ValueError:
                 return False
-            store = self._get_store()
-            return store.delete(user_id, kind, rid)
+            removed = self._db().delete_manager_memory(user_id, [rid])
+            self._get_store().delete(user_id, "mem", rid)
+            return removed > 0
         return False
 
     def forget_old(self, user_id: str, max_age_days: int = 90) -> int:
@@ -512,18 +525,13 @@ class _FallbackManager:
         )
 
     def clear_user(self, user_id: str) -> int:
-        """清空该用户在 mem 集合中的全部记忆，返回删除条数。"""
-        col = self._mem_collection()
-        if col is None:
-            return 0
+        """清空该用户的全部管理记忆（权威表 + 向量），返回删除条数。"""
+        removed = self._db().clear_manager_memories(user_id)
         try:
-            got = col.get(where={"user_id": user_id})
-            ids = list(got.get("ids") or [])
-            if ids:
-                col.delete(ids=ids)
-            return len(ids)
+            self._get_store().clear_user_kind(user_id, "mem")
         except Exception:
-            return 0
+            pass
+        return removed
 
 
 # 全局单例

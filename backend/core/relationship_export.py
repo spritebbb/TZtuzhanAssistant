@@ -34,7 +34,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
-               "learning_candidates"),
+               "learning_candidates", "manager_memories"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
              "persona_evolution_log", "tavern_sessions"),

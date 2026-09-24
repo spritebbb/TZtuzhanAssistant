@@ -1,5 +1,5 @@
 """数据迁移：把既有 SQLite 记忆（long_memory / facts / triples / user_profile /
-important_dates / kv 摘要）批量灌入 Chroma 向量库，保留现有记忆不丢。
+important_dates / manager_memories / kv 摘要）批量灌入 Chroma 向量库，保留现有记忆不丢。
 
 运行时机：
 - 启动时由 engine.ensure_backfill() 自动触发（检测到 Chroma 为空且 SQLite 有数据）
@@ -35,6 +35,7 @@ def _needs_migration() -> bool:
             "triples": "triples",
             "user_profile": "profile",
             "important_dates": "topic",
+            "manager_memories": "mem",
         }
         total = 0
         missing = False
@@ -137,17 +138,30 @@ def migrate(progress_cb=None) -> dict:
     except Exception:
         pass
 
+    # 7) manager_memories → mem（P0-1：fallback 管理记忆的权威副本重灌。
+    #    此前该分区只在写入时进向量，任何 rebuild 都会把降级期记忆清掉且
+    #    无回填路径——现在它与 lm/facts 一样「SQLite 权威、向量可重建」。
+    #    向量 rid 必须用内容哈希列 rid（与 _FallbackManager.add 一致），
+    #    用自增 id 重灌会让检索权威闸门把全部 mem 向量当孤儿过滤掉。）
+    count += _migrate_table(
+        "manager_memories", "mem", lambda r: r["content"], stats, progress_cb,
+        rid_fn=lambda r: r["rid"],
+    )
+
     logger.info("[迁移] 完成，共灌入 {} 条", count)
     return stats
 
 
-def _migrate_table(table: str, kind: str, text_fn, stats: dict, progress_cb=None) -> int:
+def _migrate_table(table: str, kind: str, text_fn, stats: dict, progress_cb=None,
+                   rid_fn=None) -> int:
     from . import vector_store as vec
 
     rows = _sqlite_rows(table)
     if not rows:
         stats[table] = 0
         return 0
+    if rid_fn is None:
+        rid_fn = lambda r: r["id"]  # noqa: E731
     done = 0
     for i in range(0, len(rows), _BATCH):
         batch = rows[i : i + _BATCH]
@@ -162,7 +176,7 @@ def _migrate_table(table: str, kind: str, text_fn, stats: dict, progress_cb=None
             # 已置位）。若走默认闸门，重建重灌的每一条都会被 add() 拒绝，导致清库后
             # 重灌 0 条、语义检索静默失效（P1 自锁）。迁移是批量全量重灌写方自身，
             # 不会被重建流程误删，必须放行。
-            if vec.add(r["user_id"], kind, r["id"], text, _allow_during_rebuild=True):
+            if vec.add(r["user_id"], kind, rid_fn(r), text, _allow_during_rebuild=True):
                 done += 1
         if progress_cb:
             progress_cb(table, min(i + _BATCH, len(rows)), len(rows))
