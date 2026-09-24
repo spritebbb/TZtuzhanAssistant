@@ -417,7 +417,7 @@ function attachDesktopExtras(): void {
   })
   sttHost.attach()
 
-  // L10：桌面宠物（骨架：前台全屏 helper 未实装 → 避让为 mock 模式不隐藏）
+  // L10：桌面宠物（前台全屏探测走后端 /api/desktop/fullscreen；失效时保守隐藏）
   const prefsFile = () => join(app.getPath('userData'), 'pet-prefs.json')
   const loadPrefs = () => {
     try {
@@ -437,7 +437,16 @@ function attachDesktopExtras(): void {
         writeFileSync(prefsFile(), JSON.stringify(prefs), 'utf-8')
       } catch { /* 偏好保存失败不影响窗口 */ }
     },
-    foregroundProbe: null,
+    foregroundProbe: async () => {
+      try {
+        const resp = await fetch(`${BACKEND_HOST}/api/desktop/fullscreen`)
+        if (!resp.ok) return null
+        const data = await resp.json()
+        return { fullscreen: Boolean(data.fullscreen), displayId: data.display_id }
+      } catch {
+        return null // 探测失败 → avoidanceDecision 保守隐藏
+      }
+    },
   })
   ipcMain.handle('pet:toggle', () => petManager?.toggle() ?? Promise.resolve(false))
 }
