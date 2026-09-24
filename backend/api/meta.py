@@ -56,6 +56,8 @@ def _memory_status() -> dict:
 @router.get("/meta")
 async def api_meta(session_id: str = ""):
     """工具开关状态 + 完整工具清单 + 基本信息 + 心情。session_id 可选：传入时按会话隔离用户身份。"""
+    import asyncio
+
     from ..api.chat import _user_id
     from ..core.presence import visual_state
     from ..core.search import last_error as search_last_error
@@ -63,7 +65,13 @@ async def api_meta(session_id: str = ""):
     from ..core.affection import display as affection_display
 
     uid = _user_id(session_id) if session_id else active_user_id()
-    mood_val, mood_label = current_mood(uid, city=config.mood_city)
+    # P1-7：心情基线在天气缓存未命中时会同步 urlopen 多个天气引擎（单引擎
+    # 超时 10-25s + wttr 兜底 8s）——此前直接跑在事件循环上，把全部请求与
+    # SSE 心跳冻结半分钟以上。挪进线程池；本端点是前端主轮询，每天首次
+    # 访问（缓存过期/重启后）必踩这条路径。
+    mood_val, mood_label = await asyncio.to_thread(
+        current_mood, uid, city=config.mood_city
+    )
     # 心情 emoji 映射
     if mood_val >= 85:
         mood_emoji = "🤩"

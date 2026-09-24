@@ -102,7 +102,8 @@ async def unlock(body: UnlockBody) -> JSONResponse:
     method = body.method.strip()
     if method == "local":
         try:
-            result = broker().unlock_local(_slot_root())
+            # P3-28：本机槽解锁含 DPAPI/Argon2 类同步重活（数百毫秒级），不卡事件循环
+            result = await asyncio.to_thread(broker().unlock_local, _slot_root())
         except KeyBrokerError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         logger.info("[应用锁] 本机槽解锁 key_id={}", result["key_id"])
@@ -118,7 +119,10 @@ async def unlock(body: UnlockBody) -> JSONResponse:
         if not body.passphrase:
             return JSONResponse({"ok": False, "error": "缺少恢复口令"}, status_code=400)
         try:
-            result = broker().unlock_recovery(_slot_root(), body.passphrase)
+            # P3-28：恢复口令解锁走 Argon2id 派生（单次约 500ms），挪进线程池
+            result = await asyncio.to_thread(
+                broker().unlock_recovery, _slot_root(), body.passphrase
+            )
         except KeyBrokerError as exc:
             _fail_times.append(now)
             # 统一错误信息：不区分口令错/槽坏，减少可探测性
@@ -145,8 +149,10 @@ async def initialize_keyslots(body: InitBody) -> JSONResponse:
         if slots["initialized"]:
             return JSONResponse({"ok": False, "error": "已存在密钥槽，拒绝重复初始化"},
                                 status_code=409)
-        master_key = initialize(root, passphrase=body.passphrase,
-                                passphrase_repeat=body.passphrase_repeat)
+        master_key = await asyncio.to_thread(
+            initialize, root,
+            passphrase=body.passphrase, passphrase_repeat=body.passphrase_repeat,
+        )
     except KeySlotError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     b().install_for_testing(master_key)
