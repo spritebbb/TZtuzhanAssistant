@@ -63,6 +63,37 @@ const statusLabel: Record<string, string> = {
   cancelled: '⏹ 已取消',
 }
 
+// ---- 执行轨迹（§24.3-2）：task.log 时间线 ----
+function fmtTs(ts: number): string {
+  try {
+    return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false })
+  } catch {
+    return ''
+  }
+}
+function traceIcon(e: { type?: string; ok?: boolean }): string {
+  switch (e.type) {
+    case 'round': return '🧠'
+    case 'tool': return e.ok === false ? '❌' : '🔧'
+    case 'result': return '📝'
+    case 'usage': return '🔢'
+    case 'elapsed': return '⏱️'
+    case 'timeout': return '⏰'
+    case 'retry': return '↻'
+    default: return '·'
+  }
+}
+function traceText(e: { type?: string; content?: string; duration_sec?: number; error_code?: string }): string {
+  let text = String(e.content || '')
+  if (e.type === 'tool' && typeof e.duration_sec === 'number') {
+    text += `（${e.duration_sec}s）`
+  }
+  if (e.error_code) {
+    text += ` [${e.error_code}]`
+  }
+  return text
+}
+
 async function loadTasks() {
   try {
     const r = await apiFetch('/api/agent/tasks')
@@ -386,6 +417,19 @@ function dangerLabel(d: string): string {
               <span v-if="running" class="a-running">执行中…</span>
             </div>
             <div v-if="current.result" class="a-result">{{ current.result }}</div>
+            <div v-if="(current.log || []).length" class="a-trace">
+              <div class="a-trace-title">执行轨迹</div>
+              <div
+                v-for="(e, i) in current.log"
+                :key="i"
+                class="a-trace-item"
+                :class="{ err: e.ok === false }"
+              >
+                <span class="a-trace-ts">{{ fmtTs(e.ts) }}</span>
+                <span class="a-trace-icon">{{ traceIcon(e) }}</span>
+                <span class="a-trace-text">{{ traceText(e) }}</span>
+              </div>
+            </div>
           </div>
           <div v-if="msg" class="a-msg" :class="{ err: msg.startsWith('✗') }" :role="msg.startsWith('✗') ? 'alert' : 'status'">{{ msg }}</div>
         </div>
@@ -482,6 +526,15 @@ function dangerLabel(d: string): string {
 .a-detail-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
 .a-running { font-size: 0.8rem; color: var(--primary-text); }
 .a-result { margin-top: 12px; font-size: 0.84rem; color: var(--text); background: var(--primary-soft); padding: 10px 12px; border-radius: var(--radius-sm); white-space: pre-wrap; }
+/* 执行轨迹（§24.3-2） */
+.a-trace { margin-top: 12px; }
+.a-trace-title { font-size: 0.72rem; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; }
+.a-trace-item { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 0.74rem; color: var(--text-dim); border-bottom: 1px dashed var(--border); }
+.a-trace-item:last-child { border-bottom: none; }
+.a-trace-item.err .a-trace-text { color: var(--danger); }
+.a-trace-ts { font-family: Consolas, monospace; font-size: 0.66rem; color: var(--text-faint); flex-shrink: 0; }
+.a-trace-icon { flex-shrink: 0; }
+.a-trace-text { word-break: break-all; }
 .a-msg { font-size: 0.8rem; margin-top: 10px; padding: 8px 12px; background: var(--primary-soft); border-radius: var(--radius-sm); color: var(--primary-text); }
 .a-msg.err { color: var(--danger); background: var(--danger-soft); }
 
