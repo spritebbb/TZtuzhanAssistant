@@ -319,6 +319,9 @@ def current_focus(user_id: str, *, settle: bool = True) -> tuple[dict | None, bo
             )
             detail = _row_to_detail(_get_row_locked(user_id, activity_id))
             event_id = _record_focus_finished_locked(user_id, activity_id, detail, now)
+            # P1-6：自然到点是计时器主场景，收尾消息必须与手动结束一样入箱
+            # （wrapup_outbox 只认 pending 行，漏入箱 = 收尾语永不发出）
+            _enqueue_wrapup_locked(user_id, activity_id, detail, now)
             db.conn.commit()
             # P1-5：钩子（气质证据/初历）必须在事件真正提交之后登记
             if event_id is not None:
