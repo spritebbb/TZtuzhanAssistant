@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, computed } from 'vue'
-import { apiFetch } from '../api'
+import { apiFetch, getApiUrl } from '../api'
 import { listArchives, getArchive, searchArchives as apiSearchArchives, type ArchiveInfo, type Message, type ArchiveDetail, type ArchiveSearchResult } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
 
@@ -238,7 +238,8 @@ defineExpose({ load })
         <div class="viewer-head">
           <span class="viewer-title">{{ viewing.title }}</span>
           <span class="viewer-time">{{ fmtTime(viewing.created_at) }}</span>
-          <a class="viewer-export" :href="`/api/keepsake/${viewing.id}`" target="_blank" rel="noopener" title="导出纪念册（可打印为 PDF）">纪念册</a>
+          <!-- P1-10/P2-20：绝对地址 + query token（<a> 导航不带 Authorization；Electron 内链 _blank 由主进程转下载） -->
+          <a class="viewer-export" :href="getApiUrl(`/api/keepsake/${viewing.id}`, true)" target="_blank" rel="noopener" title="导出纪念册（可打印为 PDF）">纪念册</a>
           <button ref="viewerClose" class="viewer-close" aria-label="关闭归档对话" @click="closeView">✕</button>
         </div>
         <div class="viewer-body">

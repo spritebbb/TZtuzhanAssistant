@@ -11,8 +11,10 @@
 const CACHE = 'tztuzhan-v2'
 const PRECACHE = ['/', '/manifest.json', '/icon.svg', '/favicon.ico']
 
-// 需要走 network-first 缓存策略的静态资源（其余一律直连网络不缓存）
-const CACHEABLE = /^(\/assets\/|\/favicon\.ico$|\/manifest\.json$|\/icon\.svg$)|\/$/
+// 需要走 network-first 缓存策略的静态资源（其余一律直连网络不缓存）。
+// P3-51：旧正则的顶层 alternation 让 `\/$` 独立生效——任意以 / 结尾的路径
+// 都会被缓存；收紧为单个分组锚定开头。
+const CACHEABLE = /^(?:\/assets\/|\/favicon\.ico$|\/manifest\.json$|\/icon\.svg$|\/$)/
 const SKIP = /^\/(api|mcp)\//
 
 self.addEventListener('install', (e) => {

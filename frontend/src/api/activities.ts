@@ -1,4 +1,4 @@
-import { apiFetch } from './index'
+import { apiFetch, getApiUrl } from './index'
 
 export type ViewpointRole = 'user' | 'tuzhan' | 'shared'
 
@@ -116,7 +116,8 @@ export async function proposeReadingQuestion(
 }
 
 export function exportReadingUrl(activityId: number): string {
-  return `/api/activities/${activityId}/export?format=md`
+  // 绝对地址 + query token：`<a href>` 原生导航不带 Authorization 头（P2-20）
+  return getApiUrl(`/api/activities/${activityId}/export?format=md`, true)
 }
 
 // ---- M8-B 全活动感想栏：任意活动壳类型的双方感想 ----
