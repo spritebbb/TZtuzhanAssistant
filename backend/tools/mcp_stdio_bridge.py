@@ -31,6 +31,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 _REQUEST_TIMEOUT = 60.0
+# P2-7：桥内部 id 从大数起分配——服务器自身主动请求（sampling/elicitation）
+# 的 id 通常是小整数，不偏移会撞进 _pending 被误当响应投递。
+_BRIDGE_ID_BASE = 1_000_000_000
 
 
 def resolve_command(command: list[str]) -> list[str]:
@@ -55,7 +58,7 @@ class StdioBridge:
     def __init__(self, command: list[str]) -> None:
         self.command = resolve_command(command)
         self._lock = threading.Lock()
-        self._next_id = 0
+        self._next_id = _BRIDGE_ID_BASE
         self._pending: dict[int, dict] = {}
         try:
             self._proc = subprocess.Popen(
@@ -118,11 +121,16 @@ class StdioBridge:
                 print(f"[bridge] 非 JSON 输出（已忽略）：{line[:200]}", file=sys.stderr)
                 continue
             msg_id = message.get("id")
-            if msg_id is None:
-                print(f"[bridge] 服务器通知：{line[:200]}", file=sys.stderr)
+            # P2-7：非整数 id（JSON-RPC 允许字符串 id；服务器主动请求如
+            # sampling/elicitation 也走这里）不做 int() 转换——旧实现直接
+            # int(msg_id) 抛 ValueError 杀死读线程，之后无人消费 stdout，
+            # 子进程管道塞满后自身阻塞，整桥永久挂死。
+            if not isinstance(msg_id, int) or isinstance(msg_id, bool):
+                print(f"[bridge] 服务器通知/主动请求（不匹配等待者，已忽略）：{line[:200]}",
+                      file=sys.stderr)
                 continue
             with self._lock:
-                slot = self._pending.pop(int(msg_id), None)
+                slot = self._pending.pop(msg_id, None)
             if slot is not None:
                 slot["result"] = message
                 slot["event"].set()
@@ -174,8 +182,27 @@ class StdioBridge:
         self._send(forward)
 
     def close(self) -> None:
+        """关闭子进程整棵进程树（P2-8）。
+
+        terminate() 只杀直接子进程：实际命令是 npx.cmd → cmd.exe → node 多层，
+        node 孙进程会残留吃内存。Windows 用 taskkill /T /F 杀树（与
+        plugins/code_exec 的 _kill_tree 同口径），POSIX 先 terminate 再兜底 kill。
+        """
+        proc = getattr(self, "_proc", None)
+        if proc is None:
+            return
         try:
-            self._proc.terminate()
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    capture_output=True, timeout=10, check=False,
+                )
+            else:
+                proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         except Exception:
             pass
 

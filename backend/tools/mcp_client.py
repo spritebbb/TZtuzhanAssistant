@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,10 @@ _ACCEPT = "application/json, text/event-stream"
 
 class McpProtocolError(RuntimeError):
     """MCP 握手/调用失败（协议层）。"""
+
+
+class _SessionExpired(McpProtocolError):
+    """会话过期（HTTP 404 / JSON-RPC -32001）：可重握手一次恢复。"""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -134,12 +139,37 @@ class McpClient:
         self.transport: str | None = None      # "streamable" | "sse"
         self._session_id: str | None = None
         self._sse_endpoint: str | None = None
-        self._sse_queue: queue.Queue = queue.Queue()
+        self._sse_resp = None                  # SSE 长连接响应对象（close 时关闭以结束读线程）
         self._sse_thread: threading.Thread | None = None
+        # P2-5：按请求 id 归档等待队列——共享队列 + 「id 不匹配就丢弃」会让
+        # 并发调用互吞响应；通知/服务器主动消息直接丢弃（本客户端不支持）。
+        self._sse_pending: dict[int, queue.Queue] = {}
         self._next_id = 0
         self._lock = threading.Lock()
+        self._closing = False
 
     # ---- 对外 API ----
+
+    def close(self) -> None:
+        """关闭连接与 SSE 读线程（P2-6：重注册/卸载时调用，防连接与线程泄漏）。
+
+        等待中的请求以错误立即唤醒（fail fast），不傻等超时。
+        """
+        self._closing = True
+        self.transport = None
+        self._session_id = None
+        with self._lock:
+            waiters = list(self._sse_pending.values())
+            self._sse_pending.clear()
+        for q in waiters:
+            q.put({"id": None, "error": {"code": -32000, "message": "MCP client closed"}})
+        resp = self._sse_resp
+        self._sse_resp = None
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
     def initialize(self) -> dict:
         """握手（幂等）：返回服务器信息。"""
@@ -195,6 +225,10 @@ class McpClient:
         try:
             if status >= 400:
                 detail = resp.read().decode("utf-8", errors="replace")[:200]
+                # P3-20：部分服务器（含官方 SDK）用 404 表达会话过期——与
+                # JSON-RPC -32001 同样走重握手恢复，不再当普通协议错误直接失败。
+                if status == 404 and want_id is not None and self._session_id:
+                    raise _SessionExpired(f"HTTP 404：会话可能已过期（{detail}）")
                 raise McpProtocolError(f"HTTP {status}：{detail}")
             session = headers.get("Mcp-Session-Id")
             if session:
@@ -254,6 +288,7 @@ class McpClient:
             raise McpProtocolError("SSE 通道未返回 endpoint 事件")
         self._sse_endpoint = urllib.parse.urljoin(self.url + "/", endpoint)
         self.transport = "sse"
+        self._sse_resp = resp
         # 后台线程继续读事件流
         self._sse_thread = threading.Thread(
             target=self._sse_reader, args=(resp,), daemon=True,
@@ -273,7 +308,7 @@ class McpClient:
         return {"transport": "sse", "server": self._server_info}
 
     def _sse_reader(self, resp) -> None:
-        """后台读取 SSE 事件流，把 JSON-RPC 消息放进队列。"""
+        """后台读取 SSE 事件流，把 JSON-RPC 响应按 id 投递给等待者（P2-5）。"""
         data_lines: list[str] = []
         try:
             for raw_line in resp:
@@ -284,34 +319,70 @@ class McpClient:
                     payload = "\n".join(data_lines)
                     data_lines = []
                     try:
-                        self._sse_queue.put(json.loads(payload))
+                        message = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    mid = message.get("id")
+                    with self._lock:
+                        entry = self._sse_pending.get(mid) if isinstance(mid, int) else None
+                    if entry is not None:
+                        entry.put(message)
+                    # 否则是通知/服务器主动消息：本客户端不处理，丢弃
         except Exception as exc:
-            logger.info("[MCP] {} SSE 读线程结束：{}", self.name, exc)
+            if not self._closing:
+                logger.info("[MCP] {} SSE 读线程结束：{}", self.name, exc)
         finally:
             resp.close()
+            # 流结束：唤醒所有等待者（fail fast，不傻等超时）
+            with self._lock:
+                waiters = list(self._sse_pending.values())
+                self._sse_pending.clear()
+            for q in waiters:
+                q.put({"id": None, "error": {"code": -32000, "message": "SSE 事件流已结束"}})
 
     def _request(self, method: str, params: dict) -> dict:
-        """发一次请求（sse 传输下从事件流取响应）。"""
+        """发一次请求（sse 传输下按 id 从事件流取响应）。"""
         rid = self._rpc_id()
         url = self._sse_endpoint if self.transport == "sse" else self.url
         if not url:
             raise McpProtocolError("未完成握手")
         payload = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
         if self.transport == "sse":
-            self._post(url, payload, want_id=None)  # 响应走事件流
-            deadline = self.timeout
-            while True:
-                try:
-                    message = self._sse_queue.get(timeout=deadline)
-                except queue.Empty as exc:
-                    raise McpProtocolError(f"{method} 超时未收到响应") from exc
-                if message.get("id") == rid:
-                    return self._unwrap(message)
-        message = self._post(url, payload, want_id=rid)
+            # P2-5：本请求专属队列 + 单调时钟总 deadline——旧实现共享队列里
+            # 「id 不匹配的消息直接丢弃」（并发调用互吞响应），且每轮 get 都
+            # 重置完整 timeout，通知洪流下可能永不超时。
+            entry: queue.Queue = queue.Queue()
+            with self._lock:
+                self._sse_pending[rid] = entry
+            try:
+                self._post(url, payload, want_id=None)  # 响应走事件流
+                deadline = time.monotonic() + self.timeout
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise McpProtocolError(f"{method} 超时未收到响应")
+                    try:
+                        message = entry.get(timeout=remaining)
+                    except queue.Empty as exc:
+                        raise McpProtocolError(f"{method} 超时未收到响应") from exc
+                    if message.get("id") == rid:
+                        return self._unwrap(message)
+            finally:
+                with self._lock:
+                    self._sse_pending.pop(rid, None)
+        try:
+            message = self._post(url, payload, want_id=rid)
+        except _SessionExpired:
+            # P3-20：会话过期（HTTP 404）：重握手一次再试
+            self.transport = None
+            self._session_id = None
+            self.initialize()
+            url = self._sse_endpoint if self.transport == "sse" else self.url
+            rid = self._rpc_id()
+            payload["id"] = rid
+            message = self._post(url, payload, want_id=rid)
         if message.get("error") and message.get("error", {}).get("code") == -32001:
-            # 会话过期（部分服务器用 404 表达）：重握手一次再试
+            # 会话过期（部分服务器用 JSON-RPC 错误码表达）：重握手一次再试
             self.transport = None
             self._session_id = None
             self.initialize()

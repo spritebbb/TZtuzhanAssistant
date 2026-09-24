@@ -370,7 +370,8 @@ def register(ctx=None) -> None:
         ("open_app", "打开应用/文件（如 notepad, calc, 或路径）",
          _open_app, {
              "command": {"type": "string", "description": "要打开的应用或文件路径"}
-         }, "run", "normal", True),
+         }, "run", "high", True),  # P2-9：经 Start-Process 启动任意路径可执行文件，
+        # 与 run_command 同级——归 high 才不会被 grace「免确认 N 分钟」豁免
         ("screenshot", "截取屏幕并保存到本地，返回路径",
          _screenshot, {}, "read", "info", False),
         ("clipboard_get", "读取剪贴板文本内容",
@@ -382,7 +383,7 @@ def register(ctx=None) -> None:
         ("browser_open", "在默认浏览器中打开 URL",
          _browser_open, {
              "url": {"type": "string", "description": "要打开的 URL（如 https://example.com）"}
-         }, "run", "normal", True),
+         }, "run", "high", True),  # P2-9：允许 file:// 打开本地任意路径，与 open_app 同级
     ]
     for name, desc, func, props, cat, danger, confirm in specs:
         ToolRegistry.register_func(

@@ -107,6 +107,9 @@ async def mcp_call_tool(request: Request):
 
 # 已注册的外部服务器登记表（运行时内存态）
 _EXTERNAL_SERVERS: dict[str, dict] = {}
+# P2-6：name → 活跃 McpClient。client 持有 SSE 长连接与读线程，重注册/卸载
+# 时必须 close 旧实例，否则连接和线程随每次「重新连接」累积泄漏。
+_EXTERNAL_CLIENTS: dict[str, "object"] = {}
 
 
 def _persist_servers() -> None:
@@ -206,6 +209,12 @@ def unregister_external_server(name: str) -> bool:
         if tname.startswith(prefix):
             ToolRegistry.unregister(tname)
     _EXTERNAL_SERVERS.pop(name, None)
+    client = _EXTERNAL_CLIENTS.pop(name, None)
+    if client is not None:
+        try:
+            client.close()   # P2-6：关 SSE 连接与读线程，不再泄漏
+        except Exception:
+            pass
     _persist_servers()
     return True
 
@@ -255,6 +264,10 @@ async def register_external_server(name: str, url: str, *,
         tools = await asyncio.to_thread(client.list_tools)
     except Exception as exc:
         logger.warning("[MCP] 连接外部服务器失败: {}（{}）", name, exc)
+        try:
+            client.close()   # 连接失败也不留半开连接
+        except Exception:
+            pass
         return False
 
     async def make_proxy(tool_name: str) -> Any:
@@ -263,8 +276,9 @@ async def register_external_server(name: str, url: str, *,
 
         return proxy
 
-    # 若该服务器已注册过，先清掉旧工具（避免重复注册）
+    # 若该服务器已注册过，先清掉旧工具（避免重复注册）与旧 client（P2-6 防泄漏）
     unregister_external_server(name)
+    _EXTERNAL_CLIENTS[name] = client
 
     for t in tools:
         tname = t.get("name", "")
