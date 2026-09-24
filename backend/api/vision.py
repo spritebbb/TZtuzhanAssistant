@@ -71,15 +71,25 @@ async def api_vision(request: Request):
 
     # 落盘图片：文件名 = md5 前缀 + 扩展名（复用 /api/images/ 服务的命名白名单）。
     # 扩展名按文件真实内容（魔数）判断，而非上传文件名，避免「.jpg 名存 PNG 内容」
-    # 导致某些严格浏览器不渲染。
+    # 导致某些严格浏览器不渲染。P3-28：8MB 图的 md5+写盘是同步重操作，挪进
+    # 线程池，不卡事件循环。
+    import asyncio
+
     ext = _detect_ext(data, up.filename or "")
-    digest = hashlib.md5(data).hexdigest()[:16]
-    fname = f"vision_{digest}{ext}"
     img_dir = config.data_dir / "imgs"
-    try:
-        img_dir.mkdir(parents=True, exist_ok=True)
-        (img_dir / fname).write_bytes(data)
-    except OSError:
+
+    def _persist() -> str | None:
+        try:
+            digest = hashlib.md5(data).hexdigest()[:16]
+            fname = f"vision_{digest}{ext}"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            (img_dir / fname).write_bytes(data)
+            return fname
+        except OSError:
+            return None
+
+    fname = await asyncio.to_thread(_persist)
+    if fname is None:
         # 落盘失败不阻塞识图：仅返回描述，前端退化为纯文本
         return {"ok": True, "description": text}
     return {"ok": True, "description": text, "image_url": f"/api/images/{fname}"}
