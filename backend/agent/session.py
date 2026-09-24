@@ -489,6 +489,40 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
 
         _llm.reset_task_usage(budget=_cfg.agent_task_token_budget)
 
+        # §24.3-2 执行轨迹：每步工具/轮次/耗时写进 task.log（面板时间线展示）
+        rounds = {"n": 0}
+        pending_tools: dict[str, float] = {}
+
+        async def _trace(ev: dict) -> None:
+            try:
+                etype = str(ev.get("type") or "")
+                if etype == "thinking":
+                    rounds["n"] += 1
+                    task.log.append({
+                        "ts": time.time(), "type": "round",
+                        "content": f"第 {rounds['n']} 轮：思考与工具选择",
+                    })
+                elif etype == "tool":
+                    pending_tools[str(ev.get("name") or "")] = time.time()
+                elif etype == "tool_done":
+                    name = str(ev.get("name") or "")
+                    t0 = pending_tools.pop(name, None)
+                    entry: dict = {
+                        "ts": time.time(), "type": "tool", "content": name,
+                        "ok": bool(ev.get("ok")),
+                    }
+                    if ev.get("error_code"):
+                        entry["error_code"] = str(ev["error_code"])
+                    if t0 is not None:
+                        entry["duration_sec"] = round(time.time() - t0, 2)
+                    task.log.append(entry)
+                else:
+                    return
+                _save(task)
+            except Exception:
+                pass  # 轨迹记录失败绝不影响任务执行
+
+        started_at = time.time()
         final = await asyncio.wait_for(
             run_tool_round(
                 messages,
@@ -496,10 +530,16 @@ async def run_task(task_id: str, *, max_rounds: int = MAX_TOOL_ROUNDS,
                 chat_native=lambda ms, tools: chat_native(ms, tools),
                 max_loops=max_rounds,
                 tool_filter=_mcp_filter_for(task.objective),
+                on_progress=_trace,
             ),
             timeout=TASK_TIMEOUT,
         )
         used_tokens = _llm.task_tokens()
+        task.log.append({
+            "ts": time.time(), "type": "elapsed",
+            "content": f"执行完成：{rounds['n']} 轮 / {time.time() - started_at:.1f}s / "
+                       f"tokens≈{used_tokens}",
+        })
         # 执行期间用户可能点了取消：保留 cancelled 状态，不覆盖为 done。
         # （正在进行的 LLM 调用无法中断，但最终状态以用户选择为准。）
         fresh = _load(task_id)
@@ -704,7 +744,7 @@ def to_dict(task: AgentTask) -> dict:
         "max_attempts": task.max_attempts,
         "step_confirmations": task.step_confirmations,
         "pending_steps": pending_steps(task),
-        "log": task.log[-20:],
+        "log": task.log[-50:],
         "result": task.result,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
