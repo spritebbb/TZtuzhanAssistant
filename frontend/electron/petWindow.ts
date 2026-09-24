@@ -142,7 +142,28 @@ export function createPetWindowManager(deps: PetWindowDeps): PetWindowManager {
       },
     })
     win.setVisibleOnAllWorkspaces?.(false)
-    await win.loadURL(deps.resolveUrl())
+    // 透明窗口默认整体点击穿透（forward: true 让渲染层仍收得到 mousemove
+    // 用于恢复交互）；立绘命中检测在 PetView 里按位置切换（P1-9：此前从未
+    // 开启穿透，窗口矩形是隐形点击黑洞）
+    win.setIgnoreMouseEvents(true, { forward: true })
+    try {
+      await win.loadURL(deps.resolveUrl())
+    } catch {
+      // P3-54：快速开关时窗口可能在加载期间被销毁，loadURL 会以
+      // "Object has been destroyed" 拒绝——此时 closed/cleanup 监听尚未
+      // 注册，必须在这里直接销毁并复位状态，不让未处理拒绝冒泡到
+      // ipcMain.handle，也不留下隐藏的孤儿窗口。
+      if (win && !win.isDestroyed()) win.destroy()
+      win = null
+      state.close()
+      return false
+    }
+    if (!win || win.isDestroyed()) {
+      if (win && !win.isDestroyed()) win.destroy()
+      win = null
+      state.close()
+      return false
+    }
     win.setPosition(Math.round(clamped.x), Math.round(clamped.y), false)
     win.showInactive() // 不抢焦点
     win.on('moved', saveCurrentPrefs)

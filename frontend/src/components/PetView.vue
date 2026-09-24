@@ -4,10 +4,13 @@
  *
  * - 复用现有立绘资源（/persona/full/{state} 五档）与 VisualState，不复制人格数据；
  * - 拖动经 tuzhanPet.drag(dx,dy) 走 IPC（主进程按工作区 clamp）；
- * - Escape 关闭；透明区点击穿透由主进程 setIgnoreMouseEvents 控制；
+ * - Escape 关闭；透明区点击穿透：默认穿透，鼠标悬停在立绘上时恢复交互
+ *   （P1-9：此前从未开启穿透，260×360 的透明窗口是隐形点击黑洞）；
  * - reduced-motion 适配：呼吸动画关闭。
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+
+import { portraitMoodFor, type PortraitMood } from '../utils/portrait'
 
 interface PetBridge {
   drag: (delta: { dx: number; dy: number }) => void
@@ -19,24 +22,54 @@ interface PetBridge {
 const props = withDefaults(defineProps<{ backendBase?: string }>(), { backendBase: '' })
 
 const bridge = (window as unknown as { tuzhanPet?: PetBridge }).tuzhanPet ?? null
-const visualState = ref('calm')
+// 合法初值必须是后端五档白名单之一（low/plain/lazy/happy/excited）；
+// 旧版 'calm' 不在白名单里，/persona/full/calm 404，立绘永远加载失败（P1-8）
+const visualState = ref<PortraitMood>('plain')
 const personaName = ref('')
 const dragging = ref(false)
 let last = { x: 0, y: 0 }
 let pollTimer: number | null = null
+
+function extractPersonaName(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const obj = value as { name?: unknown; id?: unknown }
+    return String(obj.name ?? obj.id ?? '')
+  }
+  return typeof value === 'string' ? value : ''
+}
 
 async function refreshMeta(): Promise<void> {
   try {
     const resp = await fetch(`${props.backendBase}/api/meta?session_id=`)
     if (!resp.ok) return
     const data = await resp.json()
-    if (typeof data.visual_state === 'string' && data.visual_state) {
-      visualState.value = data.visual_state
+    // /api/meta 的 visual_state 是结构化对象（presence.py），立绘档位从
+    // mood.value 走与主窗口相同的 portraitMoodFor 映射（P1-8）
+    const moodValue = Number(data?.mood?.value ?? 60)
+    if (Number.isFinite(moodValue)) {
+      visualState.value = portraitMoodFor(moodValue)
     }
-    personaName.value = String(data.persona || '')
+    personaName.value = extractPersonaName(data?.persona)
   } catch {
     /* 后端未起时保持上一帧立绘 */
   }
+}
+
+function setIgnore(ignore: boolean): void {
+  if (!bridge) return
+  bridge.toggleIgnoreMouse(ignore)
+}
+
+/** 鼠标命中检测：悬在立绘上才接管鼠标，其余区域穿透给桌面。 */
+function updateIgnoreOnMove(ev: MouseEvent): void {
+  if (!bridge || dragging.value) return
+  const el = document.querySelector('.pet-portrait')
+  let over = false
+  if (el) {
+    const r = el.getBoundingClientRect()
+    over = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom
+  }
+  setIgnore(!over)
 }
 
 function onPointerDown(ev: PointerEvent): void {
@@ -53,6 +86,7 @@ function onPointerMove(ev: PointerEvent): void {
 }
 
 function onPointerUp(): void {
+  if (dragging.value && bridge) bridge.toggleIgnoreMouse(true) // 松手后交还穿透，下一帧 mousemove 会按位置校正
   dragging.value = false
 }
 
@@ -64,11 +98,15 @@ onMounted(() => {
   void refreshMeta()
   pollTimer = window.setInterval(refreshMeta, 60_000)
   window.addEventListener('keydown', onKeydown)
+  // 默认整体穿透（窗口其余 260×360 的透明区域不该挡住桌面点击）
+  setIgnore(true)
+  window.addEventListener('mousemove', updateIgnoreOnMove)
 })
 
 onBeforeUnmount(() => {
   if (pollTimer) window.clearInterval(pollTimer)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('mousemove', updateIgnoreOnMove)
 })
 </script>
 

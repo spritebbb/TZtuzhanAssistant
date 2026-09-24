@@ -18,7 +18,12 @@ beforeEach(() => {
   }
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,
-    json: async () => ({ visual_state: 'happy', persona: '菟菚' }),
+    json: async () => ({
+      // /api/meta 真实契约：mood.value 数值 + visual_state 结构化对象（presence.py）
+      mood: { value: 70, label: '开心', emoji: '😄' },
+      visual_state: { persona_id: 'default', mood_label: '开心' },
+      persona: '菟菚',
+    }),
   })))
 })
 
@@ -28,13 +33,23 @@ afterEach(() => {
 })
 
 describe('L10 PetView', () => {
-  it('按 /api/meta 的 visual_state 渲染对应档位立绘', async () => {
+  it('按 /api/meta 的 mood.value 映射五档立绘（visual_state 是对象不可直接用）', async () => {
     const wrapper = mount(PetView)
     await new Promise((r) => setTimeout(r, 0)) // 等 fetch 完成
     const img = wrapper.get('.pet-portrait')
     expect(img.attributes('src')).toContain('/persona/full/happy')
+    expect(img.attributes('src')).not.toContain('/persona/full/calm') // calm 不在后端白名单
     expect(img.attributes('alt')).toContain('菟菚')
     wrapper.unmount() // 解除 window 级监听，避免泄漏到后续用例
+  })
+
+  it('挂载即开启整体穿透，窗口 mousemove 按命中切换（P1-9 点击黑洞）', async () => {
+    const wrapper = mount(PetView)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(petCalls.toggleIgnoreMouse).toHaveBeenCalledWith(true) // 默认穿透
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 500, clientY: 500 }))
+    expect(petCalls.toggleIgnoreMouse).toHaveBeenLastCalledWith(true) // 立绘外保持穿透
+    wrapper.unmount()
   })
 
   it('Escape 走桥关闭（IPC 白名单内的 pet:close）', async () => {
@@ -54,6 +69,7 @@ describe('L10 PetView', () => {
     expect(petCalls.drag).toHaveBeenCalledWith({ dx: 40, dy: 18 })
     expect(petCalls.drag).toHaveBeenCalledWith({ dx: 10, dy: 12 })
     await wrapper.trigger('pointerup')
+    expect(petCalls.toggleIgnoreMouse).toHaveBeenLastCalledWith(true) // 松手交还穿透
     await wrapper.trigger('pointermove', { clientX: 500, clientY: 500 })
     expect(petCalls.drag).toHaveBeenCalledTimes(2) // 松开后不再拖
     wrapper.unmount()
