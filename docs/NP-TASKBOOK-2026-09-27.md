@@ -88,6 +88,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__ --reporter=dot ;;
 
 ## NP-03 会话重命名（修"五个同名会话"导航瘫痪）
 
+> 状态：**已完成** @ `db37457`（2026-09-27，ZCode 实施，VERIFY 全绿：后端脚本 6/6 + 前端 4/4 + vue-tsc 0。自行补充决策：①测试遵循仓库「脚本 + main()」约定（pytest.ini 只收集 5 个指定文件），VERIFY 命令相应为 `python -m tests.test_session_rename`；②核实单一会话模式下侧栏列表实为归档列表，重命名主体是归档 + 当前会话标题，与任务书路由设计一致；③错误语义对齐本日同步的 400/404/422 真实状态码约定，缺 title 字段由 pydantic 层 422）
+
 **背景**：自动命名撞车（截图中五条「聊聊菟丝子吧」），`SessionList.vue` 无重命名入口。已核实：`backend/api/sessions.py` 现有路由不含 rename；`backend/session/store.py` 的 `sessions`/`archives` 表均有 `title` 字段——**无 schema 变更**。
 
 **涉及文件**（修改）：
