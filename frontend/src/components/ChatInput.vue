@@ -11,7 +11,7 @@ const emit = defineEmits<{
   file: [f: File | null]
 }>()
 
-defineProps<{ busy: boolean; streaming: boolean; personaName?: string }>()
+const props = defineProps<{ busy: boolean; streaming: boolean; personaName?: string }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -85,12 +85,14 @@ onBeforeUnmount(() => {
   void sttBridge?.cancel()
 })
 
-// === Enter 发送（NP-01）===
+// === Enter 发送（NP-01/NP-02）===
 // 中文输入法组合中的 Enter（选词/上屏）不发送，且不拦截默认行为（否则上屏失效）；
-// keyCode 229 兜底旧式 IME 实现
+// keyCode 229 兜底旧式 IME 实现。
+// 生成期间允许预打字（NP-02），但 Enter 不发送也不产生换行。
 function onEnterKey(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
   e.preventDefault()
+  if (props.busy) return
   emit('send')
 }
 
@@ -172,7 +174,7 @@ function useShortcut(s: Shortcut) {
         </svg>
       </button>
       <span v-if="sttHint" class="stt-hint">{{ sttHint }}</span>
-      <textarea v-model="input" :disabled="busy" rows="1" :aria-label="'给' + (personaName || '助手') + '的消息'" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact="onEnterKey"></textarea>
+      <textarea v-model="input" rows="1" :aria-label="'给' + (personaName || '助手') + '的消息'" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact="onEnterKey"></textarea>
       <button v-if="streaming" class="btn stop" aria-label="停止生成" @click="emit('stop')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
