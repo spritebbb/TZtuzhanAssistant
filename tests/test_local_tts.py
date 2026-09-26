@@ -234,7 +234,9 @@ def test_schema_v45() -> None:
     from backend.core.userdb import _SCHEMA_VERSION
 
     version = db.conn.execute("PRAGMA user_version").fetchone()[0]
-    assert _SCHEMA_VERSION == 45 and version == 45, f"schema 应为 v45，实际 {version}"
+    # v45 引入 voice_profiles/manifests；v46 追加 manager_memories（P0-1）。
+    # 断言与当前 _SCHEMA_VERSION 一致即可，后续 bump 不必改本测试。
+    assert version == _SCHEMA_VERSION >= 45, f"schema 应 ≥v45 且与代码一致，实际 user_version={version} code={_SCHEMA_VERSION}"
     for table in ("voice_profiles", "voice_manifests"):
         row = db.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
