@@ -432,8 +432,10 @@ async def save_session(
         db.conn.execute(
             "INSERT INTO tavern_sessions (id, user_id, card_name, summary, turns_json, played_at, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, turns_json=excluded.turns_json",
-            (sid, user_id, card_name, summary, turns_json, now, now),
+            "ON CONFLICT(id) DO UPDATE SET "
+            "summary=excluded.summary, turns_json=excluded.turns_json, played_at=excluded.played_at "
+            "WHERE tavern_sessions.user_id=excluded.user_id",
+            (sid, user_id, card_name, summary, turns_json, now, now),  # P3-47：跨命名空间不复用他人局
         )
         db.conn.commit()
 

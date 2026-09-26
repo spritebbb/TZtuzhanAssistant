@@ -232,6 +232,10 @@ def apply_repair(user_id: str, *, cause_type: str, cause_id: str,
     items = [i for i in items if i.intensity >= EMOTION_RULES["remove_below"]]
     save_emotions(user_id, items, now=now)
     repaired.append(repair_key)
+    # P3-43：终身一次的修复记录列表封顶（保留最近 200 条），防止 kv 值
+    # 多年使用单调膨胀
+    if len(repaired) > 200:
+        repaired = repaired[-200:]
     _kv_set_json(user_id, KV_REPAIRS, {"format_version": 1, "repaired": repaired})
     return items
 

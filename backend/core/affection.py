@@ -5,6 +5,12 @@ v2 优化：
 - 惩罚调优：刷屏阈值放宽、单日扣分上限、辱骂分级
 - 恋人羁绊等级：眷恋(75-84) / 热恋(85-94) / 白头(95-100)
 - 体验感：进度条、好感变动自然融入对话
+
+【P3-38 行为须知】自 P2-01（M9 ADR）起本模块全部即时规则仅 legacy 留痕：
+update_affection 只写 affection_log（reason 带 [legacy] 前缀），不再修改
+users.affection/trust/intimacy。两维变化只走 apply_relationship_event /
+set_affection_absolute。下文所有「加分/扣分」描述均为审计流水语义，
+不改变真实数值。
 """
 from collections import deque
 from datetime import date, datetime, timedelta
