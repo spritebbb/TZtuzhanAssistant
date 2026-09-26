@@ -74,13 +74,21 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
 
 
 def match_spec(key: str) -> KvKeySpec | None:
-    """把实际键匹配到登记项：先精确匹配，再按 {占位} 模板前缀匹配。"""
+    """把实际键匹配到登记项：先精确匹配，再按 {占位} 模板前缀匹配（最长前缀优先）。
+
+    P3-9：此前按声明顺序首个命中即返回——泛模式 `initiative:{day}:{user_id}`
+    的前缀 "initiative:" 排在三个更具体的 `initiative:archive_suggest:{day}`
+    等之前，导致这三个每日键被错误归类到 proactive_policy（导出审计的
+    模块/用途元数据失真）。
+    """
     if key in {spec.pattern for spec in KV_KEY_SPECS}:
         return next(spec for spec in KV_KEY_SPECS if spec.pattern == key)
+    best: tuple[int, KvKeySpec] | None = None
     for spec in KV_KEY_SPECS:
         if "{" not in spec.pattern:
             continue
         prefix = spec.pattern.split("{", 1)[0]
         if prefix and key.startswith(prefix):
-            return spec
-    return None
+            if best is None or len(prefix) > best[0]:
+                best = (len(prefix), spec)
+    return best[1] if best else None

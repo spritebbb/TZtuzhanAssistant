@@ -191,7 +191,15 @@ def _media_candidates() -> set[str]:
 
 
 def _names_in(value: str, candidates: set[str]) -> set[str]:
-    return {name for name in candidates if name in value}
+    # P3-10：子串匹配误报（候选 1.png 会命中包含 21.png 的文本），方向是
+    # 「误保留」——重置后本应删除的私密图片残留。按路径/标点分隔符切词后
+    # 精确匹配文件名。
+    if not value:
+        return set()
+    import re as _re
+
+    tokens = set(_re.split(r"[\/:;\"'\[\](){}<>|,\s]+", value))
+    return {name for name in candidates if name in tokens}
 
 
 def _collect_user_media(

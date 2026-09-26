@@ -841,7 +841,7 @@ CREATE TABLE IF NOT EXISTS memory_annotations (
     origin TEXT NOT NULL DEFAULT 'observed',   -- observed / user_teaching / inference
     confidence REAL NOT NULL DEFAULT 0.7,
     source_event_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))  -- P3-11：与全库本地时间系一致
 );
 CREATE INDEX IF NOT EXISTS idx_memory_annotations_fact
     ON memory_annotations(user_id, fact_id);
@@ -851,7 +851,7 @@ CREATE TABLE IF NOT EXISTS first_occurrences (
     event_type TEXT NOT NULL,
     topic_key TEXT NOT NULL,
     source_event_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),  -- P3-11
     UNIQUE (user_id, event_type, topic_key)
 );
 -- F01 问候变体冷却（runtime，不导出）：同一变体 7 天冷却，记录上次使用的
@@ -1144,6 +1144,26 @@ def _locked(method):
     return wrapper
 
 
+# P3-3：级联触发器单独成常量——UserDB.reset() 的「删文件重建」分支此前只跑
+# _SCHEMA 不跑本脚本，同进程 reset 后删产物/事件不再级联清理（重启才恢复）。
+_TRIGGERS_SQL = """
+CREATE TRIGGER IF NOT EXISTS room_artifact_deleted AFTER DELETE ON artifacts BEGIN
+  DELETE FROM artifact_placements WHERE user_id=OLD.user_id AND artifact_id=OLD.id;
+  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='artifact' AND source_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS room_event_deleted AFTER DELETE ON relationship_events BEGIN
+  DELETE FROM artifacts WHERE user_id=OLD.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS room_event_invalidated AFTER UPDATE OF status ON relationship_events
+WHEN NEW.status!='active' BEGIN
+  DELETE FROM artifacts WHERE user_id=NEW.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS aesthetic_opinion_deleted AFTER DELETE ON knowledge_opinions BEGIN
+  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='knowledge_opinion' AND source_id=OLD.id;
+END;
+"""
+
+
 class UserDB:
     def __init__(self) -> None:
         # 写锁：pipeline 按用户串行，但 daily/profile/mood/greeting/agent 等
@@ -1157,7 +1177,15 @@ class UserDB:
     def conn(self) -> sqlite3.Connection:
         """当前连接（首次访问触发惰性开库；锁定+加密态抛 DatabaseLockedError）。"""
         self._ensure_connected()
-        return self._conn  # type: ignore[return-value]
+        # P3-4：取连接也要持锁——close()（锁端点并发）可能刚把 _conn 关闭置
+        # None，无锁快路径会拿到已关闭连接。RLock 同线程可重入，既有
+        # @_locked 方法内使用不受影响。
+        with self._lock:
+            if self._conn is None:
+                from ..storage.runtime import DatabaseLockedError
+
+                raise DatabaseLockedError("数据库连接已关闭（应用锁定中）")
+            return self._conn
 
     def _ensure_connected(self) -> None:
         if self._conn is not None:
@@ -1195,22 +1223,7 @@ class UserDB:
         _enable_wal(self.conn)
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
-        self.conn.executescript("""
-        CREATE TRIGGER IF NOT EXISTS room_artifact_deleted AFTER DELETE ON artifacts BEGIN
-          DELETE FROM artifact_placements WHERE user_id=OLD.user_id AND artifact_id=OLD.id;
-          DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='artifact' AND source_id=OLD.id;
-        END;
-        CREATE TRIGGER IF NOT EXISTS room_event_deleted AFTER DELETE ON relationship_events BEGIN
-          DELETE FROM artifacts WHERE user_id=OLD.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=OLD.id;
-        END;
-        CREATE TRIGGER IF NOT EXISTS room_event_invalidated AFTER UPDATE OF status ON relationship_events
-        WHEN NEW.status!='active' BEGIN
-          DELETE FROM artifacts WHERE user_id=NEW.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=NEW.id;
-        END;
-        CREATE TRIGGER IF NOT EXISTS aesthetic_opinion_deleted AFTER DELETE ON knowledge_opinions BEGIN
-          DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='knowledge_opinion' AND source_id=OLD.id;
-        END;
-        """)
+        self.conn.executescript(_TRIGGERS_SQL)
         # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
         # L02：共创壳增加 subtype 与结构化大纲列（旧库 ALTER 补齐）
         writing_columns = {
@@ -1416,12 +1429,17 @@ class UserDB:
             mood = max(target_row["mood_value"], legacy_row["mood_value"])
             mood_updated = target_row["mood_updated_at"] or legacy_row["mood_updated_at"]
             style = target_row["style_profile"] or legacy_row["style_profile"]
+            # P3-8：两维同样取 max——此前 legacy 侧的信任/亲密积累被静默丢弃，
+            # 打破 P2-01 不变量（dashboard 读 users.affection 与两维矛盾）
+            merged_trust = max(target_row["trust"] or 0, legacy_row["trust"] or 0)
+            merged_intimacy = max(target_row["intimacy"] or 0, legacy_row["intimacy"] or 0)
             self.conn.execute(
                 "UPDATE users SET affection=?, nickname_pref=?, lover_confirm=?, "
                 "first_chat_done=?, last_chat_date=?, last_batch_date=?, "
-                "mood_value=?, mood_updated_at=?, style_profile=? WHERE user_id=?",
+                "mood_value=?, mood_updated_at=?, style_profile=?, trust=?, intimacy=? "
+                "WHERE user_id=?",
                 (merged_affection, nickname, lover, first_chat, last_chat, last_batch,
-                 mood, mood_updated, style, target),
+                 mood, mood_updated, style, merged_trust, merged_intimacy, target),
             )
             self.conn.execute("DELETE FROM users WHERE user_id = ?", (legacy,))
 
@@ -2300,6 +2318,8 @@ class UserDB:
         self.conn.execute("PRAGMA synchronous = NORMAL")
         if deleted:
             self.conn.executescript(_SCHEMA)
+            # P3-3：重建后补级联触发器（_SCHEMA 不含触发器 DDL）
+            self.conn.executescript(_TRIGGERS_SQL)
             mark_schema_current(self.conn, _SCHEMA_VERSION)
         else:
             # 文件删除失败（被占用）时退化的清空路径：覆盖全部业务表
