@@ -565,6 +565,7 @@ function confirmLabel(c: string): string {
           </div>
           <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" aria-label="心情城市" :placeholder="config.mood_city || '留空不查天气'" /></div>
           <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" aria-label="启用语义检索" /></div>
+          <div class="setting-hint">开启后换了说法也能想起来（按意思匹配）；关闭则只按字面精确匹配</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
@@ -641,6 +642,7 @@ function confirmLabel(c: string): string {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
             MCP 服务器
           </div>
+          <div class="setting-hint">外挂工具接口（MCP）：给她接浏览器自动化这类外部能力。进阶功能，不配置完全不影响使用</div>
           <div class="mcp-list">
             <div v-if="mcpServers.length === 0" class="mcp-empty">暂无已注册的外部 MCP 服务器</div>
             <div v-for="s in mcpServers" :key="s.name" class="mcp-item glass-sub">

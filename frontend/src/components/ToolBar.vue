@@ -24,6 +24,15 @@ const labels: Record<string, string> = {
   memory: '记忆',
   mcp: 'MCP',
 }
+// 悬停人话说明（NP-05）：术语保留，出现处带人话
+const hints: Record<string, string> = {
+  search: '联网搜索：拿实时信息',
+  weather: '天气：她知道你所在城市的天气',
+  image: '生图：她能画画',
+  vision: '识图：发图片她看得懂',
+  memory: '记忆：你说过的话她记得',
+  mcp: '外挂工具（MCP）：接浏览器自动化这类外部能力，不用可以不管',
+}
 const failures = computed(() => [
   ...Object.entries(tools.value).filter(([, on]) => !on).map(([name]) => ({ name, label: labels[name] || name, detail: `${labels[name] || name}能力当前未配置或已关闭` })),
   ...(!backendOk.value ? [{ name: 'backend', label: '连接', detail: '后端连接失败，请检查服务是否已启动' }] : []),
@@ -90,7 +99,7 @@ onUnmounted(() => {
       </svg>
       工具
     </span>
-    <span v-for="(on, name) in tools" :key="name" class="chip" :class="on ? 'on' : 'off'" :title="on ? '已启用' : '未启用'">
+    <span v-for="(on, name) in tools" :key="name" class="chip" :class="on ? 'on' : 'off'" :title="(on ? '已启用 · ' : '未启用 · ') + (hints[name] || name)">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
         <path :d="iconPaths[name] || ''"/>
       </svg>

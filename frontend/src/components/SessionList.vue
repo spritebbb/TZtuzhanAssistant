@@ -228,7 +228,7 @@ defineExpose({ load })
 
     <!-- 底部 -->
     <div class="foot">
-      <span class="foot-text">归档 · 本机 SQLite</span>
+      <span class="foot-text">聊天记录只存在你自己的电脑上</span>
       <button class="settings-link" @click="emit('open-settings')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
