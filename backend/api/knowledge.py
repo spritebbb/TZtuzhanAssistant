@@ -37,16 +37,17 @@ async def api_knowledge_upload(file: UploadFile):
             content={"ok": False, "error": f"文件超过 {config.kb_max_file_mb}MB 上限"},
         )
     if not data:
-        return {"ok": False, "error": "文件是空的"}
+        return JSONResponse({"ok": False, "error": "文件是空的"}, status_code=400)
     try:
         doc = await asyncio.to_thread(
             knowledge.ingest_document, uid, file.filename or "未命名", data
         )
     except knowledge.KnowledgeError as e:
-        return {"ok": False, "error": str(e)}
+        # P3-26：出错不再返回 200——依赖状态码的调用方会误判成功
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     except Exception:
         logger.exception("[知识库] 上传失败：{}", file.filename)
-        return {"ok": False, "error": "文档解析入库失败"}
+        return JSONResponse({"ok": False, "error": "文档解析入库失败"}, status_code=500)
     return {"ok": True, "document": doc}
 
 
@@ -98,7 +99,7 @@ async def api_knowledge_delete(doc_id: int):
 
     uid = active_user_id()
     if not await asyncio.to_thread(knowledge.delete_document, uid, doc_id):
-        return {"ok": False, "error": "文档不存在"}
+        return JSONResponse({"ok": False, "error": "文档不存在"}, status_code=404)
     # L01：源删清阅读段（F05 地图由活动删除路径处理）
     await asyncio.to_thread(document_import.forget_for_document, uid, doc_id)
     return {"ok": True}

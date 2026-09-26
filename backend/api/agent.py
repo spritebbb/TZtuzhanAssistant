@@ -258,12 +258,17 @@ async def api_agent_schedule(task_id: str, request: Request):
                             status_code=409)
     at_ts = body.get("at_ts")
     delay = body.get("delay_minutes")
-    if at_ts is not None:
-        when = float(at_ts)
-    elif delay is not None:
-        when = _time.time() + max(0, float(delay)) * 60
-    else:
-        return JSONResponse({"ok": False, "error": "缺少 delay_minutes 或 at_ts"},
+    try:
+        if at_ts is not None:
+            when = float(at_ts)
+        elif delay is not None:
+            when = _time.time() + max(0, float(delay)) * 60
+        else:
+            return JSONResponse({"ok": False, "error": "缺少 delay_minutes 或 at_ts"},
+                                status_code=422)
+    except (TypeError, ValueError):
+        # P3-25：坏输入（如 {"at_ts": "abc"}）语义是 422 而非 500
+        return JSONResponse({"ok": False, "error": "at_ts/delay_minutes 必须是数字"},
                             status_code=422)
     updated = agent_session.schedule_task(task_id, when)
     return {"ok": True, "task": agent_session.to_dict(updated or task)}
