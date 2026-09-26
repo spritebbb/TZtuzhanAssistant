@@ -46,6 +46,61 @@ describe('ChatInput privacy mode', () => {
   })
 })
 
+describe('ChatInput Enter 发送（NP-01 IME 守卫）', () => {
+  function mountInput(busy = false) {
+    return mount(ChatInput, {
+      props: { input: '', ephemeral: false, busy, streaming: false },
+    })
+  }
+
+  function pressEnter(
+    wrapper: ReturnType<typeof mountInput>,
+    extra: Partial<KeyboardEventInit> = {},
+  ): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+      ...extra,
+    })
+    wrapper.get('textarea').element.dispatchEvent(event)
+    return event
+  }
+
+  it('普通 Enter：发送且阻止默认换行', () => {
+    const wrapper = mountInput()
+    const event = pressEnter(wrapper)
+    expect(wrapper.emitted('send')).toHaveLength(1)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('输入法组合中的 Enter（isComposing）：不发送且不拦截上屏', () => {
+    const wrapper = mountInput()
+    const event = pressEnter(wrapper, { isComposing: true })
+    expect(wrapper.emitted('send')).toBeUndefined()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('keyCode 229（旧式 IME 信号）：不发送', () => {
+    const wrapper = mountInput()
+    const legacy = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    })
+    Object.defineProperty(legacy, 'keyCode', { value: 229 })
+    wrapper.get('textarea').element.dispatchEvent(legacy)
+    expect(wrapper.emitted('send')).toBeUndefined()
+    expect(legacy.defaultPrevented).toBe(false)
+  })
+
+  it('Shift+Enter：不发送（换行交给默认行为）', () => {
+    const wrapper = mountInput()
+    pressEnter(wrapper, { shiftKey: true })
+    expect(wrapper.emitted('send')).toBeUndefined()
+  })
+})
+
 describe('ChatInput 本地语音输入（L09）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
