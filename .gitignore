@@ -47,6 +47,7 @@ AGENTS.md
 TODO.md
 docs/AGENT-COORDINATION.md
 docs/HANDOFF-TO-CODEX.md
+docs/archive/HANDOFF-TO-CODEX.md
 
 # Playwright MCP 运行产物（会话/截图）
 .playwright-mcp/
