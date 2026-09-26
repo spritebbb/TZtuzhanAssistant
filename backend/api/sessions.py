@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """会话接口 + 归档接口（单一会话模式）。
 
-单一会话模式下只有一个固定会话（id='current'），因此不再提供
-新建/删除/重命名/列表/搜索等多会话 CRUD，仅保留：
+单一会话模式下只有一个固定会话（id='current'），因此不提供
+新建/删除/列表/搜索等多会话 CRUD，仅保留：
 - 归档（结束并归档当前会话 / 归档列表 / 归档详情）
 - 读取当前会话消息（GET /{session_id}，session_id 恒为 'current'）
 - 导出当前会话（markdown / json）
+- 重命名（NP-03：session_id='current' 改当前会话标题，否则改对应归档标题；
+  自动命名只占位「新会话」时才回填，自定义标题不会被覆盖）
 """
 from __future__ import annotations
 
@@ -13,12 +15,14 @@ import datetime as _dt
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from ..session.store import (
     archive_current,
     get_archive,
     get_messages,
     list_archives,
+    rename_session,
     search_archives,
 )
 
@@ -60,6 +64,25 @@ async def api_archives_get(archive_id: str):
     if data is None:
         return JSONResponse({"ok": False, "error": "归档不存在"}, status_code=404)
     return {"ok": True, "archive": data}
+
+
+class RenamePayload(BaseModel):
+    title: str
+
+
+@router.post("/{session_id}/rename")
+async def api_sessions_rename(session_id: str, payload: RenamePayload):
+    """重命名（NP-03）：'current' 改当前会话标题，其余按归档 id 改归档标题。
+
+    空标题 400、目标不存在 404——与 knowledge 等端点的真实状态码语义对齐。
+    """
+    title = (payload.title or "").strip()
+    if not title:
+        return JSONResponse({"ok": False, "error": "标题不能为空"}, status_code=400)
+    ok = await rename_session(session_id, title)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "会话或归档不存在"}, status_code=404)
+    return {"ok": True, "session_id": session_id, "title": title[:60]}
 
 
 # ---- 单一会话读取 / 导出 ----

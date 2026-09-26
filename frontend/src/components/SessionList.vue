@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, computed } from 'vue'
 import { apiFetch, getApiUrl } from '../api'
-import { listArchives, getArchive, searchArchives as apiSearchArchives, type ArchiveInfo, type Message, type ArchiveDetail, type ArchiveSearchResult } from '../api/sessions'
+import { listArchives, getArchive, searchArchives as apiSearchArchives, renameSession, type ArchiveInfo, type Message, type ArchiveDetail, type ArchiveSearchResult } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
 
 const emit = defineEmits<{
@@ -90,6 +90,45 @@ function escapeHtml(s: string): string {
 async function load() {
   archives.value = await listArchives()
   await refreshMood()
+}
+
+// === 归档重命名（NP-03：自动命名撞车后的可导航性兜底）===
+const renamingId = ref<string | null>(null)
+const renameDraft = ref('')
+const renameMsg = ref('')
+
+function startRename(a: ArchiveInfo) {
+  renamingId.value = a.id
+  renameDraft.value = a.title
+  renameMsg.value = ''
+  void nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.rename-input')
+    el?.focus()
+    el?.select()
+  })
+}
+
+function cancelRename() {
+  renamingId.value = null
+  renameDraft.value = ''
+}
+
+async function saveRename(a: ArchiveInfo) {
+  const title = renameDraft.value.trim()
+  if (!title) {
+    renameMsg.value = '标题不能为空'
+    return
+  }
+  try {
+    if (!(await renameSession(a.id, title))) {
+      renameMsg.value = '保存失败：该归档不存在'
+      return
+    }
+    a.title = title
+    cancelRename()
+  } catch {
+    renameMsg.value = '保存失败，稍后再试'
+  }
 }
 
 async function refreshMood() {
@@ -209,12 +248,29 @@ defineExpose({ load })
           :class="{ active: viewing?.id === a.id }"
           @click="viewArchive(a)"
         >
-          <span class="t">{{ a.title }}</span>
-          <span class="meta">{{ a.message_count }} 条</span>
+          <template v-if="renamingId === a.id">
+            <input
+              v-model="renameDraft"
+              class="rename-input"
+              aria-label="重命名归档"
+              maxlength="60"
+              @click.stop
+              @keydown.enter.prevent="saveRename(a)"
+              @keydown.esc.prevent="cancelRename"
+            />
+            <button class="rename-btn" aria-label="保存重命名" title="保存" @click.stop="saveRename(a)">✓</button>
+            <button class="rename-btn" aria-label="取消重命名" title="取消" @click.stop="cancelRename">✕</button>
+          </template>
+          <template v-else>
+            <span class="t">{{ a.title }}</span>
+            <span class="meta">{{ a.message_count }} 条</span>
+            <button class="rename-btn rename-start" aria-label="重命名归档" title="重命名" @click.stop="startRename(a)">✎</button>
+          </template>
         </div>
       </div>
     </template>
 
+    <div v-if="renameMsg" class="search-note">{{ renameMsg }}</div>
     <div v-if="searchMsg && !searchResult.length" class="search-note">{{ searchMsg }}</div>
 
     <!-- 心情卡片 -->
@@ -474,6 +530,35 @@ defineExpose({ load })
   color: var(--text-faint);
   flex-shrink: 0;
 }
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--edge-active);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 3px 6px;
+  outline: none;
+}
+.rename-btn {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.rename-btn:hover {
+  color: var(--primary-text);
+  background: var(--primary-soft);
+}
+.sitem .rename-start { opacity: 0.4; }
+.sitem:hover .rename-start,
+.sitem:focus-within .rename-start { opacity: 1; }
 .sitem-preview {
   flex-basis: 100%;
   font-size: 0.72rem;
