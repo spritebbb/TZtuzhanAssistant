@@ -35,10 +35,10 @@ async def api_plugin_enable(name: str):
     # 先临时移除禁用标记（load_plugin 会因 disabled 跳过），加载成功后再持久化
     loader.set_disabled(name, False)
     path = loader.PLUGINS_DIR / f"{name}.py"
-    # P3-28：load_plugin 会 exec 插件模块（顶层代码量不受控），挪进线程池
-    import asyncio
-
-    ok = await asyncio.to_thread(loader.load_plugin, path)
+    # 注：load_plugin 不挪线程池——插件顶层代码会用 ctx.schedule 注册定时
+    # 任务，其要求在事件循环所在线程执行（工作线程无 running loop 会直接
+    # RuntimeError）。插件加载是低频管理操作，exec 的阻塞时长可接受。
+    ok = loader.load_plugin(path)
     st = loader.plugin_states().get(name, {})
     if not ok:
         # 加载失败：回滚禁用标记，保持「禁用」状态，避免热加载反复重试半注册插件
@@ -71,9 +71,7 @@ async def api_plugin_reload(name: str):
         return JSONResponse({"ok": False, "error": f"插件不存在: {name}"}, status_code=404)
     if name in loader.plugin_states() and loader.plugin_states()[name].get("disabled"):
         return JSONResponse({"ok": False, "error": "插件已禁用，请先启用"}, status_code=400)
-    import asyncio
-
-    ok = await asyncio.to_thread(loader.load_plugin, path)
+    ok = loader.load_plugin(path)
     st = loader.plugin_states().get(name, {})
     if not ok:
         return JSONResponse({
