@@ -164,6 +164,18 @@ def create_app() -> FastAPI:
             logger.warning("[安全] 拦截 null Origin 写请求：method={} path={}",
                            method, request.url.path)
             return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
+        if origin and origin not in _TRUSTED_ORIGINS:
+            # P3-27：带 Origin 但没有 Sec-Fetch-Site 头（旧浏览器不发送）的
+            # 请求此前直通——fail-closed 兜住防御纵深缺口。同源放行不依赖
+            # 白名单：Origin 的 authority 与 Host 头一致即真同源（LAN 直接
+            # IP 访问的场景 Origin 不在白名单里但确实同源）。
+            origin_authority = origin.split("://", 1)[-1]
+            host_header = (request.headers.get("host") or "").strip().lower()
+            if origin_authority == host_header:
+                return await call_next(request)
+            logger.warning("[安全] 拦截无 Sec-Fetch-Site 的跨站写：method={} origin={} path={}",
+                           method, origin, request.url.path)
+            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
         return await call_next(request)
 
     # 受控端点统一鉴权（来源 IP 语义，见 tools/safety.remote_token_ok_by_peer）：

@@ -304,6 +304,10 @@ async def api_chat(
                 except ResetSuperseded:
                     await q.put(("__error__", "请求因重置而取消"))
                     return
+                except Exception:
+                    # P3-24：兜底写库自身故障（磁盘满/库锁）不允许冲出处理器——
+                    # 否则 q 永远收不到终止帧，前端永久等待
+                    logger.exception("[chat] 部分文本落库失败（双重故障，会话 {}）", session_id)
             # 面向用户的通用错误提示（不泄露内部异常原文），并作为 error 帧回传。
             note = "回复生成中断，请重试"
             if not ephemeral:
@@ -313,6 +317,9 @@ async def api_chat(
                 except ResetSuperseded:
                     await q.put(("__error__", "请求因重置而取消"))
                     return
+                except Exception:
+                    logger.exception("[chat] 错误提示落库失败（双重故障，会话 {}）", session_id)
+            # P3-24：无论落库成败，终止帧必须入队
             await q.put(("__error__", note))
         finally:
             current_sse_push.set(None)
