@@ -119,6 +119,8 @@ VERIFY: .venv/Scripts/python -m pytest tests/test_session_rename.py -q ;; cd fro
 
 ## NP-04 欢迎卡导流重排 + 初见预期管理
 
+> 状态：**已完成** @ `ef198c1`（2026-09-27，ZCode 实施，VERIFY 全绿：ChatView 5/5 + vue-tsc 0。自行补充决策：①预期文案改为人物中立版「你说过的话她都记着——关系是攒出来的，别急。」——不用任务书原稿的「菟菚慢热」，因为人格可切换，慢热是菟菚特质而非系统事实；②测试并入既有 `ChatView.test.ts`（复用其 mock 与 mountView），未新建 welcome 测试文件；③摸排发现 App.vue 顶栏本无 MCP 图标，该假设已按实际布局修正）
+
 **背景**：欢迎卡三个 chips（`ChatView.vue:717-719`，现为 查天气/画张图/聊菟丝子）没有一个指向产品最大差异点（记忆）和最好用的新手工具（能力演示，触发词「新手教程」）；新玩家也无从知道"菟菚慢热"。已核实 chips 就是 `input = '...'` 草稿预填模式，扩展成本极低。
 
 **涉及文件**（修改）：
@@ -148,6 +150,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/ChatView.welcome.
 ---
 
 ## NP-05 黑话翻译层（纯文案，不动逻辑）
+
+> 状态：**已完成** @ `e52fb8c`（2026-09-27，ZCode 实施，VERIFY 全绿：jargon 4/4 + ToolBar 3/3 + vue-tsc 0。摸排结论：SQLite 全前端仅 1 处用户可见（已改）；SSE/声纹/embedding/stdio 仅存在于代码注释（非用户可见，未动）；MCP 人话括注落在 ToolBar 悬停 hints、SettingsPanel 小节副标题；App.vue 顺带把「token 用量」改为「AI 消耗统计」、任务代理 title 补派活示例）
 
 **背景**：UI 直接暴露工程术语，新玩家每见一个词交一次理解税。已核实实例：主界面左下「归档 · 本机 · SQLite」（截图）、顶栏 MCP 图标全靠 title 辨识（`App.vue:407-476`）。
 
