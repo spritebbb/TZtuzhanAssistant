@@ -14,7 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_watch.sql"
-TARGET_VERSION = 45  # v45: P3-03 本地声纹（voice_profiles/voice_manifests）
+
+
+def _target_version() -> int:
+    """跟随代码的当前 schema 版本（v45 引入声纹表，v46 追加 manager_memories），
+    升级链 v40 → 当前版本每次 bump 自动适用。"""
+    from backend.core.userdb import _SCHEMA_VERSION
+
+    return _SCHEMA_VERSION
+
+
+TARGET_VERSION = _target_version()
 
 
 def _root() -> Path:
@@ -76,7 +86,7 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     before_count = conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0]
     conn.close()
 
-    backups = list((data_root / "backups").glob("schema-bot-v40-to-v45-*/bot.db"))
+    backups = list((data_root / "backups").glob(f"schema-bot-v40-to-v{TARGET_VERSION}-*/bot.db"))
     assert len(backups) == 1, backups
     old = sqlite3.connect(backups[0])
     assert _version(old) == 40
@@ -86,7 +96,7 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     old.close()
 
     _run_import(data_root)
-    after_backups = list((data_root / "backups").glob("schema-bot-v40-to-v45-*/bot.db"))
+    after_backups = list((data_root / "backups").glob(f"schema-bot-v40-to-v{TARGET_VERSION}-*/bot.db"))
     conn = sqlite3.connect(db_path)
     assert len(after_backups) == 1
     assert _version(conn) == TARGET_VERSION
