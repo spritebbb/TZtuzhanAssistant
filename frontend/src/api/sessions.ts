@@ -121,6 +121,18 @@ export async function resetUser(deep = false): Promise<ResetStats> {
   return d.reset ?? { userdb_tables: 0, vector: 0, mem0: 0, media: 0, archives: 0, backups: 0, tts_cache: 0, session_msgs: 0 }
 }
 
+/** 重命名（NP-03）：id='current' 改当前会话标题，否则改对应归档标题。 */
+export async function renameSession(id: string, title: string): Promise<boolean> {
+  const r = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!r.ok) return false
+  const d = await r.json()
+  return !!d.ok
+}
+
 /** 归档列表（只读回看）。 */
 export async function listArchives(): Promise<ArchiveInfo[]> {
   const r = await apiFetch('/api/sessions/archives')

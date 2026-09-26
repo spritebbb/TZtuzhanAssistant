@@ -209,6 +209,32 @@ def _append_sync(session_id: str, messages: list[dict]) -> bool:
         conn.close()
 
 
+# ---- 重命名（NP-03：自动命名撞车后的可导航性兜底）----
+
+def _rename_sync(session_id: str, title: str) -> bool:
+    """重命名：session_id='current' 改当前会话标题，否则视为归档 id 改归档标题。
+
+    自定义标题上限 60 字（与自动标题的 20 字上限区分）。
+    返回是否有行被更新；标题为空属于调用方（API 层）校验失误，防御性返回 False。
+    """
+    title = (title or "").strip()[:60]
+    if not title:
+        return False
+    conn = _connect()
+    try:
+        if session_id == CURRENT_SESSION_ID:
+            cur = conn.execute(
+                "UPDATE sessions SET title=?, updated_at=? WHERE id=?",
+                (title, time.time(), session_storage_id(session_id)),
+            )
+        else:
+            cur = conn.execute("UPDATE archives SET title=? WHERE id=?", (title, session_id))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 # ---- 归档（单一会话模式下，会话结束 → 打包存入 archives）----
 
 def _archive_current_sync() -> dict | None:
@@ -410,6 +436,11 @@ async def message_count(session_id: str) -> int:
 async def append_messages(session_id: str, messages: list[dict]) -> bool:
     async with _lock:
         return await asyncio.to_thread(_append_sync, session_id, messages)
+
+
+async def rename_session(session_id: str, title: str) -> bool:
+    async with _lock:
+        return await asyncio.to_thread(_rename_sync, session_id, title)
 
 
 def _append_proactive_sync(session_id: str, text: str, image: str | None = None) -> bool:
