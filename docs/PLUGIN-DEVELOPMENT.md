@@ -440,7 +440,7 @@ python -m pytest tests/test_pluginized_tools.py tests/test_plugins.py
 ```
 
 7. 交付时在 `PLUGIN_META` 里给出版本与说明；涉及行为的改动同步更新
-   `HARNESS_ROADMAP.md` 的“插件开发规范”或本文件。
+   `archive/HARNESS_ROADMAP.md` 的“插件开发规范”或本文件。
 
 ---
 

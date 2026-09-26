@@ -473,7 +473,7 @@ persona-菟菚.md               # 人格源文件
 - 当前版本：**v3.1.0**（schema v42）
 - 后端聚合回归 **175/175**、前端 Vitest **115/115**、浏览器 E2E **15/15**、桌面外壳冒烟 **5/5**（2026-09-18 全量实跑）
 - 桌面壳依赖：Electron **44.4.2** + electron-builder **26.15.3**（`npm audit` 0 漏洞；外壳冒烟见下方「运行测试」的 `npm run test:electron`）
-- 发布门禁报告：[docs/RELEASE-QUALITY-GATE-2026-09-18.md](docs/RELEASE-QUALITY-GATE-2026-09-18.md)
+- 发布门禁报告：[docs/archive/RELEASE-QUALITY-GATE-2026-09-18.md](docs/archive/RELEASE-QUALITY-GATE-2026-09-18.md)
 - 回归由 CI 代跑，不再依赖「某天有人手动跑过一遍」：`.github/workflows/regression.yml` 在后端/测试/前端变更时自动执行
 - 运行期被降级的旁路副作用（记忆检索、联网搜索、表情包等）不再是静默日志——累计失败计数可在 `GET /api/meta` 的 `effect_stats` 字段查看
 - 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
