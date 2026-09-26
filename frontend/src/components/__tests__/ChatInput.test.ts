@@ -153,3 +153,36 @@ describe('ChatInput 本地语音输入（L09）', () => {
     expect(wrapper.emitted('update:input')?.at(-1)).toEqual(['今天天气不错'])
   })
 })
+
+describe('ChatInput 生成期间可打字（NP-02）', () => {
+  function mountBusy() {
+    return mount(ChatInput, {
+      props: { input: '', ephemeral: false, busy: true, streaming: true },
+    })
+  }
+
+  it('busy 时 textarea 不禁用，可预打草稿', async () => {
+    const wrapper = mountBusy()
+    const textarea = wrapper.get('textarea')
+    expect(textarea.attributes('disabled')).toBeUndefined()
+    await textarea.setValue('下一句先打好')
+    expect(wrapper.emitted('update:input')?.at(-1)).toEqual(['下一句先打好'])
+  })
+
+  it('busy 时 Enter 不发送也不产生换行', () => {
+    const wrapper = mountBusy()
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    })
+    wrapper.get('textarea').element.dispatchEvent(event)
+    expect(wrapper.emitted('send')).toBeUndefined()
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('busy 时发送按钮保持禁用', () => {
+    const wrapper = mountBusy()
+    expect(wrapper.get('.btn.send').attributes('disabled')).toBeDefined()
+  })
+})
