@@ -21,6 +21,8 @@
 
 ## NP-01 中文输入法回车误发送（IME composition 守卫）
 
+> 状态：**已完成** @ `51b7248`（2026-09-27，ZCode 实施，VERIFY 全绿：ChatInput 9/9 + vue-tsc 0。自行补充决策：测试并入既有 `ChatInput.test.ts` 而非新建 `ChatInput.ime.test.ts`，一组件一测试文件）
+
 **背景**：`ChatInput.vue:166` 使用 `@keydown.enter.exact.prevent="emit('send')"`，无 `isComposing` 防护。拼音输入法按 Enter 确认候选词时 keydown 照常到达，消息会带着未上屏内容被提前发送。中文产品的地基 bug。
 
 **涉及文件**（修改）：
@@ -54,6 +56,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/ChatInput.ime.tes
 ---
 
 ## NP-02 生成期间允许打字（解锁输入框 busy 锁）
+
+> 状态：**已完成** @ `91b4c1e`（2026-09-27，ZCode 实施，VERIFY 全绿：__tests__ 全量 16 文件 97 用例 + vue-tsc 0。核实：父层 `ChatView.vue:188` send 处理已有 busy 守卫，无需改动）
 
 **背景**：`ChatInput.vue:166` textarea `:disabled="busy"`，流式回复期间整个输入框禁用，用户不能预打下一句；主动消息也只能排队。新玩家解读为"卡了"。
 
