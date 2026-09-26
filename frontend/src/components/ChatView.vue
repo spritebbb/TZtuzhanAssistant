@@ -713,11 +713,13 @@ function isActive(i: number): boolean {
           <div class="eyebrow"><span></span>此刻也在这里</div>
           <div class="t">{{ props.personaName || '人格助手' }}</div>
           <div class="t-sub">我是{{ props.personaName || '你的助手' }}。说说看？</div>
+          <div class="t-hint">你说过的话她都记着——关系是攒出来的，别急。</div>
           <div class="chips">
+            <button class="hint-chip" @click="input = '新手教程'">你会什么？</button>
+            <button class="hint-chip" @click="input = '记住：我喜欢'">帮我记住一件事</button>
             <button class="hint-chip" @click="input = '帮我查一下今天襄阳的天气'">查天气</button>
-            <button class="hint-chip" @click="input = '帮我画一张好看的图'">画张图</button>
-            <button class="hint-chip" @click="input = '聊聊菟丝子吧'">聊菟丝子</button>
           </div>
+          <div class="hint-more">想自己逛 → 更多 → 能力演示</div>
         </div>
       </div>
       <MessageBubble
@@ -1124,6 +1126,8 @@ function isActive(i: number): boolean {
 }
 .empty .t { font-size: 1.18rem; color: var(--text); font-weight: 700; line-height: 1.5; letter-spacing: 0.7px; }
 .empty .t-sub { font-size: 0.88rem; color: var(--text-dim); line-height: 1.75; max-width: 310px; }
+.empty .t-hint { font-size: 0.78rem; color: var(--text-faint); margin-top: 6px; }
+.empty .hint-more { font-size: 0.72rem; color: var(--text-faint); margin-top: 10px; opacity: 0.85; }
 .chips {
   display: flex;
   gap: 8px;
