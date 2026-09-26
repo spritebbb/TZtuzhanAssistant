@@ -5,7 +5,7 @@
 """
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 
 from ..llm import chat
 from ..log import logger
@@ -47,6 +47,10 @@ def _parse_dates(resp: str) -> list[dict]:
             continue
         month, day = int(mm.group(1)), int(mm.group(2))
         if not (1 <= month <= 12 and 1 <= day <= 31):
+            continue
+        try:
+            datetime(2001, month, day)  # P3-41：真实日历校验（02-31/04-31 入库即永不触发的死数据）
+        except ValueError:
             continue
         label_val = d.get("label")
         label = str(label_val).strip()[:30] if isinstance(label_val, str) else ""

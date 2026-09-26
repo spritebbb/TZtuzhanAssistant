@@ -512,7 +512,8 @@ def apply_impulse(
 ) -> AgentState:
     """应用一次「情绪冲击」：由 perception 计算出的各维度 delta 驱动状态演化。
 
-    情绪 delta 落到 users.mood_value；好感度 delta 落到 users.affection；
+    情绪 delta 落到 users.mood_value；好感度 delta 仅 legacy 留痕
+    （update_affection 只写 affection_log，不改 users 数值——P2-01/M9）；
     若命中情绪冲击（emotional_hit 非空），追加进情绪记忆（让她短期记得这次情绪），
     同时按强度把「事件级记忆（带原文）」写入长期（让她能精确记得这件事）。
     返回演化后的状态快照。
@@ -527,7 +528,8 @@ def apply_impulse(
         new_emotion = max(0, min(100, emotion + emotion_delta))
         db.set_mood(user_id, new_emotion)
 
-    # 好感度：叠加 delta（update_affection 内部已 clamp 0-100 并记流水）
+    # 好感度：仅记 legacy 流水（P2-01 起 update_affection 不再改 users 数值，
+    # 也无 clamp——affection_delta 的数值副作用只剩 valence 定向与张力触发）
     if affection_delta != 0:
         db.update_affection(user_id, affection_delta, affection_reason or "拟人状态演化")
 

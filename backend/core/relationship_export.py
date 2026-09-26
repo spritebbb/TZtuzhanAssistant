@@ -348,14 +348,18 @@ def preview_restore(bundle: dict, target_user_id: str) -> dict:
     }
 
 
-def _topo_order(tables: list[str]) -> list[str]:
-    """被引用的表先插入（Kahn 拓扑；引用边来自 _REFERENCE_RULES）。"""
+def _topo_order(tables: list[str], rows_of: dict[str, list[dict]]) -> list[str]:
+    """被引用的表先插入（Kahn 拓扑；引用边来自 _REFERENCE_RULES）。
+
+    P3-46：行集由参数传入——模块级全局在并发恢复时会被后到者覆盖，
+    拓扑序基于错误行集计算导致整包回滚。
+    """
     edges: dict[str, set[str]] = defaultdict(set)  # ref_table → {依赖它的表}
     indegree: dict[str, int] = {table: 0 for table in tables}
     for table, ref_fn, _column in _REFERENCE_RULES:
         if table not in indegree:
             continue
-        for row in _rows_of.get(table, []):
+        for row in rows_of.get(table, []):
             pointed = ref_fn(row)
             if pointed is None:
                 continue
@@ -400,12 +404,10 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
     id_maps: dict[str, dict] = defaultdict(dict)
     self_fixups: list[tuple[str, str, str, int, int]] = []  # (table, column, ref_table, referencing_old_id, old_ref_value)
     restored: dict[str, int] = {}
-    global _rows_of
-    _rows_of = data
 
     with db._lock:
         try:
-            for table in _topo_order(list(data)):
+            for table in _topo_order(list(data), data):
                 rows = data[table]
                 rules = [
                     (ref_fn, column)
