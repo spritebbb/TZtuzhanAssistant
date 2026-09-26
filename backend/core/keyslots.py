@@ -215,6 +215,11 @@ def write_recovery_slot(
     target = directory / RECOVERY_SLOT
     tmp = directory / f".{RECOVERY_SLOT}.tmp"
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    # P3-7：先备份旧槽再原子替换；自检失败回滚旧槽而不是只删新槽——
+    # 旧实现 os.replace 已覆盖旧槽，失败 unlink 后恢复槽归零（轮换口令
+    # 中途失败会同时失去新旧恢复能力）。
+    had_old = target.is_file()
+    old_bytes = target.read_bytes() if had_old else None
     os.replace(tmp, target)
     try:
         # 写入后实际解包自检：解不开的槽不如没有槽
@@ -223,9 +228,12 @@ def write_recovery_slot(
             raise KeySlotError("恢复槽自检不一致")
     except Exception:
         try:
-            target.unlink()
+            if had_old and old_bytes is not None:
+                target.write_bytes(old_bytes)
+            else:
+                target.unlink()
         finally:
-            raise KeySlotError("恢复槽自检失败，已删除（请重试）")
+            raise KeySlotError("恢复槽自检失败，已回滚（请重试）")
     return target
 
 
@@ -317,5 +325,12 @@ def initialize(root: Path, *, passphrase: str | None, passphrase_repeat: str | N
     if passphrase is not None:
         write_recovery_slot(directory, master_key, passphrase, passphrase_repeat or "")
     if win32crypt is not None:
-        write_local_slot(directory, master_key)
+        try:
+            write_local_slot(directory, master_key)
+        except Exception:
+            # P3-6：本机槽写失败时回滚已写的恢复槽——否则半初始化状态被
+            # 「已存在密钥槽」拒绝重试，initialize 永久卡死（只能靠用户
+            # 记住口令走 unlock_recovery 兜底）。
+            (directory / RECOVERY_SLOT).unlink(missing_ok=True)
+            raise
     return master_key

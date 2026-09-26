@@ -86,19 +86,26 @@ def database_key_or_none() -> bytes:
 
 
 def close_all_databases() -> None:
-    """应用锁锁定时关闭所有已打开的库连接（解锁后由惰性开库重连）。"""
+    """应用锁锁定时关闭所有已打开的库连接（解锁后由惰性开库重连）。
+
+    P3-5：close 失败不再静默——SQLCipher 连接一旦打开，后续读写不再需要
+    MK；若 close 失败且被吞掉，broker 已忘钥匙但旧连接仍可完整读写，
+    「锁=忘钥匙」模型形同虚设且无任何线索。
+    """
+    from ..core.log import logger
+
     try:
         from ..core import userdb
 
         userdb.db.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("[应用锁] userdb 关闭失败（锁定态可能不完整）：{}", exc)
     try:
         from ..core import telemetry
 
         telemetry.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("[应用锁] telemetry 关闭失败（锁定态可能不完整）：{}", exc)
 
 
 # ---- 持久化门（P3-04 E/F）：迁移或一致性备份期间暂停写入 ----

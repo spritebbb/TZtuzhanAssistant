@@ -263,9 +263,10 @@ def record_user_teaching_annotation(user_id: str, fact_id: int, *,
         )
         cur = db.conn.execute(
             "INSERT INTO memory_annotations "
-            "(user_id, fact_id, role, emotion, viewpoint, origin, confidence, source_event_id) "
-            "VALUES (?, ?, 'assistant', '', '这条记忆用户亲手确认过', 'user_teaching', 1.0, ?)",
-            (user_id, int(fact_id), event_id),
+            "(user_id, fact_id, role, emotion, viewpoint, origin, confidence, source_event_id, created_at) "
+            "VALUES (?, ?, 'assistant', '', '这条记忆用户亲手确认过', 'user_teaching', 1.0, ?, ?)",
+            (user_id, int(fact_id), event_id,
+             datetime.now().isoformat(timespec="seconds")),  # P3-11：本地时间
         )
         db.conn.commit()
     return int(cur.lastrowid)
@@ -286,10 +287,11 @@ def add_annotation(user_id: str, fact_id: int, *, emotion: str = "",
             _require_source(db.conn, user_id, "relationship_events", source_event_id)
         cur = db.conn.execute(
             "INSERT INTO memory_annotations "
-            "(user_id, fact_id, role, emotion, viewpoint, origin, confidence, source_event_id) "
-            "VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?)",
+            "(user_id, fact_id, role, emotion, viewpoint, origin, confidence, source_event_id, created_at) "
+            "VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)",
             (user_id, int(fact_id), emotion, viewpoint, origin,
-             confidence, source_event_id),
+             confidence, source_event_id,
+             datetime.now().isoformat(timespec="seconds")),  # P3-11
         )
         db.conn.commit()
     return int(cur.lastrowid)
@@ -326,8 +328,9 @@ def mark_first_occurrence(user_id: str, event_type: str, topic_key: str,
             _require_source(db.conn, user_id, "relationship_events", source_event_id)
         cur = db.conn.execute(
             "INSERT OR IGNORE INTO first_occurrences "
-            "(user_id, event_type, topic_key, source_event_id) VALUES (?, ?, ?, ?)",
-            (user_id, event_type, key, source_event_id),
+            "(user_id, event_type, topic_key, source_event_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, event_type, key, source_event_id,
+             datetime.now().isoformat(timespec="seconds")),  # P3-11
         )
         db.conn.commit()
     return cur.rowcount == 1
