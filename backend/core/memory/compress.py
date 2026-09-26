@@ -54,9 +54,10 @@ def _strip_parens(text: str) -> str:
 
 def message_count(user_id: str) -> int:
     """该用户总共的聊天消息数。"""
-    row = db.conn.execute(
-        "SELECT COUNT(*) AS c FROM messages WHERE user_id = ?", (user_id,)
-    ).fetchone()
+    with db._lock:  # P3-31：共享连接的读同样要持锁，与全库锁纪律一致
+        row = db.conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE user_id = ?", (user_id,)
+        ).fetchone()
     return row["c"] or 0
 
 

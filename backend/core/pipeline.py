@@ -99,7 +99,17 @@ def _spawn_memory_task(coro) -> None:
 
     task = asyncio.ensure_future(coro)
     _memory_tasks.add(task)
-    task.add_done_callback(_memory_tasks.discard)
+
+    def _consume_exc(done):
+        _memory_tasks.discard(done)
+        # P3-13：不取异常会在 GC 时才以 "never retrieved" 浮现，取消/入账类
+        # 副作用静默丢失且无台账
+        if not done.cancelled() and done.exception() is not None:
+            from .log import logger
+
+            logger.warning("[pipeline] 后台记忆任务异常：{}", done.exception())
+
+    task.add_done_callback(_consume_exc)
 
 
 async def _veto_life_templates(user_id: str) -> None:
@@ -866,7 +876,8 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 1.0b)~1.8) 本轮确定性旁路副作用（关系入账 / 用户教学 / 即时奖励 / 惰性提炼 /
     # 聊天派活）。messages 先建空表，派活的系统提示才能落在本轮 prompt 里。
     messages: list[dict] = []
-    await run_turn_effects(
+    _effects_ledger = None
+    _effects_ledger = await run_turn_effects(
         user_id,
         text,
         turn_id=turn_id,
@@ -877,6 +888,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         draft_cb=draft_cb,
         messages=messages,
     )
+    # P3：turn_effects 内部 14 项副作用的失败此前不进本轮 summary
+    # （返回的台账被整体丢弃），轮级失败统计只覆盖 pipeline 自己那一半。
+    # 台账对象保留，末尾与本轮 ledger 合并记账。
 
     # 2) 称呼与过分称呼处理（无论是否已设称呼，过分称呼都要检测并扣分）
     pref = user["nickname_pref"]
@@ -1450,6 +1464,14 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         logger.debug("[pipeline] 记忆引擎 on_message 失败（后台提炼，不影响回复）")
     # 本轮吞掉的旁路错误计数（进程级，供 /api/meta 观测）；不暴露用户内容。
     ledger.run("本轮台账记账", _record_ledger, ledger)
+    # P3：把 turn_effects 台账的失败项并入本轮 ledger——复用 fail() 的
+    # 进程级计数与日志节流，轮级 summary 覆盖全部旁路副作用。
+    if _effects_ledger is not None:
+        try:
+            for _f in getattr(_effects_ledger, "failures", []) or []:
+                ledger.fail(f"turn_effects:{_f.name}", RuntimeError(_f.message))
+        except Exception:
+            pass
     return reply
 
 
