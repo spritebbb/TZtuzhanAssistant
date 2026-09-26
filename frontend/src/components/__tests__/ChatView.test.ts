@@ -50,6 +50,37 @@ function fakePngFile() {
   return new File(['fake-png-bytes'], 'cat.png', { type: 'image/png' })
 }
 
+describe('ChatView 欢迎卡导流（NP-04）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('空会话渲染三个导流 chips，点击只预填草稿不自动发送', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const chips = wrapper.findAll('.hint-chip')
+    expect(chips.map((c) => c.text())).toEqual(['你会什么？', '帮我记住一件事', '查天气'])
+
+    await chips[0].trigger('click')
+    expect(wrapper.findComponent(ChatInput).props('input')).toBe('新手教程')
+    expect(mockStream).not.toHaveBeenCalled()
+
+    await chips[1].trigger('click')
+    expect(wrapper.findComponent(ChatInput).props('input')).toBe('记住：我喜欢')
+
+    await chips[2].trigger('click')
+    expect(wrapper.findComponent(ChatInput).props('input')).toBe('帮我查一下今天襄阳的天气')
+  })
+
+  it('预期管理文案与能力演示指引存在', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const emptyText = wrapper.get('.empty').text()
+    expect(emptyText).toContain('关系是攒出来的')
+    expect(emptyText).toContain('能力演示')
+  })
+})
+
 describe('ChatView image upload', () => {
   beforeEach(() => {
     vi.clearAllMocks()
