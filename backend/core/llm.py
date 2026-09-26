@@ -98,6 +98,10 @@ def _client_for_route(route) -> AsyncOpenAI:
     # 生产 SDK 构造器是 class，按端点和认证标识稳定复用。
     cacheable = isinstance(ClientClass, type)
     client = _client_cache.get(cache_key) if cacheable else None
+    if client is not None and cacheable:
+        # LRU touch：重新插入到 dict 末尾（插入序即近期使用序）
+        _client_cache.pop(cache_key, None)
+        _client_cache[cache_key] = client
     if client is None:
         client = ClientClass(
             base_url=route.base_url,
@@ -107,14 +111,13 @@ def _client_for_route(route) -> AsyncOpenAI:
             http_client=_build_http_client(route.timeout_sec),
         )
         if cacheable:
-            # §17.3 LRU 有界：超上限时淘汰最久未用条目（只释放内存对象，
-            # 不影响任何持久数据）
+            # §17.3 有界缓存：超上限按最旧插入淘汰。P3：旧实现 min(..., key=get)
+            # 对 client 对象比较必抛 TypeError 被吞，淘汰从未生效——API key
+            # 轮换时旧 client 的连接池缓慢泄漏。
             if len(_client_cache) >= _CLIENT_CACHE_MAX:
-                try:
-                    oldest = min(_client_cache, key=_client_cache.get)
-                    _client_cache.pop(oldest, None)
-                except (ValueError, TypeError):
-                    pass
+                oldest_key = next(iter(_client_cache), None)
+                if oldest_key is not None:
+                    _client_cache.pop(oldest_key, None)
             _client_cache[cache_key] = client
     return client
 
@@ -363,18 +366,26 @@ async def chat_stream(
                     stream=True,
                     stream_options={"include_usage": True},
                 )
-                async for chunk in stream:
-                    if getattr(chunk, "usage", None):
-                        usage = chunk.usage
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    piece = getattr(delta, "content", None)
-                    if piece:
-                        produced = True
-                        produced_text += piece
-                        yield piece
-                _record_usage(current.task, current.model, usage, prompt_text, produced_text)
+                try:
+                    async for chunk in stream:
+                        if getattr(chunk, "usage", None):
+                            usage = chunk.usage
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+                        piece = getattr(delta, "content", None)
+                        if piece:
+                            produced = True
+                            produced_text += piece
+                            yield piece
+                finally:
+                    # P3：中断（用户停止/超时/网络断，GeneratorExit 或异常）时
+                    # 已产出片段的 token 也按估算落账——cost_guard 月度熔断
+                    # 此前对中断流长期低估。GeneratorExit 继承 BaseException，
+                    # 不会被下面的 except Exception 误捕获。零产出的失败尝试
+                    # 不落账（避免重试路径虚增估算）。
+                    if produced or usage is not None:
+                        _record_usage(current.task, current.model, usage, prompt_text, produced_text)
                 return
             except Exception as e:
                 last_exc = e

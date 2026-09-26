@@ -242,11 +242,15 @@ def _ensure_default_providers() -> None:
 # ---- 生命周期（context_lifecycle 表，读写都走 userdb 连接锁语义）----
 
 def _load_lifecycle(user_id: str) -> dict[str, dict]:
-    rows = db.conn.execute(
-        "SELECT entry_id, last_committed_turn, sticky_until_turn, cooldown_until_turn "
-        "FROM context_lifecycle WHERE user_id = ?",
-        (user_id,),
-    ).fetchall()
+    # P3-17：collect_context 会被 turn_context_gather 挪到工作线程执行，
+    # 与事件循环线程的写路径共享同一连接——读也必须持 db._lock
+    # （本文件 commit/invalidate 均持锁，这里是唯一例外）。
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT entry_id, last_committed_turn, sticky_until_turn, cooldown_until_turn "
+            "FROM context_lifecycle WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
     return {
         r["entry_id"]: {
             "last": int(r["last_committed_turn"]),

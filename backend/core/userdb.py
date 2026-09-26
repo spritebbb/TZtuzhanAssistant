@@ -2507,24 +2507,34 @@ def get_open_promises(user_id: str, limit: int = 5) -> list[dict]:
 
 
 def mark_promise_done(promise_id: int) -> None:
+    user_owner: tuple[str, str] | None = None
     with db._lock:
         db.conn.execute(
             "UPDATE promises SET status = 'done', done_at = ? WHERE id = ?",
             (datetime.now().isoformat(timespec="seconds"), promise_id),
         )
-        db.conn.commit()
-    # P2-03：关系入账按 promise id 幂等（ledger 唯一键防重复加分）。事件记录
-    # 由调用方负责（initiative 走 record_promise_completed，单一事件类型）。
-    try:
         row = db.conn.execute(
             "SELECT user_id, owner FROM promises WHERE id = ?", (promise_id,)
         ).fetchone()
         if row is not None and row["owner"] == "user":
+            user_owner = (row["user_id"], row["owner"])
+        db.conn.commit()
+    # P2-03：关系入账按 promise id 幂等（ledger 唯一键防重复加分）。事件记录
+    # 由调用方负责（initiative 走 record_promise_completed，单一事件类型）。
+    # P3：SELECT 移入锁内；异常不再裸吞——apply_relationship_event 的
+    # INSERT 与 commit 之间出错会在共享连接上留半提交事务，烧掉幂等键。
+    if user_owner is not None:
+        try:
             from .affection import apply_relationship_event
 
-            apply_relationship_event(row["user_id"], int(promise_id), "promise_confirmed")
-    except Exception:
-        pass
+            apply_relationship_event(user_owner[0], int(promise_id), "promise_confirmed")
+        except Exception:
+            try:
+                with db._lock:
+                    db.conn.rollback()
+            except Exception:
+                pass
+            logger.warning("[promises] 约定入账失败（已回滚）：id={}", promise_id)
 
 
 def expire_due_promises(user_id: str, today: str) -> int:
@@ -2734,9 +2744,13 @@ def usage_summary(user_id: str, days: int = 7) -> dict:
             "COUNT(*) n FROM usage_log WHERE user_id = ? AND ts >= ? GROUP BY channel ORDER BY p + c DESC",
             (user_id, since),
         ).fetchall()
+        # P3：两个 _sum 必须在锁内先算好——此前闭包在锁块之外才执行，
+        # 共享连接上的读与其它线程未提交事务交错。
+        today_stat = _sum("ts >= ?", (today,))
+        period_stat = _sum("ts >= ?", (since,))
     return {
-        "today": _sum("ts >= ?", (today,)),
-        "period": _sum("ts >= ?", (since,)),
+        "today": today_stat,
+        "period": period_stat,
         "days": days,
         "by_channel": [
             {"channel": r["channel"], "prompt": r["p"], "completion": r["c"], "calls": r["n"]}
