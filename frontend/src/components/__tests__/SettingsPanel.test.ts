@@ -11,8 +11,15 @@ const petBridge = vi.hoisted(() => ({
   getPetState: vi.fn(async () => true),
 }))
 
+const apiFetchMock = vi.hoisted(() =>
+  vi.fn(async (_p: string, _opts?: { method?: string; body?: string }) => ({
+    ok: true,
+    json: async () => ({}),
+  })),
+)
+
 vi.mock('../../api', () => ({
-  apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+  apiFetch: apiFetchMock,
 }))
 vi.mock('../../api/encryption', () => ({
   getEncryptionStatus: vi.fn(async () => ({ enabled: false })),
@@ -61,5 +68,52 @@ describe('SettingsPanel 宠物开关状态回显（NP-06）', () => {
 
     const checkbox = wrapper.get('input[aria-label="桌面宠物"]')
     expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('NP-07：单价输入回显配置值，保存时随 body 提交', async () => {
+    apiFetchMock.mockImplementation(async (path: string, opts?: { method?: string; body?: string }) => {
+      if (path === '/api/config' && !opts?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            config: {
+              llm_base_url: 'https://api.deepseek.com/v1',
+              llm_model: 'deepseek-chat',
+              llm_price_input_per_mtok: 2,
+              llm_price_output_per_mtok: 8,
+            },
+          }),
+        }
+      }
+      return { ok: true, json: async () => ({ ok: true }) }
+    })
+
+    const wrapper = mount(
+      SettingsPanel,
+      { props: { show: false, personaName: '菟菚' }, global: { stubs: { teleport: true } } },
+    )
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const inputField = wrapper.get('input[aria-label="输入单价（元每百万token）"]')
+    const outputField = wrapper.get('input[aria-label="输出单价（元每百万token）"]')
+    expect((inputField.element as HTMLInputElement).value).toBe('2')
+    expect((outputField.element as HTMLInputElement).value).toBe('8')
+
+    await inputField.setValue('3.5')
+    // 触发保存（按文本精确定位，面板内其他区域也有 .btn 按钮）
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    const postCall = apiFetchMock.mock.calls.find(
+      (c) => c[0] === '/api/config' && c[1]?.method === 'POST',
+    )
+    expect(postCall).toBeTruthy()
+    const body = JSON.parse(String(postCall![1]!.body)) as Record<string, string>
+    expect(body.llm_price_input_per_mtok).toBe('3.5')
+    expect(body.llm_price_output_per_mtok).toBe('8')
   })
 })

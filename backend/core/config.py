@@ -42,9 +42,9 @@ class Config:
         self.llm_model: str = os.getenv("LLM_MODEL", "deepseek-chat")
         # 强模型路由（D5）：写作/代码/长文类请求可走更强的模型。留空=全部走主模型。
         self.llm_model_strong: str = os.getenv("LLM_MODEL_STRONG", "").strip()
-        # 成本面板价格（元 / 百万 tokens），DeepSeek-chat 参考价：入 1 / 出 2
-        self.llm_price_input_per_mtok: float = _env_float("LLM_PRICE_INPUT_PER_MTOK", 1.0)
-        self.llm_price_output_per_mtok: float = _env_float("LLM_PRICE_OUTPUT_PER_MTOK", 2.0)
+        # 成本面板价格（元 / 百万 tokens），DeepSeek-chat 参考价：入 2 / 出 8
+        self.llm_price_input_per_mtok: float = _env_float("LLM_PRICE_INPUT_PER_MTOK", 2.0)
+        self.llm_price_output_per_mtok: float = _env_float("LLM_PRICE_OUTPUT_PER_MTOK", 8.0)
         self.llm_temperature: float = _env_float("LLM_TEMPERATURE", 0.8)
         self.llm_max_tokens: int = _env_int("LLM_MAX_TOKENS", 500)
         # 流式逃生开关：某些端点不支持 stream 时退回整句返回（1=关流式，0=开）

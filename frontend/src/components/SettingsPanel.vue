@@ -12,6 +12,8 @@ interface ConfigData {
   llm_model?: string
   llm_temperature?: number
   llm_max_tokens?: number
+  llm_price_input_per_mtok?: number
+  llm_price_output_per_mtok?: number
   llm_api_key_masked?: string
   search_enabled?: boolean
   search_engine?: string
@@ -372,6 +374,8 @@ async function open() {
         llm_model: c.llm_model || '',
         llm_temperature: String(c.llm_temperature ?? 0.8),
         llm_max_tokens: String(c.llm_max_tokens ?? 500),
+        llm_price_input_per_mtok: String(c.llm_price_input_per_mtok ?? 2),
+        llm_price_output_per_mtok: String(c.llm_price_output_per_mtok ?? 8),
         llm_api_key: '',
         search_enabled: c.search_enabled !== false,
         search_engine: c.search_engine || 'bing',
@@ -416,6 +420,7 @@ async function save() {
   const strFields: Array<[string, boolean]> = [
     ['llm_base_url', false], ['llm_model', false],
     ['llm_temperature', false], ['llm_max_tokens', false],
+    ['llm_price_input_per_mtok', false], ['llm_price_output_per_mtok', false],
     ['llm_api_key', true], ['search_engine', false],
     ['search_api_key', true], ['image_base_url', false],
     ['image_model', false], ['image_api_key', true],
@@ -525,6 +530,9 @@ function confirmLabel(c: string): string {
           <div class="srow"><label>模型</label><input v-model="form.llm_model" type="text" aria-label="对话模型名称" :placeholder="config.llm_model || 'deepseek-chat'" /></div>
           <div class="srow"><label>温度</label><input v-model="form.llm_temperature" type="number" aria-label="对话模型温度" step="0.1" min="0" max="2" :placeholder="String(config.llm_temperature ?? 0.8)" /></div>
           <div class="srow"><label>最大 tokens</label><input v-model="form.llm_max_tokens" type="number" aria-label="对话模型最大 tokens" min="1" step="50" :placeholder="String(config.llm_max_tokens ?? 500)" /></div>
+          <div class="srow"><label>输入单价</label><input v-model="form.llm_price_input_per_mtok" type="number" aria-label="输入单价（元每百万token）" min="0.01" step="0.5" :placeholder="String(config.llm_price_input_per_mtok ?? 2)" /></div>
+          <div class="srow"><label>输出单价</label><input v-model="form.llm_price_output_per_mtok" type="number" aria-label="输出单价（元每百万token）" min="0.01" step="0.5" :placeholder="String(config.llm_price_output_per_mtok ?? 8)" /></div>
+          <div class="setting-hint">单价用于账本的金额估算（元/百万 tokens，按服务商价格填，deepseek-chat 参考价 已预填）</div>
           <div class="srow"><label>API Key</label><input v-model="form.llm_api_key" type="password" aria-label="对话模型 API Key" :placeholder="config.llm_api_key_masked || '留空保持当前'" autocomplete="off" /></div>
 
           <div class="sgroup">
