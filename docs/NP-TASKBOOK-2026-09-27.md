@@ -368,6 +368,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/desktopBasics.tes
 
 ## NP-11 迷你速聊窗（全局热键 → 说完即走）
 
+> 状态：**已完成** @ `8e91a8d`（2026-09-27，ZCode 实施，VERIFY 全绿：MiniChat 4/4 + 组件全量 135 用例 + vue-tsc 0；窗口行为由 CI test:electron 与手测兜底。实现：①`minichat.html` + `src/mini-main.ts` + `MiniChat.vue`（440×190 无边框透明置顶小窗，vite 第三入口——**任务书全局禁区"不改构建配置"按路线授权例外处理**：NP-11 路线明确要求新增 minichat 入口）；②直连 `streamChat`（current 会话正常落库，主窗打开即见历史；窗内零会话状态）；③热键 `Alt+Shift+Space` 固定（**自行补充决策**：任务书备选 Alt+Shift+M——Space 更顺手且实测无系统冲突，Electron Alt+Space 是系统菜单键但 Alt+Shift+Space 不冲突；未做可配置，等真实使用反馈）；④失焦隐藏 + 答完 3 秒自动隐藏（复用 NP-01 IME 守卫语义）；⑤confirm_request 窗内只显示「请到主窗口处理」引导。手测清单：任意应用内热键问答一轮、主窗可见同条消息、失焦收起、答完 3s 自动收起）
+
 **目标**：任意应用内按热键唤出置顶小输入条，问题即问即答，自动收起。召唤成本的天花板解决案。
 
 **涉及文件**：
