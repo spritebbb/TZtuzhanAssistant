@@ -397,6 +397,12 @@ async function open() {
   await loadPlugins()
   await loadFlags()
   await loadEncryptionStatus()
+  // NP-06：宠物开关回显真实状态（此前恒 false，宠物开着时显示关闭、再点会误关）
+  if (window.tuzhanPet) {
+    try {
+      petOn.value = await window.tuzhanPet.getPetState()
+    } catch { /* 查询失败保持现状 */ }
+  }
   saveOk.value = false
   saveNote.value = ''
 }

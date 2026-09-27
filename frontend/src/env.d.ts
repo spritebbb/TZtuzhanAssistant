@@ -23,5 +23,6 @@ interface Window {
     close: () => void
     toggleIgnoreMouse: (ignore: boolean) => void
     togglePet: () => Promise<boolean>
+    getPetState: () => Promise<boolean>
   }
 }

@@ -45,4 +45,6 @@ contextBridge.exposeInMainWorld('tuzhanPet', {
     ipcRenderer.send('pet:toggleIgnoreMouse', ignore)
   },
   togglePet: () => ipcRenderer.invoke('pet:toggle') as Promise<boolean>,
+  // NP-06：宠物开关真实状态查询（设置页/首次向导回显；此前恒 false 会误关）
+  getPetState: () => ipcRenderer.invoke('pet:get-state') as Promise<boolean>,
 })
