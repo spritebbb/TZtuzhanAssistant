@@ -56,7 +56,12 @@ _PERCEPTION_MAX_TOKENS = 200
 
 
 def _parse_json(text: str) -> dict[str, Any] | None:
-    """从 LLM 输出里稳健提取 JSON（容忍 ```json 包裹、前后杂字）。"""
+    """从 LLM 输出里稳健提取 JSON（容忍 ```json 包裹、前后杂字）。
+
+    部分模型偶发输出 Python 字面量风格（单引号键：'emotion_deltas': 2），
+    json.loads 必败——追加 ast.literal_eval 安全求值兜底（只解析字面量，
+    无代码执行面），命中后不再整轮降级关键词规则。
+    """
     if not text:
         return None
     # 去掉 markdown 代码块
@@ -65,6 +70,13 @@ def _parse_json(text: str) -> dict[str, Any] | None:
         return None
     try:
         return json.loads(m.group(0))
+    except Exception:
+        pass
+    try:
+        import ast
+
+        value = ast.literal_eval(m.group(0))
+        return value if isinstance(value, dict) else None
     except Exception:
         return None
 
