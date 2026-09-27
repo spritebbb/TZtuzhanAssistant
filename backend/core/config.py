@@ -89,6 +89,8 @@ class Config:
             1, min(30, _env_int("TELEMETRY_EVENT_RETENTION_DAYS", 7))
         )
         self.search_enabled: bool = os.getenv("SEARCH_ENABLED", "1") != "0"
+        # NP-14 桌面感知：默认关闭；开启后她可感知前台应用类别（不看窗口内容）
+        self.desktop_awareness: bool = os.getenv("DESKTOP_AWARENESS", "0") == "1"
         self.search_engine: str = os.getenv("SEARCH_ENGINE", "bing").lower()
         self.search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()
         # P0-04 C2 双轨实测结论：博查负责中文查询（快、中文源），Tavily 负责

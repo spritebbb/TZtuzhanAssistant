@@ -368,6 +368,17 @@ async def _tick_once() -> int:
     except Exception:
         logger.exception("[主动性] 成本闸异常，按放行处理")
 
+    # NP-14 桌面感知：用户前台全屏（游戏/视频/演示）时本轮主动整体静默——
+    # 分寸感是人格的一部分；开关默认关闭，关闭时不探测（隐私默认）。
+    try:
+        if config.desktop_awareness:
+            from .desktop_probe import probe_foreground
+
+            if probe_foreground().get("category") == "fullscreen":
+                return 0
+    except Exception:
+        logger.exception("[主动性] 桌面感知门异常，按放行处理")
+
     # 归档建议、约定跟进与心事：统一仲裁点出牌，一轮至多一条；
     # 与通用主动共享每日额度（额度用尽时下方 _eligible_users 自然全跳过）。
     try:

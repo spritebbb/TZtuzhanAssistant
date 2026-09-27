@@ -60,6 +60,7 @@ async def api_config_get():
             "llm_max_tokens": config.llm_max_tokens,
             "llm_price_input_per_mtok": config.llm_price_input_per_mtok,
             "llm_price_output_per_mtok": config.llm_price_output_per_mtok,
+            "desktop_awareness": config.desktop_awareness,
             "llm_api_key_masked": _mask_key(config.llm_api_key),
             "search_enabled": config.search_enabled,
             "search_engine": config.search_engine,
@@ -95,6 +96,7 @@ async def api_config_set(request: Request):
         "llm_base_url": False, "llm_model": False, "llm_temperature": False,
         "llm_max_tokens": False, "llm_api_key": True,
         "llm_price_input_per_mtok": False, "llm_price_output_per_mtok": False,
+        "desktop_awareness": False,
         "search_enabled": False, "search_engine": False, "search_api_key": True,
         "image_base_url": False, "image_model": False, "image_api_key": True,
         "vision_base_url": False, "vision_model": False, "vision_api_key": True,
@@ -108,6 +110,10 @@ async def api_config_set(request: Request):
     clear_fields = body.get("clear_fields", [])
     clear_fields = set(clear_fields) if isinstance(clear_fields, list) else set()
     required_nonempty = {"llm_base_url", "llm_model"}
+    # NP-14：布尔开关只接受 0/1，防止把 true/false 之类的字面量写进 .env
+    for flag in ("desktop_awareness",):
+        if flag in body and str(body[flag]) not in ("0", "1"):
+            return JSONResponse({"ok": False, "error": f"{flag} 只接受 0 或 1"}, status_code=400)
     updates: dict[str, str] = {}
     for field, is_secret in fields.items():
         if field not in body:

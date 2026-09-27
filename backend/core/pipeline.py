@@ -492,6 +492,36 @@ def _cost_line(user_id: str) -> str:
         return ""
 
 
+# NP-14：类别 → 行为帧提示语（只说类别，不说进程名——话术披露红线）
+_AWARENESS_LINES = {
+    "code": "用户此刻大概率在写代码或用终端，打扰要克制，长内容给结论优先",
+    "browse": "用户此刻在浏览网页，闲聊可以，别催促",
+    "idle": "用户好像有一阵子没动键鼠了，可能在忙别的或离开了，消息保持轻短",
+    "fullscreen": "用户在全屏应用里（可能在看视频或演示），回复从简",
+}
+
+
+def _awareness_line() -> str:
+    """NP-14 桌面感知 → 行为帧 awareness_line。
+
+    仅在 DESKTOP_AWARENESS=1 时探测（隐私默认关）；类别级披露——她只知道
+    「在写代码/在浏览」，不知道窗口标题与内容。任何失败返回空串。
+    """
+    try:
+        from .config import config as _cfg
+
+        if not _cfg.desktop_awareness:
+            return ""
+        from .desktop_probe import probe_foreground
+
+        category = str(probe_foreground().get("category") or "")
+        if not category or category == "fullscreen":
+            return ""  # 全屏时她该闭嘴而非引用「看你在全屏」
+        return _AWARENESS_LINES.get(category, "")
+    except Exception:
+        return ""
+
+
 def _evolution_line(user_id: str) -> str:
     """P3-05 表达层演化 + L05 领域调制 + L03 气质倾向 → 行为帧 evolution_line。
 
@@ -1041,6 +1071,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             style_line=_style_line(user_id),
             evolution_line=_evolution_line(user_id),
             cost_line=_cost_line(user_id),
+            awareness_line=_awareness_line(),
         )
     except Exception:
         logger.exception("[pipeline] 行为帧快照失败（按旧路径继续）")

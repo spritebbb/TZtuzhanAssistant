@@ -515,6 +515,7 @@ async function open() {
         vision_api_key: '',
         mood_city: c.mood_city || '',
         memory_semantic: c.memory_semantic !== false,
+        desktop_awareness: c.desktop_awareness === true,
         proactive_new_user_days: String(c.proactive_new_user_days ?? 3),
         proactive_new_user_idle_hours: String(c.proactive_new_user_idle_hours ?? 2),
         proactive_surprise_min_gap_days: String(c.proactive_surprise_min_gap_days ?? 7),
@@ -570,6 +571,7 @@ async function save() {
   }
   body.search_enabled = f.search_enabled ? '1' : '0'
   body.memory_semantic = f.memory_semantic ? '1' : '0'
+  body.desktop_awareness = f.desktop_awareness ? '1' : '0'
 
   try {
     const r = await apiFetch('/api/config', {
@@ -740,6 +742,8 @@ function confirmLabel(c: string): string {
           <div class="srow"><label>心情城市</label><input v-model="form.mood_city" type="text" aria-label="心情城市" :placeholder="config.mood_city || '留空不查天气'" /></div>
           <div class="srow"><label>语义检索</label><input v-model="form.memory_semantic" type="checkbox" aria-label="启用语义检索" /></div>
           <div class="setting-hint">开启后换了说法也能想起来（按意思匹配）；关闭则只按字面精确匹配</div>
+          <div class="srow"><label>桌面感知</label><input v-model="form.desktop_awareness" type="checkbox" aria-label="启用桌面感知" /></div>
+          <div class="setting-hint">开启后她能感知你前台在大致做什么（写代码/浏览/离开），说话更有分寸。只识别应用类别，<b>不看窗口内容</b>，随时可关</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>

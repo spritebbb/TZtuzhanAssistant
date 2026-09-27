@@ -1216,6 +1216,8 @@ VERIFY: .venv/Scripts/python.exe tests/test_tool_loop_hardening.py ;; .venv/Scri
 
 P3-04 已拍板为“本机便捷解锁 + 独立恢复口令”，完整方案见第 21 节。L10 helper 已固定为只返回前台全屏 bool/display_id 的本地进程；P1-04 `job_runs` 依第 13.4 节落 `bot.db`。这些决定仍需按各节 PoC/迁移测试审查，但不再属于开放产品问题。
 
+**NP-14 契约扩展（2026-09-27，用户拍板「类别粒度+默认关」）**：`desktop_probe.probe_foreground` 返回体扩展 `process_name` / `category`（idle/code/browse/fullscreen/other 五类，v1 不猜游戏）/ `idle_seconds`（GetLastInputInfo，非钩子）；三不红线不变（不抓屏、不读窗口标题/内容、不装键鼠钩子）。新增 `GET /api/desktop/foreground`——`DESKTOP_AWARENESS=0`（默认）时不探测直接返回 enabled=false。消费方：主动性全屏门控（fullscreen 时本轮静默）与 pipeline 行为帧 `awareness_line`（类别级话术，全屏不提）。
+
 ## 19. 2026-09-07 运行现实与执行节奏（用户拍板续）
 
 执行：ZCode（GLM）整理，用户三轮确认；与 §18 同效，冲突以本节为准。
