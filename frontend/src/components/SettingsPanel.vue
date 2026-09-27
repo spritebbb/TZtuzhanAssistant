@@ -6,6 +6,7 @@ import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
 import { notify } from '../utils/notify'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { getBackupStatus, runBackupNow, type BackupStatus } from '../api/backup'
+import { isImmersionMode, setImmersionMode } from '../utils/immersion'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -361,6 +362,12 @@ function onTtsAutoPlayChange() {
   if (!ttsAutoPlay.value) stopTts()
 }
 
+// NP 沉浸模式：localStorage 偏好即改即生效（与自动朗读同模式）
+const immersionMode = ref(isImmersionMode())
+function onImmersionChange() {
+  setImmersionMode(immersionMode.value)
+}
+
 // ---- P3-04 E：数据保护（启用加密） ----
 const encStatus = ref<EncryptionStatus | null>(null)
 const encBusy = ref(false)
@@ -489,6 +496,7 @@ async function clearTelemetry() {
 
 async function open() {
   ttsAutoPlay.value = getTtsAutoPlay()
+  immersionMode.value = isImmersionMode()
   panelLoadError.value = ''
   try {
     const r = await apiFetch('/api/config')
@@ -734,6 +742,8 @@ function confirmLabel(c: string): string {
           </div>
           <div class="srow"><label>自动朗读回复</label><input v-model="ttsAutoPlay" type="checkbox" aria-label="自动朗读回复" @change="onTtsAutoPlayChange" /></div>
           <div class="setting-hint">手动朗读按钮始终显示在{{ props.personaName || '助手' }}的消息下方；自动朗读只对新回复生效</div>
+          <div class="srow"><label>沉浸模式</label><input v-model="immersionMode" type="checkbox" aria-label="沉浸模式" @change="onImmersionChange" /></div>
+          <div class="setting-hint">开启后界面隐藏心情数值与进度条，只留她的样子和语气；想看数字仍可打开「成长总览」</div>
 
           <div class="sgroup">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>

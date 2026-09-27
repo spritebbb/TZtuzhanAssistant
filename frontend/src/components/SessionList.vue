@@ -3,6 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref, computed } from 'vue'
 import { apiFetch, getApiUrl } from '../api'
 import { listArchives, getArchive, searchArchives as apiSearchArchives, renameSession, type ArchiveInfo, type Message, type ArchiveDetail, type ArchiveSearchResult } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
+import { isImmersionMode, IMMERSION_EVENT } from '../utils/immersion'
 
 const emit = defineEmits<{
   (e: 'close-sidebar'): void
@@ -21,6 +22,12 @@ const viewerClose = ref<HTMLButtonElement | null>(null)
 let viewerTrigger: HTMLElement | null = null
 const viewingMessages = ref<Message[]>([])
 const mood = ref({ value: 60, label: '平淡', emoji: '🌱' })
+
+// 沉浸模式：隐藏心情数值/进度条（设置页可开关）
+const immersion = ref(isImmersionMode())
+function onImmersionChanged() {
+  immersion.value = isImmersionMode()
+}
 
 // === 归档搜索 ===
 const searchQuery = ref('')
@@ -166,6 +173,7 @@ function fmtTime(ts: number): string {
 
 onMounted(() => {
   load()
+  window.addEventListener(IMMERSION_EVENT, onImmersionChanged)
   // 设置保存后（mood_city 等会影响心情）刷新侧栏心情，避免状态灯与能力脱节
   window.addEventListener('tztuzhan:config-saved', refreshMood)
   document.addEventListener('keydown', onViewerKeydown)
@@ -173,6 +181,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('tztuzhan:config-saved', refreshMood)
+  window.removeEventListener(IMMERSION_EVENT, onImmersionChanged)
   document.removeEventListener('keydown', onViewerKeydown)
 })
 
@@ -273,12 +282,12 @@ defineExpose({ load })
     <div v-if="renameMsg" class="search-note">{{ renameMsg }}</div>
     <div v-if="searchMsg && !searchResult.length" class="search-note">{{ searchMsg }}</div>
 
-    <!-- 心情卡片 -->
-    <div class="moodcard glass" :title="'心情数值：' + mood.value + ' / 100'">
-      <div class="moodnum">{{ mood.value }}</div>
+    <!-- 心情卡片（沉浸模式：隐藏数值与进度条，只留叙事化表达） -->
+    <div class="moodcard glass" :title="immersion ? mood.label : '心情数值：' + mood.value + ' / 100'">
+      <div v-if="!immersion" class="moodnum">{{ mood.value }}</div>
       <div class="moodinfo">
-        <div class="moodlabel">心情 · {{ mood.label }}</div>
-        <div class="moodbar"><div class="moodfill" :style="{ width: mood.value + '%' }"></div></div>
+        <div class="moodlabel">心情 · {{ mood.label }}<span v-if="immersion" class="mood-immersion-mark">沉浸中</span></div>
+        <div v-if="!immersion" class="moodbar"><div class="moodfill" :style="{ width: mood.value + '%' }"></div></div>
       </div>
     </div>
 
@@ -563,8 +572,7 @@ defineExpose({ load })
   flex-basis: 100%;
   font-size: 0.72rem;
   color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: hidden;  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -580,6 +588,12 @@ defineExpose({ load })
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 .moodemoji { font-size: 1.5rem; line-height: 1; }
+.mood-immersion-mark {
+  margin-left: 6px;
+  font-size: 0.62rem;
+  color: var(--primary-text);
+  opacity: 0.75;
+}
 .moodnum {
   width: 40px;
   height: 40px;
