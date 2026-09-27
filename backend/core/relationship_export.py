@@ -316,6 +316,14 @@ def preview_restore(bundle: dict, target_user_id: str) -> dict:
         errors.append("备份里没有可恢复的数据")
         data = {}
 
+    # P3-44：恢复白名单——只接受导出器会写出的表（CATEGORIES 全集）。
+    # 此前仅校验表存在于 sqlite_master（应用版本检查），恶意构造的备份可借
+    # 恢复路径写任意表（kv_store/users 等系统状态）。
+    allowed_tables = {t for tables in CATEGORIES.values() for t in tables}
+    smuggled = sorted(t for t in data if t not in allowed_tables)
+    if smuggled:
+        errors.append(f"备份包含不属于关系包的表：{'、'.join(smuggled[:5])}")
+
     known = _table_names()
     counts = {table: len(rows) for table, rows in data.items()}
     errors.extend(_validate_references(data))
