@@ -424,6 +424,8 @@ VERIFY: .venv/Scripts/python -m pytest tests/test_backup_endpoints.py -q ;; cd f
 
 ## NP-13 人格包 v1（卡 + 立绘）
 
+> 状态：**已完成** @ `da69ec8`（2026-09-27，ZCode 实施，VERIFY 全绿：后端 6/6（合法包落位+立绘跟随/缺档回退包内 plain/无立绘回退全局/缺 md 400/zip-slip 400/坏 zip 400）+ PersonaSwitcher 5/5 + 组件全量 140 用例 + vue-tsc 0。实现比任务书更收敛：①**persona_profiles 零改动**——API 层先解 zip 取 persona.md 走既有 import_card（目录/设置/激活逻辑零重复），portraits 解包到同域 `data/personas/<id>/portraits/`（删除人格时随目录自然清理，无额外工作）；②立绘路由 `_active_portrait(state)` 经 `active_card_path().parent` 定位，解析顺序=包内档位→包内 plain→全局差分→全局基础；③zip 安全面：30MB 上限、zip-slip 拒绝（绝对路径/../反斜杠）、五档白名单、`_` 开头条目忽略。**与另一会话工作协调**：对方同日提交的 AI 人格生成器（`/api/personas/generate`）与本切片导入路径正交，已基于其新版本 PersonaSwitcher 追加；包格式契约 v1 冻结（约定优于配置，无 front matter 新字段））
+
 **目标**：导入一个 zip = 人格卡 + 该人格自己的立绘，解决「换了人格还是菟菚的脸」。
 
 **涉及文件**（修改）：
