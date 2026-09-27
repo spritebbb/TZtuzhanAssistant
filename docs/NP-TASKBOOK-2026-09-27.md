@@ -341,6 +341,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/errStyle.test.ts 
 
 ## NP-10 桌面四件套（托盘 / 置顶 / 自启 / 全局热键）
 
+> 状态：**已完成** @ `86fe0f4`（2026-09-27，ZCode 实施，VERIFY 全绿：desktopBasics 3/3 + 组件全量 131 用例 + vue-tsc 0（覆盖 electron 侧类型）；托盘/热键/自启的运行时行为由 CI `npm run test:electron` 与手测清单兜底。实现：①托盘菜单重建制（rebuildTrayMenu）——新增「桌面宠物」checkbox 项，toggle 后与 pet:toggle 后均刷新勾选态；②置顶/热键持久化到 `ui-prefs.json`（pet-prefs.json 同款策略），启动时恢复；③自启用 `setLoginItemSettings({openAtLogin, args:['--hidden']})`——**自行补充决策**：任务书原文 openAsHidden 是 macOS 专属，Windows 用 --hidden 参数 + ready-to-show 检查实现"启动驻留托盘不弹窗"；④热键三选一下拉（默认 Alt+Shift+T），被占用时自动回退默认键并在设置区提示；再按一次热键为"收起"（toggle 语义）；⑤退出时 globalShortcut.unregisterAll。手测清单：托盘三项（显示/宠物勾选/退出）、置顶跨窗、自启后仅托盘、热键唤起/再按收起/占用回退）
+
 **目标**：补齐「桌面助手」底线存在感。
 
 **涉及文件**（修改）：
