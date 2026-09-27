@@ -394,6 +394,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/MiniChat.test.ts 
 
 ## NP-12 数据护栏（不迁移 + 加固）
 
+> 状态：**已完成** @ `803287a`（2026-09-27，ZCode 实施，VERIFY 全绿：后端 3/3（空态/健康态/篡改 fail）+ SettingsPanel 5/5 + 组件全量 128 用例 + vue-tsc 0。实现：①`POST /api/backup/run` 复用 `maintenance.loop.backup()`（含加密/锁定分支与轮转，零新备份逻辑）+ `GET /api/backup/status` 复用 `load_manifest(verify_files=True)`（sha256 + SQLite integrity_check）；②设置页数据保护区「立即备份/恢复演习」按钮 + 状态行 + 超 3 天黄色提醒；③**启动快照条目按降级取消**——分析发现 schema 迁移前快照已存在（schema_backup），而"覆盖更新本身"发生在任何脚本可执行之前，软件手段救不了，唯一防线是把备份拷出包外（UI 文案已引导）。自行补充决策：加密备份在明文/锁定态 verify=skip 并说明原因；测试需显式触发 userdb 惰性连接建 bot.db）
+
 **目标**：让「她的记忆能不能活过一次覆盖更新」从靠用户记性变成靠产品。
 
 **涉及文件**（修改）：
