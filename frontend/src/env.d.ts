@@ -33,4 +33,8 @@ interface Window {
     togglePet: () => Promise<boolean>
     getPetState: () => Promise<boolean>
   }
+  /** NP-11 迷你速聊窗桥（仅迷你窗内使用） */
+  tuzhanMini?: {
+    hide: () => void
+  }
 }

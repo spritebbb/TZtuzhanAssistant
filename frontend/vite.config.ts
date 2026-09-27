@@ -27,10 +27,11 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     rollupOptions: {
-      // L10 桌面宠物：独立入口页（打包后随 dist 由后端静态目录/dev server 提供）
+      // L10 桌面宠物 + NP-11 迷你速聊窗：独立入口页（打包后随 dist 由后端静态目录/dev server 提供）
       input: {
         main: resolve(__dirname, 'index.html'),
         pet: resolve(__dirname, 'pet.html'),
+        minichat: resolve(__dirname, 'minichat.html'),
       },
     },
   },
