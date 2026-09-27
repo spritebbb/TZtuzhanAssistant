@@ -452,6 +452,8 @@ VERIFY: .venv/Scripts/python -m pytest tests/test_persona_pack.py -q ;; cd front
 
 ## NP-14 桌面感知 v1（类别粒度 + 默认关）
 
+> 状态：**已完成** @ `41300a7`（2026-09-27，ZCode 实施，VERIFY 全绿：后端 5/5（归类矩阵 9 例/隐私默认不探测/开启后字段形状/全屏门控静默/注入行语义）+ awarenessToggle 2/2 + 组件全量 142 用例 + vue-tsc 0。实现：①`categorize` 纯函数五类（空闲优先/不猜游戏/未知归 other）+ probe 扩展 process_name（QueryFullProcessImageNameW）与 idle_seconds（GetLastInputInfo，非钩子），三不红线保持；②`GET /api/desktop/foreground` 关闭时不探测；③initiative 全屏门控（本轮整体静默，探测恰一次）；④pipeline `_awareness_line()` 类别级话术（全屏不提），经 BehaviorFrame.awareness_line 进 prompt；⑤SettingsPanel「桌面感知」开关（0/1 提交，后端校验）。契约扩展已声明于技术指导 §18.3（L10 原契约描述同步）。**NP 批次一+二至此 14/14 全部完成**）
+
 **目标**：她能（在你授权后）感知「你在写代码/在浏览/在全屏/离开了」，主动性更懂分寸——红线：只看应用类别，不看窗口标题与内容。
 
 **涉及文件**（修改）：
