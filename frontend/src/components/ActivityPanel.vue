@@ -212,7 +212,7 @@ async function load() {
     current.value = active
     noteDraft.value = active?.note ?? ''
   } catch {
-    error.value = '共读角落暂时打不开，过会儿再来'
+    error.value = '共读内容加载失败，请稍后再试'
   } finally {
     loading.value = false
   }

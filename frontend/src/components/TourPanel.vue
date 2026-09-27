@@ -56,7 +56,7 @@ async function load() {
   try {
     tour.value = await getTour()
   } catch {
-    error.value = '演示脚本暂时读不到，过会儿再试'
+    error.value = '演示脚本加载失败，请稍后再试'
   } finally {
     loading.value = false
   }

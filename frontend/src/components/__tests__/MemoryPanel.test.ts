@@ -185,19 +185,18 @@ describe('MemoryPanel', () => {
     expect(previewRestore).toHaveBeenCalledWith(bundle, 'assistant-main-bak')
     expect(wrapper.text()).toContain('将写入 3 条记录')
 
-    vi.stubGlobal('confirm', () => true)
+    // NP-09：确认改走 ConfirmDialog 组件（原生 confirm 已移除）
     // M8 封存卡片也用 reset-btn；恢复按钮定位在「恢复」卡片内，避免选择器歧义
     const restoreCard = wrapper.findAll('article.profile-card')
       .find((card) => card.find('input[type="file"]').exists())!
     await restoreCard.get('.reset-btn').trigger('click')
+    await wrapper.get('.cd-btn.danger').trigger('click')
     await flushPromises()
-    vi.unstubAllGlobals()
     expect(restoreRelationship).toHaveBeenCalledWith(bundle, 'assistant-main-bak')
     expect(wrapper.text()).toContain('恢复完成：共写入 3 条记录')
   })
 
   it('shows her stable profile and resets auto-formed interaction preferences', async () => {
-    vi.stubGlobal('confirm', () => true)
     const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
     await flushPromises()
 
@@ -212,6 +211,7 @@ describe('MemoryPanel', () => {
     expect(wrapper.text()).toContain('倾诉烦恼时——短句为主，偶尔省略号')
 
     await wrapper.get('.reset-btn').trigger('click')
+    await wrapper.get('.cd-btn.danger').trigger('click')
     await flushPromises()
     expect(resetInteractionStyle).toHaveBeenCalled()
     expect(wrapper.text()).toContain('还没形成')

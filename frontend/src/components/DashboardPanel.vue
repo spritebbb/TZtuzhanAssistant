@@ -69,7 +69,7 @@ async function load() {
     const result = await getDashboard(range.value)
     if (sequence === loadSequence) dashboard.value = result
   } catch {
-    if (sequence === loadSequence) error.value = '总览暂时打不开，过会儿再看'
+    if (sequence === loadSequence) error.value = '成长总览加载失败，请稍后再试'
   } finally {
     if (sequence === loadSequence) loading.value = false
   }

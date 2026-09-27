@@ -103,7 +103,7 @@ async function loadTasks() {
     const r = await apiFetch('/api/agent/tasks')
     const d = await r.json()
     if (d.ok) tasks.value = d.tasks || []
-  } catch { /* ignore */ }
+  } catch { msg.value = '任务列表加载失败，稍后重开面板再试' }
 }
 
 async function loadTask(id: string) {
@@ -114,7 +114,7 @@ async function loadTask(id: string) {
       current.value = d.task
       running.value = d.task.status === 'running'
     }
-  } catch { /* ignore */ }
+  } catch { msg.value = '任务详情加载失败' }
 }
 
 function stepConfirm(idx: number): string {
@@ -130,7 +130,7 @@ async function confirmStep(idx: number, allow: boolean) {
     })
     const d = await r.json()
     if (d.ok) current.value = d.task
-  } catch { /* ignore */ }
+  } catch { msg.value = '确认没有送达，请再点一次' }
 }
 
 async function confirmAll(allow: boolean) {
@@ -141,7 +141,7 @@ async function confirmAll(allow: boolean) {
     })
     const d = await r.json()
     if (d.ok) current.value = d.task
-  } catch { /* ignore */ }
+  } catch { msg.value = '确认没有送达，请再点一次' }
 }
 
 async function cancelTask() {

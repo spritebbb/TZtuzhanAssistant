@@ -37,7 +37,7 @@ async function load() {
   try {
     summary.value = await getUsageSummary(7)
   } catch {
-    error.value = '账本暂时打不开，过会儿再看'
+    error.value = '账本加载失败，请稍后再试'
   } finally {
     loading.value = false
   }

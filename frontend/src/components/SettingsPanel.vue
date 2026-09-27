@@ -3,9 +3,34 @@ import { onBeforeUnmount, computed, ref, watch } from 'vue'
 import { apiFetch } from '../api'
 import { enableEncryption, cleanupPlaintext, getEncryptionStatus, type EncryptionStatus } from '../api/encryption'
 import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
+import { notify } from '../utils/notify'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// ---- NP-09：通用确认弹窗（替代 window.confirm；与全局 toast 同批引入）----
+const confirmShow = ref(false)
+const confirmTitle = ref('')
+const confirmBody = ref('')
+const confirmDanger = ref(false)
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+function confirmAction(title: string, body = '', danger = true): Promise<boolean> {
+  confirmTitle.value = title
+  confirmBody.value = body
+  confirmDanger.value = danger
+  confirmShow.value = true
+  return new Promise((resolve) => { confirmResolve = resolve })
+}
+function resolveConfirm(ok: boolean) {
+  confirmShow.value = false
+  confirmResolve?.(ok)
+  confirmResolve = null
+}
+
+// NP-09：面板打开期的加载失败提示（此前 catch 吞掉，用户面对空白表单无解释）
+const panelLoadError = ref('')
 
 interface ConfigData {
   llm_base_url?: string
@@ -66,7 +91,7 @@ async function loadAuditLog() {
     const r = await apiFetch('/api/audit/log?' + params.toString())
     const d = await r.json()
     if (d.ok) auditLog.value = d.rows || []
-  } catch { /* ignore */ }
+  } catch { panelLoadError.value = '审计日志加载失败（其余设置不受影响）' }
   finally { auditBusy.value = false }
 }
 
@@ -87,7 +112,7 @@ async function loadMcpServers() {
     const r = await apiFetch('/api/mcp/servers')
     const d = await r.json()
     if (d.ok) mcpServers.value = d.servers || []
-  } catch { /* ignore */ }
+  } catch { panelLoadError.value = 'MCP 服务器列表加载失败' }
 }
 
 async function addMcpServer() {
@@ -116,7 +141,7 @@ async function addMcpServer() {
 }
 
 async function removeMcpServer(name: string) {
-  if (!confirm('卸载 MCP 服务器「' + name + '」？')) return
+  if (!(await confirmAction(`卸载 MCP 服务器「${name}」？`, '卸载后其注册的外部工具立即失效。'))) return
   try {
     const r = await apiFetch(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' })
     const d = await r.json()
@@ -156,7 +181,7 @@ async function loadPlugins() {
     const r = await apiFetch('/api/plugins')
     const d = await r.json()
     if (d.ok) plugins.value = d.plugins || []
-  } catch { /* ignore */ }
+  } catch { panelLoadError.value = '插件列表加载失败' }
 }
 
 // 面板打开期间每 10s 自动刷新（热加载/启停后状态及时可见）
@@ -208,10 +233,11 @@ async function pluginAction(name: string, action: 'enable' | 'disable' | 'reload
   const target = plugins.value.find(p => p.name === name)
   if (action === 'disable') {
     const risky = target && hasRiskyTools(target)
-    const tip = risky
-      ? `禁用插件「${target?.display_name || name}」？\n它注册了写/命令类工具（写入、执行命令、本机操控等），禁用后${props.personaName || '助手'}将失去这些能力，且立即生效。`
-      : `禁用插件「${target?.display_name || name}」？其注册的能力会立即卸载。`
-    if (!confirm(tip)) return
+    const title = `禁用插件「${target?.display_name || name}」？`
+    const body = risky
+      ? `它注册了写/命令类工具（写入、执行命令、本机操控等），禁用后${props.personaName || '助手'}将失去这些能力，且立即生效。`
+      : '其注册的能力会立即卸载。'
+    if (!(await confirmAction(title, body, risky))) return
   }
   pluginBusy.value = name + ':' + action
   pluginMsg.value = ''
@@ -253,7 +279,7 @@ async function runEnableEncryption(): Promise<void> {
     encMsg.value = '✗ 两次输入的恢复口令不一致'
     return
   }
-  if (!window.confirm('启用加密会对整个数据目录做一次迁移：期间应用暂停响应，完成后自动恢复。继续？')) return
+  if (!(await confirmAction('启用加密？', '会对整个数据目录做一次迁移：期间应用暂停响应，完成后自动恢复。'))) return
   encBusy.value = true
   encMsg.value = ''
   try {
@@ -270,7 +296,7 @@ async function runEnableEncryption(): Promise<void> {
 }
 
 async function runCleanup(): Promise<void> {
-  if (!window.confirm('确定删除明文目录？删除后无法恢复（密文数据不受影响）')) return
+  if (!(await confirmAction('确定删除明文目录？', '删除后无法恢复（密文数据不受影响）。'))) return
   encBusy.value = true
   encMsg.value = ''
   try {
@@ -318,7 +344,7 @@ async function loadFlags() {
       flags.value = d.flags || {}
       flagLabels.value = d.labels || {}
     }
-  } catch { /* ignore */ }
+  } catch { /* 功能开关读取失败：保持默认值降级（非用户操作失败，不弹提示） */ }
 }
 
 async function toggleFlag(key: string) {
@@ -346,7 +372,7 @@ async function toggleFlag(key: string) {
 }
 
 async function clearTelemetry() {
-  if (!confirm('清除当前人格的本地诊断统计？')) return
+  if (!(await confirmAction('清除当前人格的本地诊断统计？', '', false))) return
   telemetryClearBusy.value = true
   flagMsg.value = ''
   try {
@@ -363,6 +389,7 @@ async function clearTelemetry() {
 
 async function open() {
   ttsAutoPlay.value = getTtsAutoPlay()
+  panelLoadError.value = ''
   try {
     const r = await apiFetch('/api/config')
     const d = await r.json()
@@ -395,7 +422,7 @@ async function open() {
         proactive_surprise_idle_minutes: String(c.proactive_surprise_idle_minutes ?? 120),
       }
     }
-  } catch { /* ignore */ }
+  } catch { panelLoadError.value = '配置读取失败：下方表单不是当前生效值，请关闭后重开设置' }
   await loadMcpServers()
   await loadAuditLog()
   await loadPlugins()
@@ -455,7 +482,7 @@ async function save() {
     // 通知 ToolBar 等组件刷新工具开关状态（联网/天气/生图/识图等可能因配置变化）
     window.dispatchEvent(new CustomEvent('tztuzhan:config-saved'))
   } catch (e: unknown) {
-    alert('保存失败：' + ((e as Error).message || e))
+    notify('保存失败：' + ((e as Error).message || e))
   } finally {
     saving.value = false
   }
@@ -480,6 +507,7 @@ function confirmLabel(c: string): string {
   <Teleport to="body">
     <div class="overlay" :class="{ show }" :aria-hidden="!show" @click.self="emit('close')">
       <section class="settings glass-strong" role="dialog" aria-modal="true" aria-label="设置">
+        <div v-if="panelLoadError" class="setting-hint" role="alert" style="color: var(--danger, #e08a6d); margin-bottom: 8px">{{ panelLoadError }}</div>
         <div class="s-head">
           <div class="s-head-left">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -712,6 +740,14 @@ function confirmLabel(c: string): string {
         </div>
       </section>
     </div>
+    <ConfirmDialog
+      :show="confirmShow"
+      :title="confirmTitle"
+      :body="confirmBody"
+      :danger="confirmDanger"
+      @confirm="resolveConfirm(true)"
+      @cancel="resolveConfirm(false)"
+    />
   </Teleport>
 </template>
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import RoomPanel from './RoomPanel.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import {
   deleteFact,
   deleteStyleMapEntry,
@@ -33,6 +34,24 @@ import {
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// ---- NP-09：通用确认弹窗（替代 window.confirm）----
+const confirmShow = ref(false)
+const confirmTitle = ref('')
+const confirmBody = ref('')
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+function confirmAction(title: string, body = ''): Promise<boolean> {
+  confirmTitle.value = title
+  confirmBody.value = body
+  confirmShow.value = true
+  return new Promise((resolve) => { confirmResolve = resolve })
+}
+function resolveConfirm(ok: boolean) {
+  confirmShow.value = false
+  confirmResolve?.(ok)
+  confirmResolve = null
+}
 
 const facts = ref<FactItem[]>([])
 const loading = ref(false)
@@ -135,7 +154,7 @@ async function load() {
   try {
     facts.value = await getFacts()
   } catch {
-    error.value = '记忆匣子卡住了，过会儿再试'
+    error.value = '记忆加载失败，请稍后再试'
   } finally {
     loading.value = false
   }
@@ -188,7 +207,7 @@ async function loadProfile() {
 }
 
 async function resetStyle() {
-  if (!window.confirm('重置自动形成的说话偏好？重置后会随聊天重新慢慢形成')) return
+  if (!(await confirmAction('重置自动形成的说话偏好？', '重置后会随聊天重新慢慢形成。'))) return
   try {
     await resetInteractionStyle()
     userStyle.value = ''
@@ -255,10 +274,10 @@ async function runPreview() {
 
 async function runRestore() {
   if (!restoreBundle.value || !restorePreview.value?.ok) return
-  if (!window.confirm(
-    `确定把备份里的 ${restorePreview.value.total} 条记录恢复到「${restorePreview.value.target_user_id}」？`
-    + '只能恢复到空命名空间，恢复后会覆盖该命名空间的同名状态。',
-  )) return
+  if (!(await confirmAction(
+    `确定把备份里的 ${restorePreview.value.total} 条记录恢复到「${restorePreview.value.target_user_id}」？`,
+    '只能恢复到空命名空间，恢复后会覆盖该命名空间的同名状态。',
+  ))) return
   restoreBusy.value = true
   try {
     const result = await restoreRelationship(restoreBundle.value, restoreTarget.value.trim())
@@ -298,7 +317,7 @@ async function saveEdit(id: number) {
 }
 
 async function remove(id: number) {
-  if (!window.confirm(`确定让${props.personaName || '助手'}忘掉这条？删了就真的想不起来了`)) return
+  if (!(await confirmAction(`确定让${props.personaName || '助手'}忘掉这条？`, '删了就真的想不起来了。'))) return
   busyId.value = id
   try {
     await deleteFact(id)
@@ -548,6 +567,14 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
         </template>
       </div>
     </section>
+    <ConfirmDialog
+      :show="confirmShow"
+      :title="confirmTitle"
+      :body="confirmBody"
+      danger
+      @confirm="resolveConfirm(true)"
+      @cancel="resolveConfirm(false)"
+    />
   </div>
 </template>
 
