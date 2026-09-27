@@ -14,6 +14,7 @@ import KnowledgePanel from './components/KnowledgePanel.vue'
 import TourPanel from './components/TourPanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
+import TavernPanel from './components/TavernPanel.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
 import CornerPanel from './components/CornerPanel.vue'
@@ -37,6 +38,7 @@ const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
 const cornerOpen = ref(false)
 const usageOpen = ref(false)
+const tavernOpen = ref(false)
 const dashboardOpen = ref(false)
 const activityOpen = ref(false)
 const sidebarOpen = ref(false)
@@ -253,7 +255,7 @@ const moreTools = [
   { id: 'usage', label: '用量账本' }, { id: 'knowledge', label: '书架' },
   { id: 'agent', label: '任务代理' }, { id: 'archive', label: '归档当前对话' },
   { id: 'theme', label: '切换主题' }, { id: 'motion', label: '切换动效' },
-  { id: 'tour', label: '能力演示' },
+  { id: 'tour', label: '能力演示' }, { id: 'tavern', label: '酒馆同玩' },
   { id: 'settings', label: '设置' }, { id: 'reset', label: '重新开始' },
 ]
 const recentToolIds = ref<string[]>([])
@@ -280,6 +282,7 @@ function useMoreTool(id: string) {
   else if (id === 'memory') memoryOpen.value = true
   else if (id === 'corner') cornerOpen.value = true
   else if (id === 'usage') usageOpen.value = true
+  else if (id === 'tavern') tavernOpen.value = true
   else if (id === 'knowledge') knowledgeOpen.value = true
   else if (id === 'agent') agentOpen.value = true
   else if (id === 'archive') void archiveNow()
@@ -543,6 +546,7 @@ onUnmounted(() => {
     <MemoryPanel :show="memoryOpen" :persona-name="activePersona.name" @close="memoryOpen = false" />
     <CornerPanel :show="cornerOpen" :persona-name="activePersona.name" @close="cornerOpen = false" />
     <UsagePanel :show="usageOpen" :persona-name="activePersona.name" @close="usageOpen = false" />
+    <TavernPanel :show="tavernOpen" :persona-name="activePersona.name" @close="tavernOpen = false" />
     <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
     <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
     <PersonaSwitcher :show="personaOpen" :disabled="generating" @close="personaOpen = false" @switched="onPersonaSwitched" />
