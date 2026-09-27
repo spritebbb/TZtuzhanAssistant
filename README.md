@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="#-快速开始">快速开始</a> ·
-  <a href="#-v310-更新亮点">v3.1 亮点</a> ·
+  <a href="#-v350-更新亮点">v3.5 亮点</a> ·
   <a href="#-核心能力">核心能力</a> ·
   <a href="#-能力演示新手教程">能力演示</a> ·
   <a href="#-mcp-扩展接你自己的工具">MCP 扩展</a> ·
@@ -29,18 +29,31 @@
 
 ---
 
-## 📦 v3.1.0 已发布
+## 📦 v3.5.0 已发布
 
 | 推荐下载 | 适合谁 | 下载 |
 |---|---|---|
-| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-v3.1.0.zip) |
-| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-Full-v3.1.0-Large.zip) |
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.5.0/TZtuzhanAssistant-Deploy-v3.5.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.5.0/TZtuzhanAssistant-Deploy-Full-v3.5.0-Large.zip) |
 
 > 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.1.0"><strong>查看完整 Release 说明 →</strong></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.5.0"><strong>查看完整 Release 说明 →</strong></a>
 </p>
+
+## ✨ v3.5.0 更新亮点
+
+v3.5 是「新手保护 + 玩法纵深 + 地基修复」三线并行的大版本（v3.1.0 以来 97 个提交），并完成全库 103 项 bug 排查清零：
+
+- 🛡️ **新手保护层**：中文输入法回车守卫、生成期间可预打字、会话/归档重命名、首次运行四步向导（界面内直接填 Key）、黑话翻译层（SQLite/MCP/token 等术语带人话括注）、错误提示分区对待、花费人话化。
+- 🗣️ **连续语音对话 v1**：说完自动发送、回复自动朗读联动、说话即打断 TTS；本地语音输入（faster-whisper）与 GPT-SoVITS 本地音色可插拔接入。
+- 🏕️ **玩法纵深**：酒馆同玩提级（更多入口 + 玩法指引 + 在场程度三档旋钮）、沉浸模式（隐藏数值只留叙事）、哄好玩法（真诚道歉触发情绪修复，每日一次）、消息重发/编辑重发、迷你速聊窗（全局热键 Alt+Shift+Space）。
+- 🎭 **人格能力**：SillyTavern 卡导入向导（V1/V2 JSON 与 PNG 内嵌卡单向转换）、通用人格卡生成器、人格包 zip 导入（卡 + 五档立绘随人格走）、桌面感知 v1（类别粒度默认关，全屏主动静默）。
+- 🧠 **内在状态深化**：局势档案（≤2.5k tokens 恒定世界快照，钩子永不靠检索命中）、叙事化成本熔断（超支不报错，她按日程去忙了）、离线补算（关着的这段时间她照常过日子，重开逐条讲给你）、主动意愿 roll。
+- 🖥️ **桌面四件套**：托盘宠物开关、窗口置顶、开机自启（托盘驻留）、全局召唤热键；桌宠全屏避让。
+- 🗄️ **数据护栏**：立即备份/恢复演习端点与设置页按钮、超 3 天未备份黄色提醒；恢复白名单加固（恶意备份不再可写任意表）。
+- 🔧 **质量**：103 项排查全修（P0×1 / P1×13 / P2×21 / P3×68），含离线补算 datetime 崩溃、专注收尾消息永不发出、/api/meta 拉天气冻结事件循环等深水区问题；感知层 JSON 解析追加 Python 字面量安全兜底；schema 升级至 **v46**（升级前自动快照备份）。
 
 ## ✨ v3.1.0 更新亮点
 
@@ -156,6 +169,10 @@ start.bat
 - 💭 **梦境与平行可能**：共同世界观与"另一种可能"产物，`<fiction_story>` 虚构隔离，只有显式收藏的能留下
 - 🛡️ **输出卫生门禁**：所有用户可见生成出口（聊天/主动消息/日记/观点/重逢）共用同一套质检与脱敏
 - 💾 **每日可验证备份**：三个 SQLite 库、媒体、人格与知识源自动快照，schema 升级前额外备份并可校验完整性
+- 🗣️ **连续语音对话**：说完自动发送 + 回复自动朗读 + 说话打断 TTS；本地 STT（faster-whisper）与 GPT-SoVITS 本地音色可插拔
+- 🏕️ **玩法**：酒馆同玩（在场程度三档）、沉浸模式、哄好玩法、消息重发/编辑重发、迷你速聊窗（全局热键）
+- 🎭 **人格导入与生成**：SillyTavern 卡（JSON/PNG）、人格卡生成器、人格包 zip（卡 + 五档立绘）
+- 🖥️ **桌面能力**：托盘宠物、窗口置顶、开机自启、全局召唤热键、桌宠全屏避让
 
 人格名称默认从 Markdown 的第一个标题读取。卡片也可选用以下 front matter，让主题与音色首次加载时自动建立；之后可在 UI 中修改并随人格保存：
 
@@ -218,7 +235,7 @@ voice: zh-CN-XiaoyiNeural
 
 ### 从 v2.x / v3.0 升级
 
-直接用 v3.1 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到当前 v41（信任/亲密双维、情绪状态、事件链、网页监视等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
+直接用 v3.5 部署包覆盖旧目录前，**先备份包内 `data/` 目录**（聊天记录、记忆、关系状态都在里面）。首次启动会自动把旧 schema 迁移到当前 v46（信任/亲密双维、情绪状态、事件链、网页监视等新表会自动创建并回填），旧好感度会自动换算为初始信任与亲密值。
 
 ### 日常使用
 
@@ -327,7 +344,7 @@ netstat -ano | findstr 8801
 `.env` 中设置 `LLM_PROXY=off` 强制直连（本机有失效代理时）。
 
 **Q6：从 v2.x 升级后好感度/记忆还在吗**
-在。首次启动会自动迁移 schema 到当前 v41：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
+在。首次启动会自动迁移 schema 到当前 v46：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
 
 ---
 
@@ -369,7 +386,7 @@ backend/                      # Python 后端
 │   ├── fact_decay.py         # 琐碎记忆自然衰减
 │   ├── fact_lifecycle.py     # 事实生命周期（来源/置信度/级联清理）
 │   ├── memory/               # 记忆系统（事实/话题/五元组/日期记忆 + 压缩）
-│   ├── userdb.py             # SQLite 数据层（schema v42）
+│   ├── userdb.py             # SQLite 数据层（schema v46）
 │   ├── search.py             # 联网搜索 + 多源求证
 │   ├── knowledge.py          # 知识库（文档/分块/观点/来源）
 │   ├── imagegen.py           # 文生图
@@ -470,10 +487,10 @@ persona-菟菚.md               # 人格源文件
 
 ## 开发状态
 
-- 当前版本：**v3.1.0**（schema v42）
-- 后端聚合回归 **175/175**、前端 Vitest **115/115**、浏览器 E2E **15/15**、桌面外壳冒烟 **5/5**（2026-09-18 全量实跑）
+- 当前版本：**v3.5.0**（schema v46）
+- 后端聚合回归 **203/203**、前端 Vitest **200/200**、浏览器 E2E **15/15**、桌面外壳冒烟 **5/5**、人格确定性 eval **53/53**（2026-09-27 全量实跑）
 - 桌面壳依赖：Electron **44.4.2** + electron-builder **26.15.3**（`npm audit` 0 漏洞；外壳冒烟见下方「运行测试」的 `npm run test:electron`）
-- 发布门禁报告：[docs/archive/RELEASE-QUALITY-GATE-2026-09-18.md](docs/archive/RELEASE-QUALITY-GATE-2026-09-18.md)
+- 发布门禁报告：[docs/archive/RELEASE-QUALITY-GATE-2026-09-27.md](docs/archive/RELEASE-QUALITY-GATE-2026-09-27.md)
 - 回归由 CI 代跑，不再依赖「某天有人手动跑过一遍」：`.github/workflows/regression.yml` 在后端/测试/前端变更时自动执行
 - 运行期被降级的旁路副作用（记忆检索、联网搜索、表情包等）不再是静默日志——累计失败计数可在 `GET /api/meta` 的 `effect_stats` 字段查看
 - 长期路线见 [docs/TECH-PLAN.md](docs/TECH-PLAN.md)；架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；插件开发见 [docs/PLUGIN-DEVELOPMENT.md](docs/PLUGIN-DEVELOPMENT.md)
