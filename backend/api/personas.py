@@ -101,6 +101,25 @@ def _unpack_persona_pack(data: bytes) -> tuple[bytes, dict[str, bytes]]:
         return zf.read(md_name), portraits
 
 
+@router.post("/convert-stcard")
+async def api_personas_convert_stcard(file: UploadFile):
+    """SillyTavern 角色卡 → 菟菚人格卡预览（单向转换，不入库）。
+
+    拍板边界：这是导入**向导**而非卡格式兼容——返回的 markdown 经前端预览/
+    编辑后由用户确认走既有 /import；关系与记忆从零开始。
+    """
+    try:
+        data = await file.read(10 * 1024 * 1024 + 1)
+        from ..core.st_card import StCardError, convert_st_card
+
+        markdown, name, warnings = convert_st_card(file.filename or "card.json", data)
+        return {"ok": True, "markdown": markdown, "name": name, "warnings": warnings}
+    except StCardError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"转换失败：{exc}"}, status_code=500)
+
+
 @router.post("/import")
 async def api_personas_import(file: UploadFile):
     busy = _busy_response()

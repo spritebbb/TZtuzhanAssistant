@@ -4,6 +4,7 @@ import {
   activatePersona,
   generatePersona,
   importPersona,
+  convertStCard,
   listPersonas,
   updatePersona,
   type PersonaProfile,
@@ -20,6 +21,7 @@ const active = ref<PersonaProfile | null>(null)
 const busy = ref('')
 const error = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const stInput = ref<HTMLInputElement | null>(null)
 const name = ref('')
 const subtitle = ref('')
 const theme = ref<'dark' | 'light'>('dark')
@@ -98,6 +100,31 @@ async function runGenerate() {
   }
 }
 
+// ST 卡导入向导：后端单向转换成菟菚人格卡，复用生成器的预览/编辑/入库流程。
+// 拍板边界：关系与记忆从零开始——预览区上方如实提示。
+const stWarnings = ref<string[]>([])
+
+async function onStFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || busy.value) return
+  busy.value = 'st'
+  error.value = ''
+  stWarnings.value = []
+  try {
+    const result = await convertStCard(file)
+    generated.value = result.markdown
+    genName.value = result.name
+    stWarnings.value = result.warnings
+    genOpen.value = true
+  } catch (e2) {
+    error.value = (e2 as Error).message
+  } finally {
+    busy.value = ''
+  }
+}
+
 // 生成结果先给用户过目/手改，再走与文件导入完全相同的入库与激活路径。
 async function saveGenerated() {
   if (!generated.value.trim() || busy.value) return
@@ -113,6 +140,7 @@ async function saveGenerated() {
     generated.value = ''
     brief.value = ''
     genName.value = ''
+    stWarnings.value = []
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -165,7 +193,11 @@ watch(() => props.show, value => { if (value) void load() })
             <button class="import" :disabled="!!busy || disabled" @click="fileInput?.click()">
               {{ busy === 'import' ? '加载中…' : '加载人格卡 / 人格包' }}
             </button>
+            <button class="import" :disabled="!!busy || disabled" @click="stInput?.click()">
+              {{ busy === 'st' ? '转换中…' : '从 SillyTavern 卡导入' }}
+            </button>
             <input ref="fileInput" class="hidden" type="file" accept=".md,.zip,text/markdown,text/plain,application/zip" @change="onFile" />
+            <input ref="stInput" class="hidden" type="file" accept=".json,.png,application/json,image/png" @change="onStFile" />
           </div>
           <div v-if="genOpen" class="generator">
             <textarea
@@ -181,13 +213,14 @@ watch(() => props.show, value => { if (value) void load() })
                 {{ genBusy ? '生成中…' : '开始生成' }}
               </button>
             </div>
+            <p v-if="stWarnings.length" class="st-hint">从 SillyTavern 卡转换而来——<b>关系与记忆会从零开始</b>；<span v-for="w in stWarnings" :key="w">{{ w }} </span></p>
             <textarea
               v-if="generated"
               v-model="generated"
               class="card-preview"
               rows="12"
               spellcheck="false"
-              aria-label="生成的人格卡内容，可编辑"
+              :aria-label="stWarnings.length ? '从 ST 卡转换的人格卡内容，可编辑' : '生成的人格卡内容，可编辑'"
             ></textarea>
             <button v-if="generated" class="import gen-save" :disabled="!!busy || disabled" @click="saveGenerated">
               {{ busy === 'import' ? '导入中…' : '保存并启用该人格' }}
@@ -264,6 +297,7 @@ input, select, textarea { min-width: 0; padding: 8px 10px; color: var(--text); b
 input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: var(--glow); }
 .generator { margin: 10px 0 14px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px; }
 .generator textarea { width: 100%; resize: vertical; font-size: .78rem; line-height: 1.6; }
+.st-hint { font-size: .74rem; color: #d9a441; line-height: 1.7; margin: 6px 0; }
 .generator .card-preview { font-family: ui-monospace, Consolas, monospace; font-size: .72rem; white-space: pre-wrap; }
 .gen-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .gen-actions span { flex: 1; color: var(--text-faint); font-size: .7rem; }

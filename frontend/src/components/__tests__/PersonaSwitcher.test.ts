@@ -6,6 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const generatePersonaMock = vi.hoisted(() =>
   vi.fn(async (_brief: string) => ({ markdown: '# 原始卡', name: '橘猫程序员' })),
 )
+const convertStCardMock = vi.hoisted(() =>
+  vi.fn(async (_file: File) => ({
+    markdown: '# 星野 澜\n\n## 设定\n\n深夜电台的主持人。',
+    name: '星野 澜',
+    warnings: ['世界书 / lorebook 未迁移：世界书只是场景素材，如需要可作为知识库文档投喂'],
+  })),
+)
 const importPersonaMock = vi.hoisted(() =>
   vi.fn(async (_file: File) => ({
     id: 'ju-mao', name: '橘猫程序员', subtitle: '', theme: 'dark' as const,
@@ -22,13 +29,16 @@ vi.mock('../../api/personas', () => ({
   updatePersona: vi.fn(),
   importPersona: importPersonaMock,
   generatePersona: generatePersonaMock,
+  convertStCard: convertStCardMock,
 }))
 vi.mock('../../api', () => ({
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
 }))
 
 import PersonaSwitcher from '../PersonaSwitcher.vue'
-import { generatePersona, importPersona } from '../../api/personas'
+import { generatePersona, importPersona, convertStCard } from '../../api/personas'
+
+const importPersonaSpy = vi.mocked(importPersona)
 
 function mountPanel() {
   return mount(PersonaSwitcher, {
@@ -107,5 +117,34 @@ describe('PersonaSwitcher 人格包导入（NP-13）', () => {
   it('导入按钮文案覆盖人格包', () => {
     const wrapper = mountPanel()
     expect(wrapper.get('button.import:not(.generator-toggle)').text()).toContain('人格包')
+  })
+})
+
+describe('PersonaSwitcher ST 卡导入向导（NP）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('选择 ST 卡 → 转换预览 + 关系从零提示 + 确认后走导入', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const stBtn = wrapper.findAll('button.import').find((b) => b.text().includes('SillyTavern'))!
+    await stBtn.trigger('click')
+    const input = wrapper.get('input[accept=".json,.png,application/json,image/png"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['{}'], 'card.json', { type: 'application/json' })] })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(convertStCard).toHaveBeenCalledTimes(1)
+    expect((wrapper.get('textarea.card-preview').element as HTMLTextAreaElement).value).toContain('星野 澜')
+    expect(wrapper.text()).toContain('关系与记忆会从零开始')
+    expect(wrapper.text()).toContain('世界书')
+
+    await wrapper.get('button.gen-save').trigger('click')
+    await flushPromises()
+    expect(importPersonaSpy).toHaveBeenCalledTimes(1)
+    const sent = importPersonaSpy.mock.calls[0][0] as File
+    expect(sent.name.endsWith('.md')).toBe(true)
   })
 })
