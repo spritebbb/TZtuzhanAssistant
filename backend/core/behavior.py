@@ -34,6 +34,7 @@ class BehaviorFrame:
     style_line: str = ""    # 长期关系气质（L03）：表达带宽的轻倾向，不写分数/等级
     evolution_line: str = "" # P3-05 表达层演化：话多话少/幽默频率的自然语言体现
     cost_line: str = ""     # D10 成本熔断叙事面：事多轻提（每日一次）/超支简短（常驻）
+    awareness_line: str = "" # NP-14 桌面感知：用户前台在做什么的类别级提示（默认空）
 
     def compose(self) -> str:
         """拼成一段可注入 system 的文本。"""
@@ -52,6 +53,8 @@ class BehaviorFrame:
             parts.append(self.style_line)
         if self.cost_line:
             parts.append(self.cost_line)
+        if self.awareness_line:
+            parts.append(self.awareness_line)
         if self.initiative:
             parts.append(self.initiative)
         if self.reaction_line:
@@ -323,12 +326,14 @@ def _emotion_line(s: AgentState, emotions: list | None = None,
 
 def build_behavior_frame(state: AgentState, season_line: str = "",
                          calendar_line: str = "", style_line: str = "",
-                         evolution_line: str = "", cost_line: str = "") -> BehaviorFrame:
+                         evolution_line: str = "", cost_line: str = "",
+                         awareness_line: str = "") -> BehaviorFrame:
     """根据状态生成一轮行为帧。season_line 由 seasons.current_season 预先算好；
     calendar_line 由 calendar_modulation.compose_line 预先算好（P1-05）；
     style_line 由 relationship_style 推导预先算好（L03）；
     evolution_line 由 persona_evolution 白名单参数推导预先算好（P3-05）；
-    cost_line 由 cost_guard.cost_lines 预先算好（D10，默认空）。"""
+    cost_line 由 cost_guard.cost_lines 预先算好（D10，默认空）；
+    awareness_line 由 desktop_probe 推导预先算好（NP-14，默认空=不感知）。"""
     return BehaviorFrame(
         mood_line=_mood_line(state),
         stage_line=_stage_line(state),
@@ -345,4 +350,5 @@ def build_behavior_frame(state: AgentState, season_line: str = "",
         style_line=style_line,
         evolution_line=evolution_line,
         cost_line=cost_line,
+        awareness_line=awareness_line,
     )
