@@ -58,6 +58,8 @@ async def api_config_get():
             "llm_model": config.llm_model,
             "llm_temperature": config.llm_temperature,
             "llm_max_tokens": config.llm_max_tokens,
+            "llm_price_input_per_mtok": config.llm_price_input_per_mtok,
+            "llm_price_output_per_mtok": config.llm_price_output_per_mtok,
             "llm_api_key_masked": _mask_key(config.llm_api_key),
             "search_enabled": config.search_enabled,
             "search_engine": config.search_engine,
@@ -92,6 +94,7 @@ async def api_config_set(request: Request):
     fields: dict[str, bool] = {
         "llm_base_url": False, "llm_model": False, "llm_temperature": False,
         "llm_max_tokens": False, "llm_api_key": True,
+        "llm_price_input_per_mtok": False, "llm_price_output_per_mtok": False,
         "search_enabled": False, "search_engine": False, "search_api_key": True,
         "image_base_url": False, "image_model": False, "image_api_key": True,
         "vision_base_url": False, "vision_model": False, "vision_api_key": True,
@@ -128,6 +131,12 @@ async def api_config_set(request: Request):
             max_tokens = int(updates["LLM_MAX_TOKENS"])
             if not 1 <= max_tokens <= 32768:
                 raise ValueError("LLM_MAX_TOKENS 必须在 1 到 32768 之间")
+        # NP-07：单价（元/百万 tokens）>0 即可，上限 1000 防手滑多打零
+        for price_key in ("LLM_PRICE_INPUT_PER_MTOK", "LLM_PRICE_OUTPUT_PER_MTOK"):
+            if price_key in updates:
+                price = float(updates[price_key])
+                if not 0 < price <= 1000:
+                    raise ValueError(f"{price_key} 必须大于 0 且不超过 1000")
         integer_ranges = {
             "PROACTIVE_NEW_USER_DAYS": (1, 30),
             "PROACTIVE_NEW_USER_IDLE_HOURS": (1, 24),

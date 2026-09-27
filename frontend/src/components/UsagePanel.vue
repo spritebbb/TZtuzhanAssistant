@@ -25,6 +25,12 @@ function fmt(n: number): string {
   return n >= 10000 ? `${(n / 10000).toFixed(1)}万` : String(n)
 }
 
+// NP-07：小额金额不再显示一串 0.00——0 < 金额 < 0.01 显示「<¥0.01」
+function fmtCost(v: number): string {
+  if (v > 0 && v < 0.01) return '<¥0.01'
+  return `¥${v.toFixed(v === 0 ? 0 : 4)}`
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -58,12 +64,12 @@ watch(() => props.show, (show) => { if (show) void load() })
           <div class="cards">
             <div class="card">
               <span class="label">今天</span>
-              <strong>¥{{ summary.today.cost.toFixed(4) }}</strong>
+              <strong>{{ fmtCost(summary.today.cost) }}</strong>
               <span class="sub">{{ fmt(summary.today.prompt + summary.today.completion) }} tokens · {{ summary.today.calls }} 次调用</span>
             </div>
             <div class="card">
               <span class="label">近 {{ summary.days }} 天</span>
-              <strong>¥{{ summary.period.cost.toFixed(4) }}</strong>
+              <strong>{{ fmtCost(summary.period.cost) }}</strong>
               <span class="sub">{{ fmt(summary.period.prompt + summary.period.completion) }} tokens · {{ summary.period.calls }} 次调用</span>
             </div>
           </div>
@@ -73,7 +79,7 @@ watch(() => props.show, (show) => { if (show) void load() })
             <div class="bar-track">
               <div class="bar-fill" :style="{ width: `${Math.max(2, (row.prompt + row.completion) / maxChannelTokens * 100)}%` }"></div>
             </div>
-            <span class="bar-value">¥{{ row.cost.toFixed(4) }}</span>
+            <span class="bar-value">{{ fmtCost(row.cost) }}</span>
           </div>
           <p v-if="!summary.by_channel.length" class="empty">还没有用量记录，聊几句就有了</p>
           <p class="note" v-if="summary.period.estimated > 0">
