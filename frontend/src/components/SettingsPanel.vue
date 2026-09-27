@@ -5,6 +5,7 @@ import { enableEncryption, cleanupPlaintext, getEncryptionStatus, type Encryptio
 import { getTtsAutoPlay, setTtsAutoPlay, stopTts } from '../utils/tts'
 import { notify } from '../utils/notify'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { getBackupStatus, runBackupNow, type BackupStatus } from '../api/backup'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -31,6 +32,57 @@ function resolveConfirm(ok: boolean) {
 
 // NP-09：面板打开期的加载失败提示（此前 catch 吞掉，用户面对空白表单无解释）
 const panelLoadError = ref('')
+
+// ---- NP-12：数据护栏（手动备份 + 恢复演习）----
+const backupBusy = ref(false)
+const backupStatus = ref<BackupStatus | null>(null)
+const backupStatusLine = ref('')
+// 超 3 天未备份黄色提醒（任务书阈值）
+const backupStale = computed(() => (backupStatus.value?.age_days ?? 0) > 3)
+
+async function refreshBackupStatus() {
+  try {
+    backupStatus.value = await getBackupStatus()
+    const s = backupStatus.value
+    if (!s.has_backup) {
+      backupStatusLine.value = '⚠ ' + (s.hint || '还没有备份')
+      return
+    }
+    const age = s.age_days != null ? `（${s.age_days < 1 ? '今天' : `${Math.floor(s.age_days)} 天前`}）` : ''
+    if (s.verify === 'pass') backupStatusLine.value = `✓ 最新备份校验通过${age} · ${s.file_count ?? 0} 个文件`
+    else if (s.verify === 'skip') backupStatusLine.value = `✓ 最新备份${age}；${s.verify_error || '内容校验需解锁态'}`
+    else backupStatusLine.value = `✗ 最新备份校验失败${age}：${s.verify_error || '文件损坏'}——请立即重新备份`
+  } catch {
+    backupStatusLine.value = ''
+  }
+}
+
+async function onBackupNow() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const name = await runBackupNow()
+    backupStatusLine.value = `✓ 已备份：${name}`
+    await refreshBackupStatus()
+  } catch (e: unknown) {
+    notify('备份失败：' + ((e as Error).message || e))
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function onDrillBackup() {
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    await refreshBackupStatus()
+    if (backupStatus.value?.verify === 'fail') {
+      notify('恢复演习未通过：最新备份可能损坏，请重新备份')
+    }
+  } finally {
+    backupBusy.value = false
+  }
+}
 
 interface ConfigData {
   llm_base_url?: string
@@ -428,6 +480,8 @@ async function open() {
   await loadPlugins()
   await loadFlags()
   await loadEncryptionStatus()
+  // NP-12：打开设置即展示备份状态（含超 3 天黄色提醒的数据源）
+  void refreshBackupStatus()
   // NP-06：宠物开关回显真实状态（此前恒 false，宠物开着时显示关闭、再点会误关）
   if (window.tuzhanPet) {
     try {
@@ -548,6 +602,17 @@ function confirmLabel(c: string): string {
             </div>
           </template>
           <p v-if="encMsg" class="mcp-msg" :class="{ err: encMsg.startsWith('✗') }" :role="encMsg.startsWith('✗') ? 'alert' : 'status'">{{ encMsg }}</p>
+
+          <!-- NP-12：数据护栏（手动备份 + 恢复演习） -->
+          <p class="setting-hint">聊天、记忆、关系都在本机 data/ 目录里。升级或覆盖前，先在这里备份一份；重要时刻建议把备份文件夹拷贝到本机其他位置。</p>
+          <div class="srow">
+            <label>手动备份 / 恢复演习</label>
+            <span style="display: flex; gap: 6px">
+              <button class="small-btn" :disabled="backupBusy" @click="onBackupNow">{{ backupBusy ? '备份中…' : '立即备份' }}</button>
+              <button class="small-btn" :disabled="backupBusy" @click="onDrillBackup">{{ backupBusy ? '校验中…' : '恢复演习' }}</button>
+            </span>
+          </div>
+          <p v-if="backupStatusLine" class="setting-hint" :role="backupStatusLine.startsWith('✗') ? 'alert' : 'status'" :style="backupStale ? 'color: #d9a441' : ''">{{ backupStatusLine }}</p>
 
           <!-- LLM -->
           <div class="sgroup">

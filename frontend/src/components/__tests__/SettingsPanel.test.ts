@@ -26,6 +26,17 @@ vi.mock('../../api/encryption', () => ({
   enableEncryption: vi.fn(),
   cleanupPlaintext: vi.fn(),
 }))
+vi.mock('../../api/backup', () => ({
+  getBackupStatus: vi.fn(async () => ({
+    ok: true,
+    has_backup: true,
+    encrypted_mode: false,
+    age_days: 0.1,
+    verify: 'pass',
+    file_count: 42,
+  })),
+  runBackupNow: vi.fn(async () => 'periodic-test-0001'),
+}))
 vi.mock('../../utils/tts', () => ({
   getTtsAutoPlay: vi.fn(() => false),
   setTtsAutoPlay: vi.fn(),
@@ -115,5 +126,56 @@ describe('SettingsPanel 宠物开关状态回显（NP-06）', () => {
     const body = JSON.parse(String(postCall![1]!.body)) as Record<string, string>
     expect(body.llm_price_input_per_mtok).toBe('3.5')
     expect(body.llm_price_output_per_mtok).toBe('8')
+  })
+
+  it('NP-12：打开设置展示备份状态（校验通过）；立即备份后状态刷新', async () => {
+    const backupMod = (await import('../../api/backup')) as unknown as {
+      getBackupStatus: ReturnType<typeof vi.fn>
+      runBackupNow: ReturnType<typeof vi.fn>
+    }
+    const { getBackupStatus, runBackupNow } = backupMod
+
+    const wrapper = mount(
+      SettingsPanel,
+      { props: { show: false, personaName: '菟菚' }, global: { stubs: { teleport: true } } },
+    )
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(getBackupStatus).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('最新备份校验通过')
+
+    const backupBtn = wrapper.findAll('button').find((b) => b.text() === '立即备份')
+    expect(backupBtn).toBeTruthy()
+    await backupBtn!.trigger('click')
+    await flushPromises()
+    expect(runBackupNow).toHaveBeenCalled()
+    // 备份成功后会刷新状态（真实场景读到新备份）——最终行回到校验通过
+    expect(wrapper.text()).toContain('最新备份校验通过')
+  })
+
+  it('NP-12：超 3 天未备份的黄色提醒（stale 样式）', async () => {
+    const { getBackupStatus } = (await import('../../api/backup')) as unknown as {
+      getBackupStatus: ReturnType<typeof vi.fn>
+    }
+    getBackupStatus.mockResolvedValue({
+      ok: true,
+      has_backup: true,
+      encrypted_mode: false,
+      age_days: 5.2,
+      verify: 'pass',
+      file_count: 40,
+    })
+
+    const wrapper = mount(
+      SettingsPanel,
+      { props: { show: false, personaName: '菟菚' }, global: { stubs: { teleport: true } } },
+    )
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const line = wrapper.get('[role="status"]')
+    expect(line.text()).toContain('5 天前')
+    expect(line.attributes('style')).toContain('#d9a441')
   })
 })
