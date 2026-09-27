@@ -479,6 +479,8 @@ function attachDesktopExtras(): void {
     },
   })
   ipcMain.handle('pet:toggle', () => petManager?.toggle() ?? Promise.resolve(false))
+  // NP-06：宠物开关真实状态查询（设置页/首次向导回显；此前恒 false 会误关）
+  ipcMain.handle('pet:get-state', () => petManager?.isOpen() ?? false)
 }
 
 app.on('before-quit', () => {

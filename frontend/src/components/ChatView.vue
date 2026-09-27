@@ -485,6 +485,14 @@ watch(() => props.reloadKey, () => {
 
 let unsubscribeInitiativeIpc: (() => void) | undefined
 
+// NP-06：首次运行向导完成后的输入预填（与 tztuzhan:config-saved 同款轻量事件通道）
+function onPrefillInput(e: Event) {
+  const text = (e as CustomEvent<string>).detail
+  if (!text) return
+  input.value = text
+  requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.inputbar textarea')?.focus())
+}
+
 onMounted(async () => {
   try {
     await loadMessages(props.sessionId)
@@ -505,6 +513,7 @@ onMounted(async () => {
   // D11 离线补算：重开后把她离线期间的日子逐条说给你（可跳过）；不阻塞输入
   void replayOfflineRecap()
   document.addEventListener('keydown', onKeydown)
+  window.addEventListener('tztuzhan:prefill-input', onPrefillInput)
 })
 
 onUnmounted(() => {
@@ -513,6 +522,7 @@ onUnmounted(() => {
   unsubscribeInitiativeIpc?.()
   unsubscribeInitiativeIpc = undefined
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('tztuzhan:prefill-input', onPrefillInput)
   if (portraitRefreshTimer) clearTimeout(portraitRefreshTimer)
 })
 

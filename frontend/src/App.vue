@@ -4,6 +4,8 @@ import SessionList from './components/SessionList.vue'
 import ChatView from './components/ChatView.vue'
 import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import FirstRunWizard from './components/FirstRunWizard.vue'
+import { shouldShowFirstRun, FIRST_RUN_FLAG } from './utils/firstRun'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
@@ -335,6 +337,9 @@ async function lockAppNow(): Promise<void> {
   onAppLocked()
 }
 
+// NP-06 首次运行向导：没看过且尚未配 Key 才弹（判定逻辑见 utils/firstRun.ts）
+const wizardOpen = ref(false)
+
 onMounted(async () => {
   await ensureBaseUrl()
   loadTheme()
@@ -353,6 +358,10 @@ onMounted(async () => {
     const flags = await (await apiFetch('/api/flags')).json()
     compactUi.value = flags.flags?.compact_ui_enabled !== false
   } catch { /* 保持简洁布局 */ }
+  try {
+    const cfg = await (await apiFetch('/api/config')).json()
+    wizardOpen.value = shouldShowFirstRun(localStorage.getItem(FIRST_RUN_FLAG), cfg)
+  } catch { /* 后端未就绪时不打扰 */ }
   startVisualState(() => activePersona.value.id)
   focusMode.start()   // 专注陪伴：恢复未结束的计时并对表
 })
@@ -509,6 +518,7 @@ onUnmounted(() => {
 
     <!-- 面板 -->
     <SettingsPanel :show="settingsOpen" :persona-name="activePersona.name" @close="closeSettings" />
+    <FirstRunWizard :show="wizardOpen" :persona-name="activePersona.name" @close="wizardOpen = false" />
     <AgentPanel :show="agentOpen" :persona-name="activePersona.name" @close="agentOpen = false" />
     <TourPanel :show="tourOpen" :persona-name="activePersona.name" @close="tourOpen = false" @use="discussActivity" />
     <DiaryPanel :show="diaryOpen" :persona-name="activePersona.name" @close="diaryOpen = false" />
