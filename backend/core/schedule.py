@@ -227,7 +227,9 @@ def pick_material(user_id: str, local_date, recent_ids: list[str]) -> dict | Non
     bucket = [m for m in MATERIALS if current is not None and m["activity"] == current.activity]
     pool = [m for m in (bucket or MATERIALS) if m["id"] not in recent_set]
     if not pool:
-        pool = [m for m in (bucket or MATERIALS)] or list(MATERIALS)
+        # 桶内素材近 7 天全用过：放宽到全池仍排除 recent；全池也用尽才允许最早的重复
+        # （原实现放宽时取 bucket or MATERIALS，把 recent 放回了候选——7 天滑窗去重失效）
+        pool = [m for m in MATERIALS if m["id"] not in recent_set] or list(MATERIALS)
     return pool[_seed(user_id, local_date, "material") % len(pool)]
 
 

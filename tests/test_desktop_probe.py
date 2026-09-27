@@ -23,7 +23,13 @@ from backend.core.desktop_probe import probe_foreground  # noqa: E402
 
 def test_probe_real_call() -> None:
     result = probe_foreground()
-    assert set(result) == {"fullscreen", "display_id", "window_class"}
+    # NP-14 桌面感知契约扩展：+ process_name / idle_seconds / category
+    assert set(result) == {
+        "fullscreen", "display_id", "window_class",
+        "process_name", "idle_seconds", "category",
+    }
+    assert result["category"] in {"idle", "code", "browse", "fullscreen", "other"}
+    assert isinstance(result["idle_seconds"], (int, float))
     # 测试运行时前台是终端/IDE/无人值守桌面，正常不应全屏；就算真全屏也是合法 bool
     assert isinstance(result["fullscreen"], bool)
     assert "标题" not in result["window_class"], "只允许类名，不允许标题/内容"
