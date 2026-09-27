@@ -76,6 +76,26 @@ def _is_auth_error(exc: Exception) -> bool:
     return status in (401, 403)
 
 
+def _parse_tool_args(name: str, raw_args: str | None) -> dict:
+    """容错解析工具参数 JSON：坏 JSON/非对象一律按空对象处理，绝不抛出。"""
+    try:
+        args = json.loads(raw_args or "{}")
+        if not isinstance(args, dict):
+            logger.warning("[LLM] 工具 {} 参数不是对象，已按空对象处理", name)
+            return {}
+        return args
+    except Exception as je:
+        logger.warning("[LLM] 工具 {} 的参数 JSON 解析失败：{}", name, je)
+        return {}
+
+
+# 端点"不支持 tools 参数"的降级判定关键词（收窄降级，避免把网络/鉴权错误误判为不支持）
+_TOOLS_UNSUPPORTED_MARKS = (
+    "not supported", "unsupported", "unknown parameter",
+    "unexpected parameter", "does not support", "tools.*not",
+)
+
+
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
@@ -292,15 +312,10 @@ async def chat_native(
                           "".join(str(m.get("content") or "") for m in messages), text)
             calls: list[dict] = []
             for tc in (msg.tool_calls or []):
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                    if not isinstance(args, dict):
-                        logger.warning("[LLM] 工具 {} 参数不是对象，已按空对象处理", tc.function.name)
-                        args = {}
-                except Exception as je:
-                    logger.warning("[LLM] 工具 {} 的参数 JSON 解析失败：{}", tc.function.name, je)
-                    args = {}
-                calls.append({"name": tc.function.name, "arguments": args})
+                calls.append({
+                    "name": tc.function.name,
+                    "arguments": _parse_tool_args(tc.function.name, tc.function.arguments),
+                })
             return text, calls
         except Exception as e:
             last_exc = e
@@ -315,12 +330,102 @@ async def chat_native(
         msg = str(last_exc).lower()
         # 收窄降级判定：只有明确表示"不支持 tools/未知参数"才回退文本模式，
         # 避免把网络/鉴权等错误误判为不支持函数调用
-        if any(k in msg for k in ("not supported", "unsupported", "unknown parameter",
-                                  "unexpected parameter", "does not support", "tools.*not")):
+        if any(k in msg for k in _TOOLS_UNSUPPORTED_MARKS):
             logger.warning("[LLM] 原生工具调用不受支持，降级回文本模式: {}", str(last_exc)[:100])
             text = await chat(messages, mock=mock)
             return text, []
     raise last_exc  # type: ignore[union-attr]
+
+
+async def chat_native_stream(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    *,
+    on_text: "Callable[[str], Awaitable[None]] | None" = None,
+    mock: bool = False,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> tuple[str, list[dict]]:
+    """流式原生函数调用：正文片段逐个经 on_text 外推（工具选择轮的过渡语），
+    流式 tool_calls 分片按 index 聚合。返回值语义与 chat_native 完全一致：
+    (回复文本, [{"name", "arguments"}])，空 calls 即模型直接给出最终回复。
+
+    重试只在尚未产出任何片段前进行（对齐 chat_stream：已外推的内容不可重放）。
+    llm_stream_disable 开启时静默退回非流式 chat_native（不调 on_text）。
+    """
+    if mock:
+        return await chat_native(messages, tools, mock=True)
+    if getattr(config, "llm_stream_disable", False):
+        return await chat_native(messages, tools, temperature=temperature, max_tokens=max_tokens)
+    from .model_routes import resolve_route
+
+    route = resolve_route("tool")
+    client = _client_for_route(route)
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        produced = False
+        text_parts: list[str] = []
+        # 流式 tool_calls 分片按 index 聚合：id/name 取首块，arguments 串接
+        #（id 无需保留——tool_loop 会分配稳定的 call_{loop}_{i}）
+        tc_frags: dict[int, dict] = {}
+        usage = None
+        try:
+            kwargs: dict = {"model": route.model, "messages": messages}
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+            kwargs["temperature"] = config.llm_temperature if temperature is None else temperature
+            kwargs["max_tokens"] = route.max_tokens if max_tokens is None else max_tokens
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
+            stream = await client.chat.completions.create(**kwargs)
+            try:
+                async for chunk in stream:
+                    if getattr(chunk, "usage", None):
+                        usage = chunk.usage
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    piece = getattr(delta, "content", None)
+                    if piece:
+                        produced = True
+                        text_parts.append(piece)
+                        if on_text is not None:
+                            await on_text(piece)
+                    for frag in (getattr(delta, "tool_calls", None) or []):
+                        slot = tc_frags.setdefault(frag.index, {"name": "", "arguments": ""})
+                        fn = getattr(frag, "function", None)
+                        if fn is not None:
+                            if getattr(fn, "name", None):
+                                slot["name"] = fn.name
+                            if getattr(fn, "arguments", None):
+                                slot["arguments"] += fn.arguments
+            finally:
+                # 中断时已外推的 token 也落账（对齐 chat_stream 的中断记账）
+                text = "".join(text_parts)
+                if produced or usage is not None or tc_frags:
+                    _record_usage("tool", route.model, usage,
+                                  "".join(str(m.get("content") or "") for m in messages), text)
+            calls = [
+                {"name": slot["name"], "arguments": _parse_tool_args(slot["name"], slot["arguments"])}
+                for _, slot in sorted(tc_frags.items())
+            ]
+            return text, calls
+        except Exception as e:
+            last_exc = e
+            if produced or tc_frags or _is_auth_error(e) or not _is_retryable(e) or attempt >= _MAX_RETRIES:
+                break
+            wait = _RETRY_BASE_SEC * (2**attempt)
+            logger.warning("[LLM] 原生流式第{}次失败（{}），{:.1f}s 后重试",
+                          attempt + 1, type(e).__name__, wait)
+            await asyncio.sleep(wait)
+    # 与 chat_native 同款收窄降级：仅"端点不支持 tools"才退回非流式
+    if tools and last_exc:
+        msg = str(last_exc).lower()
+        if any(k in msg for k in _TOOLS_UNSUPPORTED_MARKS):
+            logger.warning("[LLM] 原生工具流式不受支持，降级回非流式: {}", str(last_exc)[:100])
+            return await chat_native(messages, tools=None, temperature=temperature, max_tokens=max_tokens)
+    raise last_exc  # type: ignore[misc]
 
 
 async def chat_stream(

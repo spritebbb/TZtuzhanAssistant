@@ -1169,7 +1169,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
     if use_tool_loop:
         from ..tools.service import run_tool_round
-        from .llm import chat_native
+        from .llm import chat_native, chat_native_stream
 
         # 工具循环把 system 指令拆到 final_instruction 单独传递，主 messages 里
         # 已注入的 think/topic/drawn 与这里保持一致即可，无需重复。
@@ -1190,11 +1190,37 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
                         logger.debug("[pipeline] 工具循环流式回调失败（客户端可能已断开）")
                 yield piece
 
+        async def _tool_native_stream(ms, tools, emit):
+            """工具选择轮的流式原生调用：过渡语先攒成完整句段、过硬规则扫描
+            （复用卫生出口的切分），再经 emit 外推——别让内部标记/半截标签上屏。
+            hygiene 关闭时直通，与正文流式的原始逐块行为保持一致。"""
+            from .output_hygiene import scan_rules
+            from .stream_hygiene import _complete_unit_end
+
+            buf = {"text": ""}
+
+            async def screened(piece: str) -> None:
+                buf["text"] += piece
+                while True:
+                    end = _complete_unit_end(buf["text"])
+                    if not end:
+                        return
+                    unit = buf["text"][:end]
+                    buf["text"] = buf["text"][end:]
+                    if hygiene_ctx is not None and scan_rules(unit, context=hygiene_ctx):
+                        continue  # 命中不可展示标记：丢弃该句段，不外推
+                    await emit(unit)
+
+            return await chat_native_stream(ms, tools, on_text=screened, mock=mock)
+
+        tool_stream_on = stream_cb is not None and not mock
+
         raw = await run_tool_round(
             messages,
             chat=lambda ms: chat(ms, mock=mock),
             chat_native=lambda ms, tools: chat_native(ms, tools, mock=mock),
-            chat_final_stream=_tool_final_stream if stream_cb is not None and not mock else None,
+            chat_final_stream=_tool_final_stream if tool_stream_on else None,
+            chat_native_stream=_tool_native_stream if tool_stream_on else None,
             max_loops=2,
             final_instruction=final_instruction,
             on_progress=progress_cb,
