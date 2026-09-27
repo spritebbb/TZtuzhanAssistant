@@ -209,6 +209,43 @@ def _append_sync(session_id: str, messages: list[dict]) -> bool:
         conn.close()
 
 
+# ---- 截断（NP-08 消息重发最小切片：只对 current 会话，删 keep_count 之后的消息）----
+
+def _truncate_sync(session_id: str, keep_count: int) -> int | None:
+    """保留会话前 keep_count 条消息，删除其余。
+
+    返回删除条数；会话不存在返回 None；keep_count 越界（<0 或 > 条数）抛 ValueError。
+    注意：被删消息此前已被感知层提取的记忆/事实不回滚（拍板语义，v1 不做事实回滚）。
+    """
+    if keep_count < 0:
+        raise ValueError("keep_count 不能为负")
+    session_id = session_storage_id(session_id)
+    conn = _connect()
+    try:
+        _ensure_session(conn, session_id)
+        conn.commit()
+        rows = conn.execute(
+            "SELECT id FROM messages WHERE session_id=? ORDER BY id ASC", (session_id,)
+        ).fetchall()
+        if rows is None:
+            return None
+        total = len(rows)
+        if keep_count > total:
+            raise ValueError(f"keep_count={keep_count} 超过现有消息数 {total}")
+        if keep_count == total:
+            return 0
+        cutoff = rows[keep_count]["id"]
+        cur = conn.execute(
+            "DELETE FROM messages WHERE session_id=? AND id >= ?", (session_id, cutoff)
+        )
+        conn.commit()
+        conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (time.time(), session_id))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 # ---- 重命名（NP-03：自动命名撞车后的可导航性兜底）----
 
 def _rename_sync(session_id: str, title: str) -> bool:
@@ -441,6 +478,11 @@ async def append_messages(session_id: str, messages: list[dict]) -> bool:
 async def rename_session(session_id: str, title: str) -> bool:
     async with _lock:
         return await asyncio.to_thread(_rename_sync, session_id, title)
+
+
+async def truncate_session(session_id: str, keep_count: int) -> int | None:
+    async with _lock:
+        return await asyncio.to_thread(_truncate_sync, session_id, keep_count)
 
 
 def _append_proactive_sync(session_id: str, text: str, image: str | None = None) -> bool:

@@ -133,6 +133,18 @@ export async function renameSession(id: string, title: string): Promise<boolean>
   return !!d.ok
 }
 
+/** 截断当前会话（NP-08 重发切片）：保留前 keepCount 条，返回删除条数。 */
+export async function truncateSession(keepCount: number): Promise<number | null> {
+  const r = await apiFetch('/api/sessions/current/truncate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keep_count: keepCount }),
+  })
+  if (!r.ok) return null
+  const d = await r.json()
+  return d.ok ? Number(d.removed) : null
+}
+
 /** 归档列表（只读回看）。 */
 export async function listArchives(): Promise<ArchiveInfo[]> {
   const r = await apiFetch('/api/sessions/archives')
