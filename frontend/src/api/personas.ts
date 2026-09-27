@@ -34,6 +34,16 @@ export async function importPersona(file: File): Promise<PersonaProfile> {
   return data.persona
 }
 
+/** ST 卡导入向导：卡 → 菟菚人格卡 markdown 预览（不入库，用户确认后走 importPersona）。 */
+export async function convertStCard(file: File): Promise<{ markdown: string; name: string; warnings: string[] }> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await apiFetch('/api/personas/convert-stcard', { method: 'POST', body: form })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || 'ST 卡转换失败')
+  return { markdown: String(data.markdown || ''), name: String(data.name || ''), warnings: Array.isArray(data.warnings) ? data.warnings : [] }
+}
+
 export async function generatePersona(brief: string): Promise<{ markdown: string; name: string }> {
   const response = await apiFetch('/api/personas/generate', {
     method: 'POST',
