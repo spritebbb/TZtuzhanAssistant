@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import {
   activatePersona,
+  generatePersona,
   importPersona,
   listPersonas,
   updatePersona,
@@ -23,6 +24,11 @@ const name = ref('')
 const subtitle = ref('')
 const theme = ref<'dark' | 'light'>('dark')
 const voice = ref('zh-CN-XiaoxiaoNeural')
+const genOpen = ref(false)
+const brief = ref('')
+const genBusy = ref(false)
+const generated = ref('')
+const genName = ref('')
 
 function fillForm(profile: PersonaProfile) {
   active.value = profile
@@ -76,6 +82,44 @@ async function onFile(event: Event) {
   }
 }
 
+async function runGenerate() {
+  if (!brief.value.trim() || genBusy.value) return
+  genBusy.value = true
+  generated.value = ''
+  error.value = ''
+  try {
+    const result = await generatePersona(brief.value)
+    generated.value = result.markdown
+    genName.value = result.name
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    genBusy.value = false
+  }
+}
+
+// 生成结果先给用户过目/手改，再走与文件导入完全相同的入库与激活路径。
+async function saveGenerated() {
+  if (!generated.value.trim() || busy.value) return
+  const stem = (genName.value || 'AI人格卡').replace(/[\\/:*?"<>|\s]+/g, '-').slice(0, 40) || 'AI人格卡'
+  const file = new File([generated.value], `${stem}.md`, { type: 'text/markdown' })
+  busy.value = 'import'
+  error.value = ''
+  try {
+    const next = await importPersona(file)
+    await load()
+    emit('switched', next)
+    genOpen.value = false
+    generated.value = ''
+    brief.value = ''
+    genName.value = ''
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function saveSettings() {
   if (!active.value || busy.value) return
   busy.value = 'save'
@@ -115,10 +159,39 @@ watch(() => props.show, value => { if (value) void load() })
         <div class="body">
           <div class="library-head">
             <b>人格档案</b>
+            <button class="import generator-toggle" :disabled="!!busy || disabled" @click="genOpen = !genOpen">
+              {{ genOpen ? '收起生成器' : 'AI 生成人格卡' }}
+            </button>
             <button class="import" :disabled="!!busy || disabled" @click="fileInput?.click()">
               {{ busy === 'import' ? '加载中…' : '加载 .md 人格卡' }}
             </button>
             <input ref="fileInput" class="hidden" type="file" accept=".md,text/markdown,text/plain" @change="onFile" />
+          </div>
+          <div v-if="genOpen" class="generator">
+            <textarea
+              v-model="brief"
+              class="gen-brief"
+              rows="3"
+              maxlength="4000"
+              placeholder="用一段话描述你想要的角色：身份、性格、说话风格、和你的关系……例：毒舌但心软的猫娘程序员，喜欢熬夜写代码和吐槽，嘴上嫌弃你其实很在意你"
+            ></textarea>
+            <div class="gen-actions">
+              <span>{{ genBusy ? '生成中，约需一两分钟…' : '生成后可先编辑再导入；会沿用菟菚卡的结构模板' }}</span>
+              <button class="import gen-run" :disabled="genBusy || !!busy || disabled" @click="runGenerate">
+                {{ genBusy ? '生成中…' : '开始生成' }}
+              </button>
+            </div>
+            <textarea
+              v-if="generated"
+              v-model="generated"
+              class="card-preview"
+              rows="12"
+              spellcheck="false"
+              aria-label="生成的人格卡内容，可编辑"
+            ></textarea>
+            <button v-if="generated" class="import gen-save" :disabled="!!busy || disabled" @click="saveGenerated">
+              {{ busy === 'import' ? '导入中…' : '保存并启用该人格' }}
+            </button>
           </div>
           <div class="persona-list">
             <button
@@ -187,8 +260,14 @@ header p { margin: 5px 0 0; color: var(--text-faint); font-size: .78rem; }
 .settings { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
 .settings-title span { color: var(--text-faint); font-size: .7rem; }
 label { display: grid; grid-template-columns: 105px 1fr; align-items: center; gap: 10px; margin: 9px 0; color: var(--text-dim); font-size: .78rem; }
-input, select { min-width: 0; padding: 8px 10px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; outline: none; }
-input:focus, select:focus { border-color: var(--primary); box-shadow: var(--glow); }
+input, select, textarea { min-width: 0; padding: 8px 10px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; outline: none; font: inherit; }
+input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: var(--glow); }
+.generator { margin: 10px 0 14px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px; }
+.generator textarea { width: 100%; resize: vertical; font-size: .78rem; line-height: 1.6; }
+.generator .card-preview { font-family: ui-monospace, Consolas, monospace; font-size: .72rem; white-space: pre-wrap; }
+.gen-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.gen-actions span { flex: 1; color: var(--text-faint); font-size: .7rem; }
+.gen-save { display: block; margin: 10px 0 0 auto; }
 .save { display: block; margin: 12px 0 0 auto; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .warning, .error, .footnote { margin: 10px 0 0; font-size: .72rem; line-height: 1.5; }

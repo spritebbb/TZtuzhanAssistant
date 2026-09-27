@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from ..core import persona as persona_runtime
-from ..core import persona_profiles
+from ..core import persona_generator, persona_profiles
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
 
@@ -39,6 +39,25 @@ async def api_personas_list():
         "active": persona_profiles.active_profile(),
         "personas": persona_profiles.list_profiles(),
     }
+
+
+@router.post("/generate")
+async def api_personas_generate(request: Request):
+    # 生成不读当前激活卡、不切库，无需 busy 守卫；生成后的导入/激活走原路径自守卫。
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 解析失败"}, status_code=400)
+    brief = str((body or {}).get("brief") or "").strip()
+    if not brief:
+        return JSONResponse({"ok": False, "error": "角色设定简报不能为空"}, status_code=400)
+    try:
+        card = await persona_generator.generate_card(brief)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"生成失败：{exc}"}, status_code=502)
+    return {"ok": True, "markdown": card, "name": persona_generator.card_name(card)}
 
 
 @router.post("/import")

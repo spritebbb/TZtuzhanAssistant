@@ -34,6 +34,17 @@ export async function importPersona(file: File): Promise<PersonaProfile> {
   return data.persona
 }
 
+export async function generatePersona(brief: string): Promise<{ markdown: string; name: string }> {
+  const response = await apiFetch('/api/personas/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ brief }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.ok) throw new Error(data.error || '生成人格卡失败')
+  return { markdown: data.markdown, name: data.name }
+}
+
 export async function updatePersona(id: string, updates: Partial<PersonaProfile>): Promise<PersonaProfile> {
   const response = await apiFetch(`/api/personas/${encodeURIComponent(id)}`, {
     method: 'PATCH',
