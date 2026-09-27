@@ -49,6 +49,9 @@ def test_tier_boundaries() -> None:
 def test_month_spend_aggregates_all_users() -> None:
     from backend.core.userdb import log_usage
 
+    # NP-07 默认价改为 2.0/8.0 后，本测试锁定单价隔离断言（不跟随默认价漂移）
+    config.llm_price_input_per_mtok = 1.0
+    config.llm_price_output_per_mtok = 2.0
     cost_guard.reset_cache_for_testing()
     log_usage("user-a", "reply", "m", 1_000_000, 0)   # input ¥1/Mtok → ¥1.0
     log_usage("user-b", "tool", "m", 0, 500_000)      # output ¥2/Mtok → ¥1.0
@@ -57,6 +60,9 @@ def test_month_spend_aggregates_all_users() -> None:
     # 缓存：60s 内再取同值；强制刷新后从库里重算仍一致
     assert cost_guard.month_spend() == spend
     cost_guard.reset_cache_for_testing()
+    # 恢复全局默认价，避免污染同进程后续断言
+    config.llm_price_input_per_mtok = 2.0
+    config.llm_price_output_per_mtok = 8.0
     print("[OK] month_spend：全人格聚合 + 当月过滤 + 缓存")
 
 
