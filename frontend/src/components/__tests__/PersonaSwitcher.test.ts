@@ -95,3 +95,17 @@ describe('PersonaSwitcher AI 生成人格卡', () => {
     expect(importPersona).not.toHaveBeenCalled()
   })
 })
+
+describe('PersonaSwitcher 人格包导入（NP-13）', () => {
+  it('文件选择器接受 .md 与 .zip（人格包）', () => {
+    const wrapper = mountPanel()
+    const accept = wrapper.get('input[type="file"]').attributes('accept') || ''
+    expect(accept).toContain('.md')
+    expect(accept).toContain('.zip')
+  })
+
+  it('导入按钮文案覆盖人格包', () => {
+    const wrapper = mountPanel()
+    expect(wrapper.get('button.import:not(.generator-toggle)').text()).toContain('人格包')
+  })
+})

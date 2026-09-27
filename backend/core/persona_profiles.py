@@ -239,7 +239,7 @@ def list_profiles() -> list[dict]:
 
 def import_card(filename: str, data: bytes) -> dict:
     if Path(filename).suffix.lower() != ".md":
-        raise PersonaProfileError("请加载与原人格卡一致的 .md 文件")
+        raise PersonaProfileError("请加载 .md 人格卡或 .zip 人格包（包内含 persona.md 与可选 portraits/ 立绘）")
     text = _decode_card(data)
     metadata = _metadata_from_card(text)
     name = (metadata.get("name") or _name_from_card(text, filename))[:40]
