@@ -16,8 +16,27 @@ from ..tools.base import ToolRegistry
 router = APIRouter(prefix="/api", tags=["meta"])
 
 
-def _tool_status() -> dict:
-    return {
+def _negative_mood(user_id: str) -> dict:
+    """哄好玩法：负面情绪摘要。kind 是人话级标签（委屈/生气/不安），
+    strength 只到档位（low/mid/high）——数值细节留在可解释面板。"""
+    try:
+        from ..core.emotion_state import active_emotions_map
+
+        m = active_emotions_map(user_id)
+        peak_name, peak = max(
+            (("anger", m.get("anger", 0.0)), ("hurt", m.get("hurt", 0.0)), ("anxiety", m.get("anxiety", 0.0))),
+            key=lambda pair: pair[1],
+        )
+        if peak < 0.35:
+            return {"active": False, "kind": "", "level": ""}
+        kind = {"anger": "在生气", "hurt": "有点委屈", "anxiety": "有些不安"}[peak_name]
+        level = "high" if peak >= 0.6 else "mid"
+        return {"active": True, "kind": kind, "level": level}
+    except Exception:
+        return {"active": False, "kind": "", "level": ""}
+
+
+def _tool_status() -> dict:    return {
         # 搜索并不依赖付费 key：开启后可直接走 Bing/DDG，SEARCH_API_KEY
         # 只是在可用时把博查放到首选。状态灯应表达“能力已开启”，而不是“有 key”。
         "search": bool(config.search_enabled),
@@ -91,6 +110,9 @@ async def api_meta(session_id: str = ""):
         "search_last_error": search_last_error(),
         "tool_list": [t.model_dump() for t in ToolRegistry.list()],
         "mood": {"value": mood_val, "label": mood_label, "emoji": mood_emoji},
+        # 哄好玩法：负面情绪摘要（anger/hurt/anxiety 的当前强度），
+        # 前端据此显示「她好像有点委屈」徽标；数值只到类别级，不暴露分数。
+        "negative_mood": _negative_mood(uid),
         "affection": affection_display(uid),
         "persona": active_profile(),
         "visual_state": visual_state(uid),
