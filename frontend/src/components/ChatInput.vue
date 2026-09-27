@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import { desktopSttBridge, PcmRecorder } from '../utils/stt'
+import { setTtsAutoPlay, stopTts } from '../utils/tts'
 
 const input = defineModel<string>('input', { required: true })
 const ephemeral = defineModel<boolean>('ephemeral', { default: false })
@@ -23,12 +24,29 @@ const sttHint = ref('')
 let recorder: PcmRecorder | null = null
 let sttGen = 0 // 迟到结果丢弃：卸载/重开后旧请求的结果不再回填
 
+// === 连续语音对话（NP 语音大件 v1）===
+// 开启后：说完自动发送（不再只回填草稿）；开始录音时停掉正在播的 TTS（v1
+// 打断规则）；回复自动朗读联动开启（关闭模式不动用户已有的朗读偏好）。
+const VOICE_CHAT_KEY = 'tuzhan-voice-chat'
+const voiceChat = ref(false)
+try { voiceChat.value = localStorage.getItem(VOICE_CHAT_KEY) === '1' } catch { /* ignore */ }
+
+function toggleVoiceChat() {
+  if (!sttBridge) return
+  voiceChat.value = !voiceChat.value
+  try { localStorage.setItem(VOICE_CHAT_KEY, voiceChat.value ? '1' : '0') } catch { /* ignore */ }
+  if (voiceChat.value) setTtsAutoPlay(true) // 语音对话没有朗读就不闭环
+}
+
 if (sttBridge) {
   sttBridge.onEvent((ev) => {
     if (ev.op === 'final' && ev.text) {
       // 只回填草稿，用户确认才发送；不把识别结果直接喂意图/工具
       input.value = input.value ? `${input.value}${ev.text}` : ev.text
       sttState.value = 'idle'
+      if (voiceChat.value && input.value.trim()) {
+        emit('send') // 连续语音：说完即发（父层 send 读 v-model 已更新的值）
+      }
     } else if (ev.op === 'error') {
       sttState.value = 'idle'
       sttHint.value = ev.message || '本地转写失败'
@@ -54,6 +72,7 @@ async function toggleMic(): Promise<void> {
     return
   }
   if (sttState.value === 'busy') return
+  if (voiceChat.value) stopTts() // 连续语音：说话时停掉她正在播的语音（v1 打断规则）
   sttGen += 1
   const gen = sttGen
   try {
@@ -173,6 +192,15 @@ function useShortcut(s: Shortcut) {
           <path d="M12 18v4"/>
         </svg>
       </button>
+      <button
+        v-if="sttBridge"
+        class="voice-mode-btn"
+        :class="{ on: voiceChat }"
+        :aria-pressed="voiceChat"
+        :title="voiceChat ? '语音对话中：说完自动发送，回复自动朗读。再点一次退出' : '开启语音对话：说完自动发送、回复自动朗读'"
+        aria-label="语音对话模式"
+        @click="toggleVoiceChat"
+      >◈</button>
       <span v-if="sttHint" class="stt-hint">{{ sttHint }}</span>
       <textarea v-model="input" rows="1" :aria-label="'给' + (personaName || '助手') + '的消息'" :placeholder="'和' + (personaName || '助手') + '说点什么…（Enter 发送，Shift+Enter 换行）'" @keydown.enter.exact="onEnterKey"></textarea>
       <button v-if="streaming" class="btn stop" aria-label="停止生成" @click="emit('stop')">
@@ -250,6 +278,20 @@ function useShortcut(s: Shortcut) {
 }
 .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .mic-btn.recording { color: var(--primary-text); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--edge-active); }
+.voice-mode-btn {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.85rem;
+  width: 28px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  transition: all 0.16s ease;
+}
+.voice-mode-btn:hover { color: var(--primary-text); background: var(--primary-soft); }
+.voice-mode-btn.on { color: var(--primary-text); border-color: var(--edge-active); background: var(--primary-soft); }
 .mic-btn.recording svg { animation: mic-pulse 1.4s ease-in-out infinite; }
 @keyframes mic-pulse {
   0%, 100% { opacity: 1; }

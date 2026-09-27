@@ -1,6 +1,16 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('../../utils/tts', () => ({
+  setTtsAutoPlay: vi.fn(),
+  stopTts: vi.fn(),
+  getTtsAutoPlay: vi.fn(() => false),
+  autoPlayTts: vi.fn(),
+  playTts: vi.fn(),
+  TTS_STATE_EVENT: 'tztuzhan:tts-state',
+}))
+
+import { setTtsAutoPlay, stopTts } from '../../utils/tts'
 import ChatInput from '../ChatInput.vue'
 
 const sttBridge = {
@@ -184,5 +194,75 @@ describe('ChatInput 生成期间可打字（NP-02）', () => {
   it('busy 时发送按钮保持禁用', () => {
     const wrapper = mountBusy()
     expect(wrapper.get('.btn.send').attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('ChatInput 连续语音对话（NP 语音 v1）', () => {
+  const VOICE_KEY = 'tuzhan-voice-chat'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    ;(window as unknown as Record<string, unknown>).tuzhanStt = sttBridge
+  })
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).tuzhanStt
+  })
+
+  function mountWithEvent() {
+    let eventCb: ((ev: { op: string; text?: string }) => void) | null = null
+    sttBridge.onEvent.mockImplementationOnce(
+      (cb: (ev: { op: string; text?: string }) => void) => {
+        eventCb = cb
+        return () => undefined
+      },
+    )
+    const wrapper = mount(ChatInput, {
+      props: { input: '', ephemeral: false, busy: false, streaming: false },
+    })
+    return { wrapper, cb: () => eventCb! }
+  }
+
+  it('开关：开启时联动自动朗读并持久化；网页无桥不渲染', async () => {
+    const wrapper = mount(ChatInput, {
+      props: { input: '', ephemeral: false, busy: false, streaming: false },
+    })
+    const btn = wrapper.get('[aria-label="语音对话模式"]')
+    expect(btn.attributes('aria-pressed')).toBe('false')
+    await btn.trigger('click')
+    expect(btn.attributes('aria-pressed')).toBe('true')
+    expect(setTtsAutoPlay).toHaveBeenCalledWith(true)
+    expect(localStorage.getItem(VOICE_KEY)).toBe('1')
+
+    delete (window as unknown as Record<string, unknown>).tuzhanStt
+    const web = mount(ChatInput, {
+      props: { input: '', ephemeral: false, busy: false, streaming: false },
+    })
+    expect(web.find('[aria-label="语音对话模式"]').exists()).toBe(false)
+  })
+
+  it('语音模式中 final 事件自动发送；关闭时只回填草稿不发送', async () => {
+    const { wrapper, cb } = mountWithEvent()
+    await wrapper.get('[aria-label="语音对话模式"]').trigger('click')
+
+    cb()({ op: 'final', text: '帮我想个标题' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(wrapper.emitted('send')).toHaveLength(1)
+    expect(wrapper.emitted('update:input')?.at(-1)).toEqual(['帮我想个标题'])
+
+    // 关闭模式
+    await wrapper.get('[aria-label="语音对话模式"]').trigger('click')
+    cb()({ op: 'final', text: '再说一句' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(wrapper.emitted('send')).toHaveLength(1) // 不增加
+  })
+
+  it('开始录音时停掉正在播的语音（v1 打断规则）', async () => {
+    const { wrapper } = mountWithEvent()
+    await wrapper.get('[aria-label="语音对话模式"]').trigger('click')
+    await wrapper.get('[aria-label="语音输入"]').trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(stopTts).toHaveBeenCalled()
   })
 })
