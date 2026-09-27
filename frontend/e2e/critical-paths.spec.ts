@@ -283,7 +283,8 @@ test('toggles a feature switch in settings and sees the change persisted', async
   await expect(flagToggle).toBeVisible()
   const before = await flagToggle.isChecked()
   await flagToggle.click()
-  await expect(settings.getByRole('status')).toContainText('已保存并立即生效')
+  // NP-12 在设置面板新增了第二个 role="status"（备份状态提示），改按文案定位保存提示
+  await expect(settings.getByText('已保存并立即生效')).toBeVisible()
 
   // 后端确认落盘（切换后与切换前互补）
   const flags = await (await page.request.get('/api/flags')).json()
@@ -325,9 +326,11 @@ test('edits, pins and forgets a memory through the real API roundtrip', async ({
   await expect(pinToggle).toBeChecked()
   await expect(card.locator('.provenance')).toContainText('长期保留')
 
-  // 忘掉（window.confirm 两段式）→ 条目消失
-  await page.evaluate(() => { window.confirm = () => true })
+  // 忘掉（NP-09 起为应用内 ConfirmDialog 两段式，不再是 window.confirm）→ 条目消失
   await card.getByRole('button', { name: '忘掉' }).click()
+  const confirmDialog = page.getByRole('alertdialog', { name: /忘掉这条/ })
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole('button', { name: '确定' }).click()
   await expect(memory.getByText(edited)).toHaveCount(0)
   await expect(memory.getByText(original)).toHaveCount(0)
 })
