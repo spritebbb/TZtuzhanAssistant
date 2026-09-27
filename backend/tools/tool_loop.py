@@ -9,12 +9,13 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Callable
 
 from ..core.log import logger
-from .base import ToolRegistry, resolve_openai_name
+from .base import CATEGORY_READ, ToolRegistry, resolve_openai_name
 from .hardening import (
     MAX_TOOL_CALLS,
     ToolLoopGuard,
@@ -327,6 +328,20 @@ def _call_fingerprint(name: str, args: dict) -> str:
     return f"{name}:{payload}"
 
 
+def _parallel_safe(entry: dict, specs: dict) -> bool:
+    """同批并发的安全判定：只读 + 免确认 + 非 MCP（stdio 桥单管道复用，并发未验证）。
+
+    写/确认类工具保持串行，确认弹窗 UX 与执行顺序语义均不变。
+    """
+    spec = specs.get(entry["name"])
+    return (
+        spec is not None
+        and spec.category == CATEGORY_READ
+        and not spec.needs_confirm
+        and not str(getattr(spec, "owner", "") or "").startswith("mcp:")
+    )
+
+
 async def _execute_calls(
     calls: list[dict], fallback: str = "", *,
     seen: dict[str, str] | None = None,
@@ -359,14 +374,14 @@ async def _execute_calls(
         if tool_filter is not None and spec is not None and not tool_filter(spec):
             body = structured_tool_error(
                 kind="permission", name=c["name"],
-                detail="该工具本轮不可用（未命中触发条件）",
+                detail="这个工具这一轮没有启用",
             )
             parts.append(f"[工具结果 {i + 1}/{len(calls)} - {c['name']}]\n{body}")
             continue
         if fingerprint in seen:
             body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
         elif executed >= remaining:
-            body = "调用上限已用尽，本次未执行"
+            body = "这一轮工具调用次数到顶啦，这条先不执行"
         else:
             result = await ToolRegistry.execute(c["name"], args)
             body = result.output if result.ok else (result.error or "调用失败")
@@ -496,7 +511,7 @@ async def _run_native(
         from ..core import llm as _llm
 
         if _llm.task_budget_exceeded():
-            return "（任务 token 预算已用尽（AGENT_TASK_TOKEN_BUDGET），工具循环提前收束；请基于以上已完成的步骤总结收尾）"
+            return "（任务 token 预算已用尽，工具循环提前收束；我先基于以上已完成的步骤收个尾）"
         loop_count += 1
         await _progress({"type": "thinking"})
         try:
@@ -538,74 +553,122 @@ async def _run_native(
                 for c in calls
             ],
         })
-        # 每个工具结果一条独立 tool 消息（id 与 tool_calls 一一对应）
+        # 每个工具结果一条独立 tool 消息（id 与 tool_calls 一一对应）。
+        # 执行拆成两段：先**同步裁决**（可见性/去重/上限/熔断/预算，全程无 await，
+        # 保住 check-then-act 原子性——gather 并发下这些 dict 状态不再天然串行），
+        # 再按原顺序**分块执行**：连续的只读免确认工具合并一批 asyncio.gather
+        # 并发跑，写/确认类与 MCP 工具仍逐个串行（确认弹窗 UX 不变）。
         specs = {t.name: t for t in ToolRegistry.list()}
+        plan: list[dict] = []
+        adjudicated = call_count
         for c in calls:
-            if is_cancelled and is_cancelled():
-                return "（操作已取消）"
             real_name = c.get("_real_name") or c["name"]
             filled = _fill_missing_args(c, fallback, getattr(specs.get(real_name), "input_schema", None))
             filled = _clean_args({"name": real_name, "arguments": filled}, fallback)
             logger.info("[工具循环] 调用 {} 参数={}", real_name, json.dumps(filled, ensure_ascii=False)[:300])
-            # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
-            await _progress({"type": "tool", "name": real_name})
-            fingerprint = _call_fingerprint(real_name, filled)
+            entry: dict = {
+                "call": c, "name": real_name, "args": filled,
+                "fp": _call_fingerprint(real_name, filled),
+                "mode": "execute", "body": "", "src": None,
+                "ok": None, "error_code": "",
+            }
             tool_spec = specs.get(real_name)
-            tool_ok: bool | None = None
-            tool_error_code = ""
+            first_exec = next(
+                (p for p in plan if p["mode"] == "execute" and p["fp"] == entry["fp"]), None
+            )
             if tool_filter is not None and tool_spec is not None and not tool_filter(tool_spec):
                 # 按需隐藏的工具：模型凭记忆猜名字也不执行（避免绕过可见性）
-                body = structured_tool_error(
+                entry["mode"] = "skip"
+                entry["body"] = structured_tool_error(
                     kind="permission", name=real_name,
-                    detail="该工具本轮不可用（未命中触发条件）",
+                    detail="这个工具这一轮没有启用",
                 )
-                tool_ok = False
-                tool_error_code = "permission"
-            elif fingerprint in seen:
-                body = seen[fingerprint] + "\n[重复调用已复用，未再次执行]"
-                tool_ok = True
-            elif call_count >= MAX_TOOL_CALLS:
-                body = "调用上限已用尽，本次未执行"
-                tool_ok = False
-                tool_error_code = "budget_exceeded"
+                entry["ok"], entry["error_code"] = False, "permission"
+            elif entry["fp"] in seen or first_exec is not None:
+                entry["mode"] = "reuse"
+                entry["src"] = first_exec
+                entry["ok"], entry["error_code"] = True, ""
+            elif adjudicated >= MAX_TOOL_CALLS:
+                entry["mode"] = "skip"
+                entry["body"] = "这一轮工具调用次数到顶啦，这条先不执行"
+                entry["ok"], entry["error_code"] = False, "budget_exceeded"
             else:
                 # §17.3 熔断与预算：同签名第 2 次拒执行；总预算超限给结构化错误
                 breaker = guard.check_signature(real_name, filled)
                 budget = None if breaker else guard.check_budget(real_name)
                 if breaker or budget:
-                    body = breaker or budget
-                    tool_ok = False
-                    tool_error_code = "budget_exceeded"
+                    entry["mode"] = "skip"
+                    entry["body"] = breaker or budget
+                    entry["ok"], entry["error_code"] = False, "budget_exceeded"
                 else:
-                    result = await ToolRegistry.execute(real_name, filled)
-                    if result.ok:
-                        body = result.output or "（工具返回空结果）"
-                        guard.record_result(body)
-                        tool_ok = True
-                    else:
-                        # 结构化错误：不把堆栈/密钥塞回上下文
-                        body = structured_tool_error(
-                            kind="provider", name=real_name,
-                            detail=result.error or "调用失败",
-                        )
-                        tool_ok = False
-                        tool_error_code = "provider_error"
-                    seen[fingerprint] = body
-                    call_count += 1
+                    adjudicated += 1
+            plan.append(entry)
+
+        from ..core.external_content import EXTERNAL_DATA_POLICY, wrap_untrusted
+
+        async def _run_one(e: dict) -> None:
+            result = await ToolRegistry.execute(e["name"], e["args"])
+            if result.ok:
+                body = result.output or "（工具返回空结果）"
+                guard.record_result(body)
+                e["body"], e["ok"], e["error_code"] = body, True, ""
+            else:
+                # 结构化错误：不把堆栈/密钥塞回上下文
+                e["body"] = structured_tool_error(
+                    kind="provider", name=e["name"],
+                    detail=result.error or "调用失败",
+                )
+                e["ok"], e["error_code"] = False, "provider_error"
+            seen[e["fp"]] = e["body"]
             await _progress({
                 "type": "tool_done",
-                "name": real_name,
-                "ok": tool_ok,
-                "error_code": tool_error_code,
+                "name": e["name"],
+                "ok": e["ok"],
+                "error_code": e["error_code"],
             })
-            from ..core.external_content import EXTERNAL_DATA_POLICY, wrap_untrusted
 
+        i = 0
+        while i < len(plan):
+            if is_cancelled and is_cancelled():
+                return "（操作已取消）"
+            entry = plan[i]
+            # 推「开始调用工具」进度，让前端气泡实时显示正在做什么（而非空窗）
+            await _progress({"type": "tool", "name": entry["name"]})
+            if entry["mode"] == "reuse":
+                src_body = entry["src"]["body"] if entry["src"] is not None else seen.get(entry["fp"], "")
+                entry["body"] = src_body + "\n[重复调用已复用，未再次执行]"
+                await _progress({"type": "tool_done", "name": entry["name"], "ok": True, "error_code": ""})
+                i += 1
+                continue
+            if entry["mode"] == "skip":
+                await _progress({
+                    "type": "tool_done",
+                    "name": entry["name"],
+                    "ok": entry["ok"],
+                    "error_code": entry["error_code"],
+                })
+                i += 1
+                continue
+            if _parallel_safe(entry, specs):
+                j = i + 1
+                while j < len(plan) and plan[j]["mode"] == "execute" and _parallel_safe(plan[j], specs):
+                    j += 1
+                batch = plan[i:j]
+            else:
+                batch = [entry]
+            for e in batch[1:]:
+                await _progress({"type": "tool", "name": e["name"]})
+            await asyncio.gather(*(_run_one(e) for e in batch))
+            i += len(batch)
+        call_count = adjudicated
+
+        for c, entry in zip(calls, plan):
             work.append({
                 "role": "tool",
                 "tool_call_id": c["_id"],
                 "content": (
                     f"[{c['name']}]\n"
-                    + wrap_untrusted("tool_result", body, source=real_name)
+                    + wrap_untrusted("tool_result", entry["body"], source=entry["name"])
                     + "\n"
                     + EXTERNAL_DATA_POLICY
                 ),
@@ -661,7 +724,7 @@ async def _run_text(
         from ..core import llm as _llm
 
         if _llm.task_budget_exceeded():
-            return "（任务 token 预算已用尽（AGENT_TASK_TOKEN_BUDGET），工具循环提前收束；请基于以上已完成的步骤总结收尾）"
+            return "（任务 token 预算已用尽，工具循环提前收束；我先基于以上已完成的步骤收个尾）"
         loop_count += 1
         await _progress({"type": "thinking"})
         raw = await call_llm(work)
