@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
 import { dirname, join, resolve } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -277,6 +277,8 @@ function createWindow(backendReady = true): void {
 
   // 阻止深色模式下白色闪烁
   mainWindow.on('ready-to-show', () => {
+    // NP-10：开机自启（--hidden）或托盘常驻场景，启动时只驻留托盘不弹主窗
+    if (process.argv.includes('--hidden')) return
     mainWindow?.show()
   })
 
@@ -340,6 +342,18 @@ function createTray(): void {
   }
   tray = new Tray(icon)
   tray.setToolTip('菟菚桌面助手')
+  rebuildTrayMenu()
+  tray.on('click', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
+
+// NP-10：托盘菜单可重建——桌面宠物项的勾选态需要随 toggle 刷新
+function rebuildTrayMenu(): void {
+  if (!tray) return
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示窗口',
@@ -348,6 +362,14 @@ function createTray(): void {
         if (mainWindow.isMinimized()) mainWindow.restore()
         mainWindow.show()
         mainWindow.focus()
+      },
+    },
+    {
+      label: '桌面宠物',
+      type: 'checkbox',
+      checked: petManager?.isOpen() ?? false,
+      click: () => {
+        void petManager?.toggle().then(() => rebuildTrayMenu())
       },
     },
     { type: 'separator' },
@@ -363,17 +385,87 @@ function createTray(): void {
     },
   ])
   tray.setContextMenu(contextMenu)
-  tray.on('click', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  })
 }
 
 // IPC 处理
 ipcMain.handle('get-backend-url', () => BACKEND_HOST)
 ipcMain.handle('get-version', () => app.getVersion())
+
+// ==== NP-10 桌面四件套：置顶 / 自启 / 全局热键（托盘扩充见 createTray）====
+
+// 窗口级偏好持久化（与 pet-prefs.json 同款策略：读失败用默认）
+const uiPrefsFile = () => join(app.getPath('userData'), 'ui-prefs.json')
+interface UiPrefs { alwaysOnTop: boolean; hotkeyMain: string }
+const HOTKEY_CHOICES = ['Alt+Shift+T', 'Ctrl+Alt+Z', 'Alt+Shift+Q']
+const DEFAULT_HOTKEY = 'Alt+Shift+T'
+
+function loadUiPrefs(): UiPrefs {
+  try {
+    const raw = JSON.parse(readFileSync(uiPrefsFile(), 'utf-8')) as Partial<UiPrefs>
+    return {
+      alwaysOnTop: raw.alwaysOnTop === true,
+      hotkeyMain: HOTKEY_CHOICES.includes(String(raw.hotkeyMain)) ? String(raw.hotkeyMain) : DEFAULT_HOTKEY,
+    }
+  } catch {
+    return { alwaysOnTop: false, hotkeyMain: DEFAULT_HOTKEY }
+  }
+}
+function saveUiPrefs(prefs: UiPrefs): void {
+  try {
+    writeFileSync(uiPrefsFile(), JSON.stringify(prefs), 'utf-8')
+  } catch { /* 偏好保存失败不影响使用 */ }
+}
+
+let currentHotkey = DEFAULT_HOTKEY
+
+function applyAlwaysOnTop(on: boolean): void {
+  mainWindow?.setAlwaysOnTop(on)
+  const prefs = loadUiPrefs()
+  saveUiPrefs({ ...prefs, alwaysOnTop: on })
+}
+
+function applyMainHotkey(hotkey: string): boolean {
+  const accel = HOTKEY_CHOICES.includes(hotkey) ? hotkey : DEFAULT_HOTKEY
+  try { globalShortcut.unregister(currentHotkey) } catch { /* 首次或未注册时忽略 */ }
+  const ok = globalShortcut.isSupported(accel) && globalShortcut.register(accel, () => {
+    if (!mainWindow) return
+    if (mainWindow.isVisible() && !mainWindow.isMinimized()) mainWindow.hide()
+    else {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  currentHotkey = ok ? accel : DEFAULT_HOTKEY
+  if (!ok) {
+    // 用户选的键被占用：回退默认键再试一次；仍失败则本轮无热键
+    try { globalShortcut.unregister(DEFAULT_HOTKEY) } catch { /* ignore */ }
+    currentHotkey = DEFAULT_HOTKEY
+    globalShortcut.register(DEFAULT_HOTKEY, () => {
+      if (!mainWindow) return
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    })
+  }
+  const prefs = loadUiPrefs()
+  saveUiPrefs({ ...prefs, hotkeyMain: currentHotkey })
+  return ok
+}
+
+ipcMain.handle('ui:set-always-on-top', (_e, on: boolean) => {
+  applyAlwaysOnTop(on === true)
+  return mainWindow?.isAlwaysOnTop() ?? false
+})
+ipcMain.handle('ui:get-always-on-top', () => mainWindow?.isAlwaysOnTop() ?? false)
+ipcMain.handle('ui:set-launch-at-login', (_e, on: boolean) => {
+  app.setLoginItemSettings({ openAtLogin: on === true, args: ['--hidden'] })
+  return app.getLoginItemSettings().openAtLogin
+})
+ipcMain.handle('ui:get-launch-at-login', () => app.getLoginItemSettings().openAtLogin)
+ipcMain.handle('ui:set-main-hotkey', (_e, hotkey: string) => applyMainHotkey(String(hotkey)))
+ipcMain.handle('ui:get-main-hotkey', () => currentHotkey)
+ipcMain.handle('ui:get-hotkey-choices', () => HOTKEY_CHOICES)
 ipcMain.handle('notify', (_e, { title, body }: { title: string; body: string }) => {
   // 系统通知：菟菚主动消息。点击通知 → 聚焦并显示窗口。
   // 去重：与轮询通道（pollInitiative）共享 lastNotifiedText，避免「渲染进程 SSE
@@ -419,6 +511,11 @@ app.whenReady().then(async () => {
   createWindow(backendReady)
   createTray()
   attachDesktopExtras()
+
+  // NP-10：恢复持久化的窗口偏好（置顶 + 全局热键；失败回退默认）
+  const uiPrefs = loadUiPrefs()
+  if (uiPrefs.alwaysOnTop) mainWindow?.setAlwaysOnTop(true)
+  applyMainHotkey(uiPrefs.hotkeyMain)
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
@@ -478,13 +575,14 @@ function attachDesktopExtras(): void {
       }
     },
   })
-  ipcMain.handle('pet:toggle', () => petManager?.toggle() ?? Promise.resolve(false))
+  ipcMain.handle('pet:toggle', () => petManager?.toggle().then((on) => { rebuildTrayMenu(); return on }) ?? Promise.resolve(false))
   // NP-06：宠物开关真实状态查询（设置页/首次向导回显；此前恒 false 会误关）
   ipcMain.handle('pet:get-state', () => petManager?.isOpen() ?? false)
 }
 
 app.on('before-quit', () => {
   isQuitting = true
+  globalShortcut.unregisterAll()  // NP-10：退出时释放全局热键
   sttHost?.dispose()      // L09：终止本地转写 worker
   petManager?.close()     // L10：宠物窗口立即关闭并释放全部订阅/定时器
   // 先归档当前会话，等归档请求结束后再停后端，避免杀进程过早导致归档丢失。

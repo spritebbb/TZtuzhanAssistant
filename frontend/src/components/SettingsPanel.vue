@@ -84,6 +84,54 @@ async function onDrillBackup() {
   }
 }
 
+// ---- NP-10：桌面四件套（仅桌面壳；置顶 / 自启 / 全局热键）----
+const desktopAvailable = typeof window !== 'undefined' && !!window.electronAPI?.setAlwaysOnTop
+const alwaysOnTop = ref(false)
+const launchAtLogin = ref(false)
+const mainHotkey = ref('')
+const hotkeyChoices = ref<string[]>([])
+const hotkeyNote = ref('')
+
+async function initDesktopBasics() {
+  if (!desktopAvailable) return
+  const bridge = window.electronAPI!
+  try {
+    alwaysOnTop.value = await bridge.getAlwaysOnTop()
+    launchAtLogin.value = await bridge.getLaunchAtLogin()
+    mainHotkey.value = await bridge.getMainHotkey()
+    hotkeyChoices.value = await bridge.getHotkeyChoices()
+  } catch { /* 主进程查询失败保持默认 */ }
+}
+
+async function toggleAlwaysOnTop() {
+  if (!desktopAvailable) return
+  try {
+    alwaysOnTop.value = await window.electronAPI!.setAlwaysOnTop(!alwaysOnTop.value)
+  } catch (e: unknown) {
+    notify('置顶设置失败：' + ((e as Error).message || e))
+  }
+}
+
+async function toggleLaunchAtLogin() {
+  if (!desktopAvailable) return
+  try {
+    launchAtLogin.value = await window.electronAPI!.setLaunchAtLogin(!launchAtLogin.value)
+  } catch (e: unknown) {
+    notify('开机自启设置失败：' + ((e as Error).message || e))
+  }
+}
+
+async function onHotkeyChange() {
+  if (!desktopAvailable) return
+  try {
+    const effective = await window.electronAPI!.setMainHotkey(mainHotkey.value)
+    if (!effective) hotkeyNote.value = `该快捷键被其他软件占用，已回退到 ${effective || '默认键'}`
+    else hotkeyNote.value = ''
+  } catch (e: unknown) {
+    notify('快捷键设置失败：' + ((e as Error).message || e))
+  }
+}
+
 interface ConfigData {
   llm_base_url?: string
   llm_model?: string
@@ -482,6 +530,8 @@ async function open() {
   await loadEncryptionStatus()
   // NP-12：打开设置即展示备份状态（含超 3 天黄色提醒的数据源）
   void refreshBackupStatus()
+  // NP-10：桌面四件套状态回显
+  void initDesktopBasics()
   // NP-06：宠物开关回显真实状态（此前恒 false，宠物开着时显示关闭、再点会误关）
   if (window.tuzhanPet) {
     try {
@@ -613,6 +663,23 @@ function confirmLabel(c: string): string {
             </span>
           </div>
           <p v-if="backupStatusLine" class="setting-hint" :role="backupStatusLine.startsWith('✗') ? 'alert' : 'status'" :style="backupStale ? 'color: #d9a441' : ''">{{ backupStatusLine }}</p>
+
+          <!-- NP-10：桌面四件套（仅桌面壳渲染） -->
+          <template v-if="desktopAvailable">
+            <div class="sgroup">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
+              桌面
+            </div>
+            <div class="srow"><label>窗口置顶（不被其他窗口挡住）</label><input type="checkbox" aria-label="窗口置顶" :checked="alwaysOnTop" @change="toggleAlwaysOnTop" /></div>
+            <div class="srow"><label>开机自启（启动后驻留托盘，不弹窗口）</label><input type="checkbox" aria-label="开机自启" :checked="launchAtLogin" @change="toggleLaunchAtLogin" /></div>
+            <div class="srow">
+              <label>全局召唤快捷键</label>
+              <select v-model="mainHotkey" aria-label="全局召唤快捷键" @change="onHotkeyChange">
+                <option v-for="k in hotkeyChoices" :key="k" :value="k">{{ k }}</option>
+              </select>
+            </div>
+            <div class="setting-hint">任意应用里按快捷键唤起{{ props.personaName || '她' }}；再按一次收起。{{ hotkeyNote }}</div>
+          </template>
 
           <!-- LLM -->
           <div class="sgroup">

@@ -9,6 +9,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   focusWindow: () => ipcRenderer.invoke('focus-window'),
   // 上报「当前会话 id」给主进程，让它独立轮询主动消息（关窗也能弹通知）
   setActiveSession: (sessionId: string | null) => ipcRenderer.invoke('set-active-session', sessionId),
+  // NP-10 桌面四件套：置顶 / 自启 / 全局热键（网页版无此桥，设置区隐藏）
+  setAlwaysOnTop: (on: boolean) => ipcRenderer.invoke('ui:set-always-on-top', on) as Promise<boolean>,
+  getAlwaysOnTop: () => ipcRenderer.invoke('ui:get-always-on-top') as Promise<boolean>,
+  setLaunchAtLogin: (on: boolean) => ipcRenderer.invoke('ui:set-launch-at-login', on) as Promise<boolean>,
+  getLaunchAtLogin: () => ipcRenderer.invoke('ui:get-launch-at-login') as Promise<boolean>,
+  setMainHotkey: (hotkey: string) => ipcRenderer.invoke('ui:set-main-hotkey', hotkey) as Promise<boolean>,
+  getMainHotkey: () => ipcRenderer.invoke('ui:get-main-hotkey') as Promise<string>,
+  getHotkeyChoices: () => ipcRenderer.invoke('ui:get-hotkey-choices') as Promise<string[]>,
   // 订阅主进程转发的主动消息（主进程轮询到后推送过来，用于追加气泡）
   onInitiativeMessage: (cb: (message: { text: string; image?: string | null }) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, message: { text: string; image?: string | null }) => cb(message)
