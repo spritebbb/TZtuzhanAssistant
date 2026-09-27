@@ -258,6 +258,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/FirstRunWizard.te
 
 ## NP-07 花费人话化（自填单价 + 预填默认）
 
+> 状态：**已完成** @ `243b3bf`（2026-09-27，ZCode 实施，VERIFY 全绿：后端 4/4 + 前端 4/4 + vue-tsc 0。**重要修正**：侦察发现金额估算、真实 prompt/completion 拆分、UsagePanel 金额显示**早已存在**（D5 成本面板已交付）——任务书设想的"3:1 拆算""账本加金额行"均不需要，实际交付收敛为：①config API 白名单+校验（0<x≤1000，非法 400）+ GET 返回单价；②设置页两个单价输入；③默认价 1.0/2.0 → 2.0/8.0（deepseek-chat 参考价）；④小额金额显示 `<¥0.01`。过程事故与修复：测试 POST 曾写入真实 `.env`（已还原干净），后续测试改为属性赋值等价模拟并注明原因——POST 成功路径的"写 .env + reload"属既有通用机制，不在本切片端到端重复；PROJECT_ROOT patch 会连带搬走人格路径（ensure_library 崩），亦已记录）
+
 **目标**：用量账本显示「近 7 天 ≈¥X.XX（约 ¥X.XX/天）」，单价用户可改、永不写死。
 
 **涉及文件**（修改）：
