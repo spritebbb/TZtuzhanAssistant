@@ -16,6 +16,7 @@ from .api import (
     agent,
     artifacts,
     audit,
+    backup,
     chat,
     colists,
     activity_drafts,
@@ -265,6 +266,7 @@ def create_app() -> FastAPI:
 
     # 注册路由
     app.include_router(health.router)
+    app.include_router(backup.router)
     app.include_router(lock.router)
     app.include_router(situation.router)
     app.include_router(offline_recap.router)
