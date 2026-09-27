@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch, onUnmounted, computed } from 'vue'
 import { streamChat, uploadVision, type ToolProgressEvent } from '../api/chat'
-import { getMessages, openInitiativeStream, CURRENT_SESSION_ID, type Message, type ProactiveMessage } from '../api/sessions'
+import { getMessages, openInitiativeStream, CURRENT_SESSION_ID, truncateSession, type Message, type ProactiveMessage } from '../api/sessions'
 import { ensureBaseUrl, getApiUrl, apiFetch } from '../api'
 import ToolBar from './ToolBar.vue'
 import ConfirmPanel from './ConfirmPanel.vue'
@@ -188,7 +188,6 @@ async function send() {
   if (!text || busy.value || initializing.value) return
   // 清空可能残留的旧确认请求
   pendingConfirm.value = []
-  busy.value = true
   input.value = ''
   const sendEphemeral = ephemeralMode.value
   ephemeralMode.value = false
@@ -197,6 +196,60 @@ async function send() {
   const userMsg: Message = { role: 'user', content: text, ephemeral: sendEphemeral, ts: Date.now() / 1000 }
   messages.value.push(userMsg)
 
+  busy.value = true
+  await runBotStream(text, { ephemeral: sendEphemeral })
+}
+
+// NP-08 重发切片：仅当最后一条是 bot（且非临时）时可重新生成
+const canRegenerate = computed(() =>
+  !busy.value && !initializing.value && messages.value.length > 0
+  && messages.value[messages.value.length - 1].role === 'bot'
+  && !messages.value[messages.value.length - 1].ephemeral
+)
+// 仅当最后一条是 user（且非临时）时可编辑重发
+const canEditLastUser = computed(() =>
+  !busy.value && !initializing.value && messages.value.length > 0
+  && messages.value[messages.value.length - 1].role === 'user'
+  && !messages.value[messages.value.length - 1].ephemeral
+)
+const actionError = ref('')
+
+async function regenerateLast() {
+  if (!canRegenerate.value) return
+  const last = messages.value[messages.value.length - 1]
+  const original = last.content
+  busy.value = true
+  actionError.value = ''
+  // 只截掉最后那条 bot 回复（保留 user 消息）；语义=「你把那句话又说了一遍」，
+  // userdb 侧正常重跑（记账/记忆由每日限额与置信度合并消化重复）。
+  const removed = await truncateSession(messages.value.length - 1)
+  if (removed === null) {
+    busy.value = false
+    actionError.value = '重新生成失败：截断没有成功，稍后再试'
+    return
+  }
+  messages.value.pop()
+  await runBotStream(original, { ephemeral: false, regenerate: true })
+}
+
+function editLastUser() {
+  if (!canEditLastUser.value) return
+  const last = messages.value[messages.value.length - 1]
+  const text = last.content
+  void truncateSession(messages.value.length - 1).then((removed) => {
+    if (removed === null) {
+      actionError.value = '编辑失败：截断没有成功，稍后再试'
+      return
+    }
+    messages.value.pop()
+    // 文本填回输入框，用户改完手动发送（走完全正常的发送路径）
+    input.value = text
+  })
+}
+
+/** 追加 bot 占位并流式生成（send 与 regenerateLast 共用的骨架）。 */
+async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate?: boolean }) {
+  const sendEphemeral = opts.ephemeral
   // 追加空的 bot 消息占位
   const botMsg: Message = { role: 'bot', content: '', ephemeral: sendEphemeral, ts: Date.now() / 1000 }
   messages.value.push(botMsg)
@@ -275,7 +328,7 @@ async function send() {
       onConfirmRequest: (req) => {
         pendingConfirm.value.push(req)
       },
-    }, null, requestId, sendEphemeral)
+    }, null, requestId, sendEphemeral, opts.regenerate === true)
   } catch (e: unknown) {
     if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
       messages.value[botIndex].content = '（已停止）'
@@ -762,6 +815,12 @@ function isActive(i: number): boolean {
         :is-match="isMatch(i)"
         :is-active-match="isActive(i)"
       />
+      <!-- NP-08 重发切片：只对最后一条消息出的操作条（临时消息不显示） -->
+      <div v-if="canRegenerate || canEditLastUser" class="msg-actions">
+        <button v-if="canRegenerate" class="msg-action" @click="regenerateLast">↻ 重新生成</button>
+        <button v-if="canEditLastUser" class="msg-action" @click="editLastUser">✎ 编辑重发</button>
+      </div>
+      <div v-if="actionError" class="msg-action-error" role="alert">{{ actionError }}</div>
     </div>
     <ConfirmPanel :pending="pendingConfirm" @resolve="resolveConfirm" />
     <ChatInput v-model:input="input" v-model:ephemeral="ephemeralMode" :busy="busy || initializing" :streaming="streaming" :persona-name="props.personaName" @send="send" @stop="stop" @file="handleImageFile" />
@@ -1287,5 +1346,35 @@ function isActive(i: number): boolean {
 @media (max-width: 540px) {
   .portrait-stage { display: none; }
   .chibi-stage { display: none; }
+}
+
+/* NP-08 重发切片操作条 */
+.msg-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin: 2px 4px 8px;
+}
+.msg-action {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.msg-action:hover {
+  color: var(--primary-text);
+  border-color: var(--edge-active);
+  background: var(--primary-soft);
+}
+.msg-action-error {
+  text-align: right;
+  font-size: 0.74rem;
+  color: var(--danger, #e08a6d);
+  margin: 0 6px 8px;
 }
 </style>

@@ -18,12 +18,14 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from ..session.store import (
+    CURRENT_SESSION_ID,
     archive_current,
     get_archive,
     get_messages,
     list_archives,
     rename_session,
     search_archives,
+    truncate_session,
 )
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -68,6 +70,25 @@ async def api_archives_get(archive_id: str):
 
 class RenamePayload(BaseModel):
     title: str
+
+
+class TruncatePayload(BaseModel):
+    keep_count: int
+
+
+@router.post("/current/truncate")
+async def api_sessions_truncate(payload: TruncatePayload):
+    """截断当前会话（NP-08 重发切片）：保留前 keep_count 条，删除其余。
+
+    仅接受 'current'——归档是只读历史，不参与重发。被删消息已提取的记忆不回滚。
+    """
+    try:
+        removed = await truncate_session(CURRENT_SESSION_ID, payload.keep_count)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if removed is None:
+        return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=404)
+    return {"ok": True, "removed": removed}
 
 
 @router.post("/{session_id}/rename")

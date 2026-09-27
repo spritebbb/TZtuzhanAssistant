@@ -47,6 +47,7 @@ async def api_chat(
     image: str = Form(""),
     request_id: str = Form(""),
     ephemeral: bool = Form(False),
+    regenerate: bool = Form(False),
 ):
     """SSE 流式对话：逐字推送 data: {"piece": "..."}，结束时发 {"done": "完整回复"}。
 
@@ -56,11 +57,19 @@ async def api_chat(
     ephemeral=true 或文本明确表达“陪我说完但别记住”时，本轮只通过 SSE 暂时展示，
     不写 sessions、对话记忆、画像、日记或关系状态。
 
+    regenerate=true（NP-08 重发切片）：不追加新的用户消息，直接基于现有历史
+    重新生成最后一条回复；要求历史末条是 user，否则 400。与 ephemeral 互斥。
+
     可选 image：识图等场景下 user 消息附带的图片 URL（已落盘的 /api/images/...），
     会随 user 消息一起持久化，保证刷新/归档后仍能看到原图。
     """
     text = text.strip()
-    if not text:
+    if regenerate:
+        if ephemeral:
+            return JSONResponse({"ok": False, "error": "重新生成不支持临时模式"}, status_code=400)
+        if image:
+            return JSONResponse({"ok": False, "error": "重新生成不支持附带图片"}, status_code=400)
+    if not text and not regenerate:
         return JSONResponse({"ok": False, "error": "消息为空"}, status_code=400)
     if len(text) > _MAX_TEXT_LENGTH:
         return JSONResponse({"ok": False, "error": "消息过长"}, status_code=413)
@@ -112,7 +121,20 @@ async def api_chat(
     if msgs is None:
         return JSONResponse({"ok": False, "error": "会话不存在，请刷新页面"}, status_code=404)
 
-    if not ephemeral:
+    if regenerate:
+        # 重发切片：必须站在一条 user 消息上重新生成（历史末条为 user）。
+        # 语义取「你把这句话又说了一遍」：pipeline 走完全正常路径（含记账与
+        # 记忆提取，由每日限额与置信度合并消化重复），本端点只跳过 sessions
+        # 侧的 user 重复落库；text 回填为落库的那条 user 消息内容。
+        if not msgs or msgs[-1].get("role") != "user":
+            return JSONResponse(
+                {"ok": False, "error": "最后一条不是你的消息，无法重新生成"}, status_code=400
+            )
+        text = str(msgs[-1].get("content") or "").strip()
+        if not text:
+            return JSONResponse({"ok": False, "error": "原消息内容为空，无法重新生成"}, status_code=400)
+
+    if not ephemeral and not regenerate:
         # 普通对话立即持久化；临时对话只存在于当前浏览器内存。
         user_msg = {"role": "user", "content": text, "ts": time.time()}
         if image:

@@ -33,6 +33,7 @@ export async function streamChat(
   image?: string | null,
   requestId?: string,
   ephemeral = false,
+  regenerate = false,
 ): Promise<void> {
   const body = new URLSearchParams()
   body.set('text', text)
@@ -40,6 +41,7 @@ export async function streamChat(
   if (image) body.set('image', image)
   if (requestId) body.set('request_id', requestId)
   if (ephemeral) body.set('ephemeral', 'true')
+  if (regenerate) body.set('regenerate', 'true')
 
   const res = await apiFetch('/api/chat', {
     method: 'POST',
