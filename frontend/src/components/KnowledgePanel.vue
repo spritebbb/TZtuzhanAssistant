@@ -90,7 +90,7 @@ async function load() {
     documents.value = await listKnowledgeDocuments()
     opinions.value = await listKnowledgeOpinions()
   } catch {
-    error.value = '书架暂时打不开，过会儿再看'
+    error.value = '书架加载失败，请稍后再试'
   } finally {
     loading.value = false
   }
@@ -103,17 +103,17 @@ async function extract(doc: KnowledgeDocument) {
   try {
     const result = await extractKnowledgeOpinions(doc.id)
     if (!result.ok) {
-      error.value = result.error || '她还没读出什么观点，过会儿再试'
+      error.value = result.error || '没有读出可用的观点，换份文档试试'
       return
     }
     if (result.opinions?.length) {
       extractNote.value = `读完《${doc.filename}》，她有了新的想法`
       opinions.value = [...result.opinions, ...opinions.value]
     } else {
-      extractNote.value = result.note || '她还没读出什么想说的，过会儿再试试'
+      extractNote.value = result.note || '这次没有想说的，稍后再试试'
     }
   } catch {
-    error.value = '提取失败，过会儿再试'
+    error.value = '观点提取失败，请稍后再试'
   } finally {
     extracting.value = false
   }
@@ -122,7 +122,7 @@ async function extract(doc: KnowledgeDocument) {
 async function revoke(opinion: KnowledgeOpinion) {
   const ok = await revokeKnowledgeOpinion(opinion.id)
   if (!ok) {
-    error.value = '撤销失败，过会儿再试'
+    error.value = '撤销失败，请稍后再试'
     return
   }
   opinions.value = opinions.value.filter((o) => o.id !== opinion.id)
@@ -141,7 +141,7 @@ async function upload(file: File) {
     notice.value = `《${result.document?.filename}》读完了，记成 ${result.document?.chunk_count} 段`
     await load()
   } catch {
-    error.value = '上传失败，过会儿再试'
+    error.value = '上传失败，请稍后再试'
   } finally {
     uploading.value = false
   }
@@ -205,7 +205,7 @@ async function remove(doc: KnowledgeDocument) {
   error.value = ''
   const ok = await deleteKnowledgeDocument(doc.id)
   if (!ok) {
-    error.value = '删除失败，过会儿再试'
+    error.value = '删除失败，请稍后再试'
     return
   }
   documents.value = documents.value.filter((d) => d.id !== doc.id)

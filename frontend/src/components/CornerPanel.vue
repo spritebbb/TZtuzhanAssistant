@@ -143,7 +143,7 @@ async function load() {
   if (artifactResult.status === 'fulfilled') {
     artifacts.value = artifactResult.value
   } else {
-    error.value = '角落暂时打不开，过会儿再来'
+    error.value = '内容加载失败，请稍后再试'
   }
   if (lettersResult.status === 'fulfilled') {
     const board = lettersResult.value
@@ -243,7 +243,7 @@ async function openLetter(letter: FutureLetter) {
     await openFutureLetter(letter.id)
     await load()
   } catch {
-    error.value = '拆信没有成功，过会儿再试'
+    error.value = '信件解锁失败，请稍后再试'
   }
 }
 
@@ -259,7 +259,7 @@ async function removeLetter(letter: FutureLetter) {
     await deleteFutureLetter(letter.id)
     await load()
   } catch {
-    error.value = '删除没有成功，过会儿再试'
+    error.value = '删除失败，请稍后再试'
   }
 }
 
@@ -324,7 +324,7 @@ async function removeSnapshot(page: RelationshipSnapshot) {
     await deleteRelationshipSnapshot(page.snapshot_days)
     await load()
   } catch {
-    snapshotError.value = '删除没有成功，过会儿再试'
+    snapshotError.value = '删除失败，请稍后再试'
   }
 }
 
@@ -465,7 +465,7 @@ async function removeDual(page: DualPerspective) {
     await deleteDualPerspective(page.id)
     await load()
   } catch {
-    dualError.value = '删除没有成功，过会儿再试'
+    dualError.value = '删除失败，请稍后再试'
   }
 }
 
@@ -555,7 +555,7 @@ async function removePossibility(item: ArtifactItem) {
     await deletePossibility(item.id)
     await load()
   } catch {
-    error.value = '删除没有成功，过会儿再试'
+    error.value = '删除失败，请稍后再试'
   }
 }
 
@@ -671,7 +671,7 @@ async function removeVersion(version: RelationshipVersion) {
     resetCompare()
     await load()
   } catch {
-    versionError.value = '删除没有成功，过会儿再试'
+    versionError.value = '删除失败，请稍后再试'
   }
 }
 

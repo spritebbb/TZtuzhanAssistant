@@ -24,7 +24,7 @@ async function load() {
     reports.value = reportRows
     unlocks.value = slotRows
   } catch {
-    error.value = '抽屉卡住了，过会儿再翻'
+    error.value = '日记加载失败，请稍后再试'
   } finally {
     loading.value = false
   }

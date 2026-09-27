@@ -75,7 +75,7 @@ it('读取失败时如实提示，不编造步骤', async () => {
   const wrapper = mount(TourPanel, { props: { show: false } })
   await wrapper.setProps({ show: true })
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toContain('读不到')
+  expect(wrapper.get('[role="alert"]').text()).toContain('演示脚本加载失败')
   expect(wrapper.findAll('.step')).toHaveLength(0)
 })
 

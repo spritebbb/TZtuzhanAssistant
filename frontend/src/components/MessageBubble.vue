@@ -112,12 +112,18 @@ function formatTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${hm}`
 }
 
+const copyFailed = ref(false)
+
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text)
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
-  } catch { /* ignore */ }
+  } catch {
+    // 剪贴板权限被拒/不可用：给可见反馈而不是让按钮毫无反应
+    copyFailed.value = true
+    setTimeout(() => { copyFailed.value = false }, 1800)
+  }
 }
 
 // ---- 增强灯箱：预览 + 下载 ----
@@ -250,10 +256,10 @@ const whySummary = computed(() => {
         <button
           v-if="canCopy()"
           class="copybtn"
-          :class="{ ok: copied }"
+          :class="{ ok: copied, fail: copyFailed }"
           @click="copyText(message.content)"
-          title="复制"
-          :aria-label="copied ? '已复制这条消息' : '复制这条消息'"
+          :title="copyFailed ? '复制失败：浏览器未授权剪贴板' : '复制'"
+          :aria-label="copied ? '已复制这条消息' : copyFailed ? '复制失败' : '复制这条消息'"
         >
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -486,6 +492,7 @@ const whySummary = computed(() => {
 @keyframes ttsPulse { 50% { opacity: 0.42; } }
 .copybtn:hover { color: var(--primary-text); background: var(--primary-soft); }
 .copybtn.ok { color: var(--primary-text); }
+.copybtn.fail { color: var(--danger, #e08a6d); }
 .whybtn {
   border: none;
   background: none;

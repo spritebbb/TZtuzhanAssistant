@@ -5,7 +5,9 @@ import ChatView from './components/ChatView.vue'
 import Portrait from './components/Portrait.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import FirstRunWizard from './components/FirstRunWizard.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import { shouldShowFirstRun, FIRST_RUN_FLAG } from './utils/firstRun'
+import { NOTIFY_EVENT, notify, type NotifyPayload } from './utils/notify'
 import AgentPanel from './components/AgentPanel.vue'
 import DiaryPanel from './components/DiaryPanel.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
@@ -113,10 +115,19 @@ async function doReset() {
     resetOpen.value = false
     void refreshVisualState(activePersona.value.id).catch(() => {})
   } catch {
-    window.alert?.('重置失败，请稍后重试')
+    notify('重置失败，请稍后重试')
   } finally {
     resetting.value = false
   }
+}
+
+// === NP-09 全局 toast（聊天流外的失败提示统一走这里；聊天流内保持人设文案）===
+const toast = ref<NotifyPayload | null>(null)
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function onNotify(e: Event) {
+  toast.value = (e as CustomEvent<NotifyPayload>).detail
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = null }, 3500)
 }
 
 const theme = ref<'dark' | 'light'>('dark')
@@ -149,7 +160,7 @@ function loadTheme() {
 function applyTheme(t: 'dark' | 'light', persist = true) {
   document.body.classList.toggle('theme-light', t === 'light')
   if (persist) {
-    try { localStorage.setItem(themeStorageKey, t) } catch { /* ignore */ }
+    try { localStorage.setItem(themeStorageKey, t) } catch { /* 隐私模式等存储不可用：主题偏好不持久化，会话内仍生效 */ }
   }
 }
 
@@ -253,7 +264,7 @@ const filteredTools = computed(() => {
 })
 function rememberTool(id: string) {
   recentToolIds.value = [id, ...recentToolIds.value.filter(item => item !== id)].slice(0, 4)
-  try { localStorage.setItem('tztuzhan-recent-tools', JSON.stringify(recentToolIds.value)) } catch { /* ignore */ }
+  try { localStorage.setItem('tztuzhan-recent-tools', JSON.stringify(recentToolIds.value)) } catch { /* 存储不可用：最近工具偏好不持久化，会话内仍生效 */ }
 }
 async function toggleMotion() {
   const enabled = activePersona.value.motion_enabled !== false
@@ -348,8 +359,9 @@ onMounted(async () => {
   try {
     const saved = JSON.parse(localStorage.getItem('tztuzhan-recent-tools') || '[]')
     if (Array.isArray(saved)) recentToolIds.value = saved.filter(id => moreTools.some(item => item.id === id)).slice(0, 4)
-  } catch { /* ignore */ }
+  } catch { /* 启动期 flags 读取失败：保持默认布局降级（非用户操作失败） */ }
   document.addEventListener('keydown', onKeydown)
+  window.addEventListener(NOTIFY_EVENT, onNotify)
   // 应用锁：启动先确认锁态（已初始化的用户重启后处于锁定态）
   await refreshLockAvailability()
   // 运行期任何 423（后台轮询/面板请求撞上锁定）也会唤起锁屏
@@ -357,7 +369,7 @@ onMounted(async () => {
   try {
     const flags = await (await apiFetch('/api/flags')).json()
     compactUi.value = flags.flags?.compact_ui_enabled !== false
-  } catch { /* 保持简洁布局 */ }
+  } catch { /* 保持简洁布局（启动期降级，非用户操作失败） */ }
   try {
     const cfg = await (await apiFetch('/api/config')).json()
     wizardOpen.value = shouldShowFirstRun(localStorage.getItem(FIRST_RUN_FLAG), cfg)
@@ -368,6 +380,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener(NOTIFY_EVENT, onNotify)
   window.removeEventListener('tztuzhan:app-locked', onAppLocked)
   focusMode.stop()
   stopVisualState()
@@ -376,6 +389,10 @@ onUnmounted(() => {
 
 <template>
   <div class="app-root" :class="{ 'visual-quiet': visualQuiet }">
+    <!-- NP-09 全局 toast：聊天流外的失败/信息提示 -->
+    <transition name="fade">
+      <div v-if="toast" class="toast" :class="toast.kind" role="status">{{ toast.message }}</div>
+    </transition>
     <!-- 侧栏 -->
     <SessionList
       :key="sessionListKey"
@@ -973,4 +990,24 @@ onUnmounted(() => {
 .modal-actions .btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .modal-actions .btn.danger:hover { filter: brightness(1.08); }
 .modal-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* NP-09 全局 toast */
+.toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  max-width: min(460px, 90vw);
+  padding: 10px 18px;
+  border-radius: var(--radius-md, 10px);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  background: rgba(30, 34, 26, 0.96);
+  color: var(--text);
+  border: 1px solid var(--edge-highlight);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+.toast.error { border-color: var(--danger, #e08a6d); color: var(--danger, #e08a6d); }
+.theme-light .toast { background: rgba(250, 247, 239, 0.98); }
 </style>

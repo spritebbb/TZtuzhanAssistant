@@ -57,7 +57,7 @@ async function loadTools() {
       const flags = await (await apiFetch('/api/flags')).json()
       compact.value = flags.flags?.compact_ui_enabled !== false
     } catch { /* 保持简洁状态栏 */ }
-  } catch { /* ignore */ }
+  } catch { /* 能力状态读取失败：保持上次状态/隐藏状态条降级（轮询性读取，非用户操作失败） */ }
   finally { loaded.value = true }
 }
 
