@@ -222,7 +222,7 @@ async function send() {
         b.content = currentStream.value
         scrollToBottom()
       },
-      onTool: handleToolEvent,
+      onTool: (ev) => handleToolEvent(ev, bubble),
       onDone: (done) => {
         const b = bubble()
         if (!b) return
@@ -320,7 +320,24 @@ const toolLabels: Record<string, string> = {
   generate_image: '正在画图…',
 }
 
-function handleToolEvent(ev: ToolProgressEvent) {
+function handleToolEvent(ev: ToolProgressEvent, bubble?: () => Message | undefined) {
+  // 过渡语：工具选择轮模型说的话先上屏（等价 onPiece），消灭「正在思考…」盲等
+  if (ev.type === 'interim') {
+    const b = bubble?.()
+    if (!b || !ev.text) return
+    currentStream.value += ev.text
+    b.content = currentStream.value
+    scrollToBottom()
+    return
+  }
+  // 最终正文流式前清空过渡语（后端保证此刻还没有最终正文，RESET 即安全）
+  if (ev.type === 'interim_reset') {
+    const b = bubble?.()
+    if (!b) return
+    currentStream.value = ''
+    b.content = ''
+    return
+  }
   if (ev.type === 'thinking') {
     toolStatus.value = '正在思考…'
   } else if (ev.type === 'tool') {
@@ -386,7 +403,7 @@ async function handleImageFile(f: File | null) {
         b.content += piece
         scrollToBottom()
       },
-      onTool: handleToolEvent,
+      onTool: (ev) => handleToolEvent(ev, bubble),
       onDone: (done) => {
         const b = bubble()
         if (!b) return

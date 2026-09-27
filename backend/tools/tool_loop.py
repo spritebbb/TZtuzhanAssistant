@@ -412,6 +412,7 @@ async def run_tool_loop(
     final_instruction: list[dict] | None = None,
     call_native: Callable | None = None,
     call_final_stream: Callable | None = None,
+    call_native_stream: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     tool_filter: Callable[[Any], bool] | None = None,
@@ -427,6 +428,12 @@ async def run_tool_loop(
         call_native: 原生函数调用回调，接收 (messages, tools) 返回 (text, tool_calls)
                      若不提供则走文本协议回退模式
         call_final_stream: 最终正文轮异步流回调；工具选择轮仍使用 call_native/call_llm
+        call_native_stream: 工具选择轮的流式原生回调，接收
+                     (messages, tools, on_text) 返回 (text, tool_calls)，正文片段
+                     经 on_text 实时外推为 {"type": "interim"} 进度事件；本轮发出过
+                     任何过渡语则在进入工具执行/最终重生成前推 {"type": "interim_reset"}，
+                     保证最终流式轮开始时气泡为空（最终正文=持久化正文，过渡语不落库）。
+                     仅在有流式 UI 的链路传入（与 call_final_stream 同门控）。
         on_progress: 可选的阶段进度回调，接收事件 dict，如
                      {"type": "thinking"} / {"type": "tool", "name": "web_search"} /
                      {"type": "tool_done", "name": "web_search"}。用于把工具循环的
@@ -450,6 +457,7 @@ async def run_tool_loop(
             work, call_native, tools,
             max_loops=max_loops, final_instruction=final_instruction,
             call_final_stream=call_final_stream,
+            call_native_stream=call_native_stream,
             on_progress=on_progress, is_cancelled=is_cancelled,
             tool_filter=tool_filter,
         )
@@ -472,6 +480,7 @@ async def _run_native(
     max_loops: int,
     final_instruction: list[dict] | None,
     call_final_stream: Callable | None = None,
+    call_native_stream: Callable | None = None,
     on_progress: Callable[[dict], Any] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     tool_filter: Callable[[Any], bool] | None = None,
@@ -514,12 +523,26 @@ async def _run_native(
             return "（任务 token 预算已用尽，工具循环提前收束；我先基于以上已完成的步骤收个尾）"
         loop_count += 1
         await _progress({"type": "thinking"})
+        # 过渡语流式：工具选择轮的正文片段实时外推（消灭「正在思考…」盲等）。
+        # 本轮发出过任何过渡语，就在进入工具执行/最终重生成前推 interim_reset，
+        # 保证最终流式轮开始时气泡为空——最终正文=持久化正文，过渡语不落库。
+        interim = {"n": 0}
+
+        async def _on_interim(piece: str) -> None:
+            interim["n"] += 1
+            await _progress({"type": "interim", "text": piece})
+
         try:
-            text, calls = await call_native(work, tools)
+            if call_native_stream is not None:
+                text, calls = await call_native_stream(work, tools, _on_interim)
+            else:
+                text, calls = await call_native(work, tools)
         except Exception as e:
             logger.warning("[工具循环] call_native 异常: {}", e)
             # 真实错误直接透传，不用误导性文案掩盖（key 失效/网络问题用户需要知道）
             return f"（处理失败：{type(e).__name__}: {str(e)[:200]}）"
+        if interim["n"]:
+            await _progress({"type": "interim_reset"})
         logger.info("[工具循环] 第{}轮: {} 个工具调用 {}", loop_count, len(calls),
                     [c["name"] for c in calls])
         if not calls:

@@ -17,9 +17,12 @@ export interface ChatCallbacks {
 }
 
 // 工具循环进度事件（后端 run_tool_loop 通过 on_progress 推送）
+// interim：工具选择轮的过渡语片段，直接上屏；interim_reset：过渡语清空，
+// 最终正文流式前调用（保证气泡内容=持久化正文，过渡语不落库）
 export interface ToolProgressEvent {
-  type: 'thinking' | 'tool' | 'tool_done'
+  type: 'thinking' | 'tool' | 'tool_done' | 'interim' | 'interim_reset'
   name?: string
+  text?: string
 }
 
 export async function streamChat(
