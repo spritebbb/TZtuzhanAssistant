@@ -181,6 +181,8 @@ VERIFY: cd frontend && npx vitest run src/components/__tests__/jargon.test.ts ;;
 
 ## NP-06 首次运行向导（含宠物开关状态查询修复）
 
+> 状态：**已完成** @ `538a23b`（2026-09-27，ZCode 实施，VERIFY 全绿：FirstRunWizard 8 + SettingsPanel 2 + 组件全量 20 文件 118 用例 + vue-tsc 0。**批次一至此 6/6 全部完成**。自行补充决策：①`petWindow.ts` 零改动——PetWindowManager 已有 `isOpen()`，直接注册 `pet:get-state` IPC；②触发判定抽为 `utils/firstRun.ts` 纯函数便于测试，判定依据核实为 GET /api/config 的 `llm_api_key_masked`（`_mask_key('')` 返回空串），响应形态不认识时保守不弹；③Key 保存仅 POST 白名单三字段——已核实后端 POST /config 对缺失字段跳过不清空；④完成后预填经 `tztuzhan:prefill-input` CustomEvent（沿用 `tztuzhan:config-saved` 事件先例），ChatView 监听后预填+聚焦；⑤App.vue 集成层（启动触发）由手测与 CI `npm run test:electron` 兜底，组件级测试覆盖全部内部逻辑。手测清单待 Codex 验收时在 Electron 壳内执行：四步走通 / 浏览器形态无宠物步骤 / 跳过后不再弹 / 宠物开着时设置页显示正确）
+
 **背景**：前端**没有任何首次运行引导**（grep first_run/onboard/首次 为空）；新玩家的 API Key 要在记事本里填。已核实：`GET/POST /api/config` 齐备（`config_api.py:51,82`）；`pet:toggle` IPC 本就返回真实状态（`preload.ts:47`）但 `SettingsPanel.vue:295` 的 `petOn` 恒初始化 false 且从不同步——宠物实际开着时开关显示关闭，再点会误关。
 
 **涉及文件**：
