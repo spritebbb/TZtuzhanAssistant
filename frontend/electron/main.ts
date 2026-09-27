@@ -15,6 +15,9 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 let isQuitting = false
+// NP-11 迷你速聊窗：全局热键唤出的小窗，答完自动收起
+let miniWindow: BrowserWindow | null = null
+let miniHotkeyRegistered = false
 
 // 后端端口
 const BACKEND_PORT = 8801
@@ -466,6 +469,60 @@ ipcMain.handle('ui:get-launch-at-login', () => app.getLoginItemSettings().openAt
 ipcMain.handle('ui:set-main-hotkey', (_e, hotkey: string) => applyMainHotkey(String(hotkey)))
 ipcMain.handle('ui:get-main-hotkey', () => currentHotkey)
 ipcMain.handle('ui:get-hotkey-choices', () => HOTKEY_CHOICES)
+
+// ==== NP-11 迷你速聊窗 ====
+
+function createMiniWindow(): void {
+  if (miniWindow && !miniWindow.isDestroyed()) return
+  miniWindow = new BrowserWindow({
+    width: 440,
+    height: 190,
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    transparent: true,
+    webPreferences: {
+      preload: join(_dirname, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  // 失焦即收起（说完即走的一半；另一半是答完 3 秒自动隐藏）
+  miniWindow.on('blur', () => {
+    if (miniWindow?.isVisible()) miniWindow.hide()
+  })
+  const url = process.env.VITE_DEV_SERVER_URL
+    ? `${process.env.VITE_DEV_SERVER_URL}minichat.html`
+    : `${BACKEND_HOST}/minichat.html`
+  void miniWindow.loadURL(url)
+}
+
+function toggleMiniWindow(): void {
+  if (!miniWindow || miniWindow.isDestroyed()) createMiniWindow()
+  if (!miniWindow) return
+  if (miniWindow.isVisible()) {
+    miniWindow.hide()
+    return
+  }
+  miniWindow.show()
+  miniWindow.focus()
+}
+
+ipcMain.on('mini:hide', () => {
+  if (miniWindow?.isVisible()) miniWindow.hide()
+})
+
+/** 全局速聊热键（默认 Alt+Shift+Space；与主窗召唤热键相互独立） */
+function applyMiniHotkey(): void {
+  const accel = 'Alt+Shift+Space'
+  try {
+    miniHotkeyRegistered = globalShortcut.isSupported(accel) && globalShortcut.register(accel, toggleMiniWindow)
+  } catch {
+    miniHotkeyRegistered = false
+  }
+}
 ipcMain.handle('notify', (_e, { title, body }: { title: string; body: string }) => {
   // 系统通知：菟菚主动消息。点击通知 → 聚焦并显示窗口。
   // 去重：与轮询通道（pollInitiative）共享 lastNotifiedText，避免「渲染进程 SSE
@@ -516,6 +573,9 @@ app.whenReady().then(async () => {
   const uiPrefs = loadUiPrefs()
   if (uiPrefs.alwaysOnTop) mainWindow?.setAlwaysOnTop(true)
   applyMainHotkey(uiPrefs.hotkeyMain)
+
+  // NP-11：迷你速聊窗（懒创建；热键即时注册）
+  applyMiniHotkey()
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())

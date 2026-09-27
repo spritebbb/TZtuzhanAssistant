@@ -56,3 +56,10 @@ contextBridge.exposeInMainWorld('tuzhanPet', {
   // NP-06：宠物开关真实状态查询（设置页/首次向导回显；此前恒 false 会误关）
   getPetState: () => ipcRenderer.invoke('pet:get-state') as Promise<boolean>,
 })
+
+// NP-11 迷你速聊窗：答完 3 秒自动隐藏经此桥请求主进程收窗
+contextBridge.exposeInMainWorld('tuzhanMini', {
+  hide: () => {
+    ipcRenderer.send('mini:hide')
+  },
+})
