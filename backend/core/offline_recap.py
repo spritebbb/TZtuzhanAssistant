@@ -179,13 +179,21 @@ async def _opening_line(
 # ---------------------------------------------------------------------------
 
 async def maybe_generate(user_id: str) -> dict | None:
-    """有足够长的离线窗口才生成；同一 pending 幂等返回。"""
+    """有足够长的离线窗口才生成；同一 pending 幂等返回。
+
+    离线补算回放的是菟菚的正典生活引擎（schedule 行程/素材），只对默认
+    人格成立；其他人格没有各自的行程正典，直接跳过，不替她们编菟菚的一天。
+    """
     try:
         from .features import flag
 
         if not flag("offline_recap_enabled"):
             return None
     except Exception:
+        return None
+    from .persona_profiles import DEFAULT_PERSONA_ID, profile_id_from_user_id
+
+    if profile_id_from_user_id(user_id) != DEFAULT_PERSONA_ID:
         return None
     from .userdb import kv_get, kv_set
 

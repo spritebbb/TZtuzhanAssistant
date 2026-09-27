@@ -67,11 +67,26 @@ def should_attach_sticker(
 
 
 def build_sticker_prompt(scene: StickerScene) -> str:
-    """固定角色视觉锚点，避免收藏逐渐画成不同的人。"""
+    """固定角色视觉锚点，避免收藏逐渐画成不同的人。
+
+    默认人格（菟菚）锁定卡面外观；其他人格没有结构化外貌数据，
+    只锚定角色名与一致性要求，不代入菟菚的绿发白大褂。
+    """
+    from .persona_profiles import DEFAULT_PERSONA_ID, active_id, active_name
+
+    if active_id() == DEFAULT_PERSONA_ID:
+        anchor = (
+            "菟菚本人，一位成年女性研究员，绿色长发，圆框眼镜，白色实验风外套，"
+            "绿色领带，头肩比例的Q版聊天表情贴纸，"
+        )
+    else:
+        anchor = (
+            f"{active_name()}，保持该角色既定形象前后一致，"
+            "头肩比例的Q版聊天表情贴纸，"
+        )
     return (
-        "菟菚本人，一位成年女性研究员，绿色长发，圆框眼镜，白色实验风外套，"
-        "绿色领带，头肩比例的Q版聊天表情贴纸，"
-        f"{scene.pose}，单人，正方形构图，纯净浅色背景，粗细适中的白色贴纸描边，"
+        anchor
+        + f"{scene.pose}，单人，正方形构图，纯净浅色背景，粗细适中的白色贴纸描边，"
         "表情清晰，适合聊天软件使用，不要文字，不要对话框，不要水印，不要额外人物"
     )
 

@@ -301,7 +301,7 @@ def preview_restore(bundle: dict, target_user_id: str) -> dict:
     """恢复预览：格式/版本/引用校验 + 目标命名空间占用检查，不写任何数据。"""
     errors: list[str] = []
     if not isinstance(bundle, dict) or bundle.get("kind") != BUNDLE_KIND:
-        raise BundleError("这不是菟菚的关系备份文件")
+        raise BundleError("这不是本助手导出的关系备份文件")
     if int(bundle.get("version") or 0) != BUNDLE_VERSION:
         errors.append(f"备份格式版本不支持：{bundle.get('version')}（需要 {BUNDLE_VERSION}）")
     bundle_schema = int(bundle.get("schema_version") or 0)

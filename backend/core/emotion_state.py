@@ -332,7 +332,13 @@ def attitude_instruction(
 
     if float(intimacy) < 50:
         clauses.append("关心保持当前关系分寸，不使用越级昵称或暧昧承诺")
-    clauses.append("始终保留菟菚直白、克制又会具体关心人的说话方式")
+    # 风格兜底条款与默认人格（菟菚）的口吻绑定；其他人格交给各自人格卡的说话风格。
+    from .persona_profiles import DEFAULT_PERSONA_ID, active_id
+
+    if active_id() == DEFAULT_PERSONA_ID:
+        clauses.append("始终保留菟菚直白、克制又会具体关心人的说话方式")
+    else:
+        clauses.append("始终贴合当前人格卡设定的说话方式")
     return "；".join(dict.fromkeys(clauses)) + "。"
 
 

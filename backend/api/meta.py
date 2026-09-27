@@ -112,29 +112,39 @@ async def api_presence():
     from ..core.schedule import current_activity, latest_life_event
 
     uid = active_user_id()
-    try:
-        activity = current_activity(uid)
-    except Exception:
+    from ..core.persona_profiles import DEFAULT_PERSONA_ID, active_id
+
+    default_persona = active_id() == DEFAULT_PERSONA_ID
+    if default_persona:
+        try:
+            activity = current_activity(uid)
+        except Exception:
+            activity = {"block_id": "", "activity": "unknown", "activity_label": "",
+                        "location_id": "", "location_label": ""}
+        try:
+            events = await asyncio.to_thread(latest_life_event, uid)
+        except Exception:
+            events = []
+    else:
+        # 行程/生活事件是菟菚的正典生活内容，其他人格返回中性占位
         activity = {"block_id": "", "activity": "unknown", "activity_label": "",
                     "location_id": "", "location_label": ""}
-    try:
-        events = await asyncio.to_thread(latest_life_event, uid)
-    except Exception:
         events = []
 
     active_outing = None
-    try:
-        from ..core.life_templates import active_outing as current_outing, latest_outing
+    if default_persona:
+        try:
+            from ..core.life_templates import active_outing as current_outing, latest_outing
 
-        outings = await asyncio.to_thread(latest_outing, uid)
-        active_outing = await asyncio.to_thread(current_outing, uid)
-        # 合并外出流进生活流（前端无需区分两种来源）
-        events = sorted(
-            events + outings, key=lambda e: str(e.get("occurred_at") or ""),
-            reverse=True,
-        )
-    except Exception:
-        pass
+            outings = await asyncio.to_thread(latest_outing, uid)
+            active_outing = await asyncio.to_thread(current_outing, uid)
+            # 合并外出流进生活流（前端无需区分两种来源）
+            events = sorted(
+                events + outings, key=lambda e: str(e.get("occurred_at") or ""),
+                reverse=True,
+            )
+        except Exception:
+            pass
     from ..core.presence import visual_state
 
     return {"ok": True, "activity": activity, "recent_events": events,

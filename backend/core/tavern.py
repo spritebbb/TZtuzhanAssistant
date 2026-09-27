@@ -202,12 +202,13 @@ def _transcript_block(transcript: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def _clean_reply(text: str) -> str:
+def _clean_reply(text: str, persona_name: str = "菟菚") -> str:
     reply = (text or "").strip()
     # 去掉模型可能自加的说话人标签/引号包裹/代码围栏
     if reply.startswith("```"):
         reply = reply.strip("`").lstrip("\n")
-    for prefix in ("菟菚：", "菟菚:", "【菟菚】", "【你】"):
+    name = (persona_name or "菟菚").strip() or "菟菚"
+    for prefix in (f"{name}：", f"{name}:", f"【{name}】", "【你】"):
         if reply.startswith(prefix):
             reply = reply[len(prefix):].lstrip()
     reply = reply.strip().strip("“”\"")
@@ -278,7 +279,7 @@ async def tavern_turn(
         final_user = (
             f"桌上目前的对话：\n\n{transcript_text}\n\n"
             "这是你「看着办」的一轮：桌上刚有新进展，你自己决定要不要开口。"
-            "开口前先确认身份：你是菟菚，不是卡的角色（它由酒馆 AI 扮演），"
+            f"开口前先确认身份：你是{persona_name}，不是卡的角色（它由酒馆 AI 扮演），"
             "别模仿它上一段的语气和自称。"
             "如果此刻你自然有话要说、有事要做（接话、吐槽、推进、和对方搭话），"
             "就按上面的要求说出来；如果沉默更自然（剧情不需要你、你刚说过话、"
@@ -289,7 +290,7 @@ async def tavern_turn(
             f"桌上目前的对话：\n\n{transcript_text}\n\n"
             f"{partner_name or '对方'}点你了：{user_text}\n\n"
             "请只输出你在故事里的这一句台词（可含括号动作），一到四句。"
-            "你是菟菚，不是卡的角色；不要替对方或其他角色说话、行动或描写内心；"
+            f"你是{persona_name}，不是卡的角色；不要替对方或其他角色说话、行动或描写内心；"
             "不要出戏解释。"
         )
     from .llm import chat
@@ -304,7 +305,7 @@ async def tavern_turn(
     except Exception as exc:  # 服务商拒绝/网络失败：兜成业务错误，不让酒馆侧崩
         logger.warning("[tavern] 她这轮生成失败: {}", type(exc).__name__)
         raise TavernError("她这轮没接上话，稍后再点她一次") from exc
-    reply = _clean_reply(raw)
+    reply = _clean_reply(raw, persona_name)
     if not reply:
         # 空回复常见于服务商风控静默过滤（如亲密场景返回空 content）——
         # 留诊断尾巴；自动轮降级为沉默（她"没接话"），点名轮才报错。
