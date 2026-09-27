@@ -47,7 +47,15 @@ _PROFILE_SECTIONS = (
 
 
 def her_profile() -> list[dict]:
-    """返回结构化的「她的侧面」，供管理页展示；顺序稳定，便于前端渲染。"""
+    """返回结构化的「她的侧面」，供管理页展示；顺序稳定，便于前端渲染。
+
+    内容是菟菚的静态侧写（与 persona-菟菚.md 手工同步），只对默认人格成立；
+    其他激活人格返回空列表，避免把菟菚的性格安到别人头上。
+    """
+    from .persona_profiles import DEFAULT_PERSONA_ID, active_id
+
+    if active_id() != DEFAULT_PERSONA_ID:
+        return []
     return [
         {"key": key, "label": label, "items": list(HER_PROFILE[key])}
         for key, label in _PROFILE_SECTIONS

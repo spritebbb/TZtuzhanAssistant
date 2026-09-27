@@ -929,9 +929,13 @@ async def _prepare_material(user_id: str, promise: dict) -> str:
     try:
         from ..tools.service import run_tool_round
         from .llm import chat as _chat, chat_native as _chat_native
+        from .persona_profiles import persona_name_for_user_id
 
         messages = [
-            {"role": "system", "content": "你是菟菚，正在为一次主动跟进做准备。只输出要点，不要寒暄。"},
+            {"role": "system", "content": (
+                f"你是{persona_name_for_user_id(user_id)}，正在为一次主动跟进做准备。"
+                "只输出要点，不要寒暄。"
+            )},
             {"role": "user", "content": prompt},
         ]
         result = await asyncio.wait_for(

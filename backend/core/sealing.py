@@ -109,10 +109,15 @@ async def seal(
     used_llm = False
     if letter:
         try:
+            from .persona_profiles import persona_name_for_user_id
+
+            persona_name = persona_name_for_user_id(user_id)
             reply = await chat(
                 [
-                    {"role": "system", "content": "你是菟菚，一个温柔、真诚、有自己想法的陪伴者。"},
-                    {"role": "user", "content": _LETTER_PROMPT.format(stats=stats_text)},
+                    {"role": "system", "content": (
+                        f"你是{persona_name}，一个温柔、真诚、有自己想法的陪伴者。"
+                    )},
+                    {"role": "user", "content": _LETTER_PROMPT.replace("菟菚", persona_name).format(stats=stats_text)},
                 ],
                 max_tokens=600,
             )

@@ -133,7 +133,13 @@ _CACHE_TTL = 30.0
 
 
 def load_templates(persona_id: str | None = None) -> tuple[LifeTemplate, ...]:
-    """加载并校验当前人格的模板资源；无效条目跳过并告警，全无效时 fallback rest。"""
+    """加载并校验当前人格的模板资源；无效条目跳过并告警，全无效时 fallback rest。
+
+    仓库内置模板池是菟菚的正典生活，只对默认人格回退；其他人格没有自己的
+    life_templates.json 时空池（只剩中性 rest 兜底），不套用菟菚的日常。
+    """
+    from .persona_profiles import DEFAULT_PERSONA_ID
+
     pid = persona_id or _active_persona_id()
     path = _template_path(pid)
     now = datetime.now().timestamp()
@@ -142,7 +148,12 @@ def load_templates(persona_id: str | None = None) -> tuple[LifeTemplate, ...]:
         return cached[1]
 
     templates: list[LifeTemplate] = []
-    source = path if path.exists() else _bundled_template_path()
+    if path.exists():
+        source: Path | None = path
+    elif pid == DEFAULT_PERSONA_ID:
+        source = _bundled_template_path()
+    else:
+        source = None
     if source is not None:
         try:
             data = json.loads(source.read_text(encoding="utf-8"))

@@ -382,12 +382,27 @@ def _write_report(task: AgentTask) -> str:
 
 # ---- 聊天派活：从对话里识别「多步任务」意图 ----
 
-_DISPATCH_PATTERNS = (
+_DISPATCH_PATTERNS_STATIC = (
     re.compile(r"(?:帮我)?(?:分|按)(?:几步|步骤|多步)(?:来)?(?:做|完成|处理|搞|整理|查|写|安排)(?:一下)?[:：]?(.{2,60})"),
     re.compile(r"(?:把|将)(.{2,40}?)(?:拆成|拆分为|分成)(?:几步|步骤)"),
     re.compile(r"(?:用|走)(?:任务代理|agent)(?:来)?(?:做|处理|完成|整理|查|写|安排|跟进)[:：]?(.{2,60})"),
-    re.compile(r"(?:派|建|开)(?:一个|个)?(?:多步)?任务(?:给你|给菟菚)?[:：]?(.{2,60})"),
 )
+
+# 「给<当前人格名>派任务」按激活人格动态编译（人格热切换后自动跟随）。
+_dispatch_pattern_cache: dict[str, tuple[re.Pattern, ...]] = {}
+
+
+def _dispatch_patterns() -> tuple[re.Pattern, ...]:
+    from ..core.persona_profiles import active_name
+
+    name = active_name()
+    cached = _dispatch_pattern_cache.get(name)
+    if cached is None:
+        cached = _DISPATCH_PATTERNS_STATIC + (
+            re.compile(rf"(?:派|建|开)(?:一个|个)?(?:多步)?任务(?:给你|给{re.escape(name)})?[:：]?(.{{2,60}})"),
+        )
+        _dispatch_pattern_cache[name] = cached
+    return cached
 
 
 def detect_dispatch_request(text: str) -> str | None:
@@ -398,7 +413,7 @@ def detect_dispatch_request(text: str) -> str | None:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()
     if not clean or len(clean) > 200:
         return None
-    for pattern in _DISPATCH_PATTERNS:
+    for pattern in _dispatch_patterns():
         match = pattern.search(clean)
         if not match:
             continue
