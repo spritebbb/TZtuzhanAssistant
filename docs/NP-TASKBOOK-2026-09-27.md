@@ -315,6 +315,8 @@ VERIFY: .venv/Scripts/python -m pytest tests/test_session_truncate.py -q ;; cd f
 
 ## NP-09 错误提示分区对待
 
+> 状态：**已完成** @ `9cdf6dc`（2026-09-27，ZCode 实施，VERIFY 全绿：组件全量 23 文件 126 用例 + vue-tsc 0。实现：①新建 `ConfirmDialog.vue` 通用确认弹窗（promise 化 confirmAction helper），替换 9 处原生 confirm（SettingsPanel 6 + MemoryPanel 3）；②新建 `utils/notify.ts` + App.vue 全局 toast，替换 2 处 alert；③空 catch 14 处分诊——用户操作失败补可见反馈（AgentPanel 确认按钮「确认没有送达，请再点一次」、MessageBubble 复制失败标红、SettingsPanel panelLoadError 面板顶部提示），启动/轮询降级改为语义化注释（带注释的合理静默视为已声明降级，errStyle 测试豁免）；④10 处拟人报错文案中性化（含 DiaryPanel/CornerPanel/KnowledgePanel 等 grep 追加发现的）。自行补充决策：errStyle 断言范围收窄到组件层（api/*.ts 的流容错与错误消息由消费方呈现）；带语义注释的静默 catch 合规——任务书"消灭吞错"的本意是不让用户面对无反馈的按钮，不是禁止一切静默降级）
+
 **目标**：聊天流内错误保持人设化；工程面板改中性清晰文案；消灭 `window.alert/confirm` 与静默吞错。
 
 **涉及文件**（修改）：
