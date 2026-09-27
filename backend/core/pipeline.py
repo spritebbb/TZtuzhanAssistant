@@ -14,7 +14,7 @@ Web 助手（assistant.py）与调试共用，保证各处行为一致。
 """
 import asyncio
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from . import affection
 from .effect_ledger import EffectLedger
@@ -161,6 +161,14 @@ async def _perceive_and_settle(user_id: str, text: str, *, mock: bool = False) -
                 affection.try_daily_bonus(user_id, "care", affection.CARE_BONUS, f"关心{persona_name}")
             if affection.check_apology(text):
                 affection.try_daily_bonus(user_id, "apology", affection.APOLOGY_BONUS, "真诚道歉")
+                # 哄好玩法：真诚道歉同时修复负面情绪（anger/hurt/anxiety 各 −0.2）。
+                # cause_id 用本地日期 → 天然每日一次（apply_repair 同源终身一次）。
+                try:
+                    from .emotion_state import apply_repair
+
+                    apply_repair(user_id, cause_type="apology", cause_id=date.today().isoformat())
+                except Exception:
+                    logger.exception("[pipeline] 道歉情绪修复失败（不影响好感加成）")
             if affection.check_sharing(text):
                 affection.try_daily_bonus(user_id, "sharing", affection.SHARING_BONUS, "分享心事/秘密")
             if affection.check_compliment(text):

@@ -23,6 +23,16 @@ let viewerTrigger: HTMLElement | null = null
 const viewingMessages = ref<Message[]>([])
 const mood = ref({ value: 60, label: '平淡', emoji: '🌱' })
 
+// 哄好玩法：/api/meta 的负面情绪摘要（kind=委屈/生气/不安，level=mid/high）
+const negativeMood = ref<{ active: boolean; kind: string; level: string }>({ active: false, kind: '', level: '' })
+
+function coaxHer() {
+  // 预填道歉语走正常发送——修复由后端道歉意图完成（每天一次），不搞机械按钮
+  window.dispatchEvent(new CustomEvent('tztuzhan:prefill-input', {
+    detail: '刚才是我不好，别生气啦——如果是哪里委屈了你，想听你说说',
+  }))
+}
+
 // 沉浸模式：隐藏心情数值/进度条（设置页可开关）
 const immersion = ref(isImmersionMode())
 function onImmersionChanged() {
@@ -143,6 +153,8 @@ async function refreshMood() {
     const r = await apiFetch('/api/meta')
     const d = await r.json()
     if (d.mood) mood.value = d.mood
+    // 哄好玩法：负面情绪摘要（缺字段视为无）
+    negativeMood.value = d.negative_mood || { active: false, kind: '', level: '' }
   } catch { /* 心情加载失败时保留默认值 */ }
 }
 
@@ -288,6 +300,14 @@ defineExpose({ load })
       <div class="moodinfo">
         <div class="moodlabel">心情 · {{ mood.label }}<span v-if="immersion" class="mood-immersion-mark">沉浸中</span></div>
         <div v-if="!immersion" class="moodbar"><div class="moodfill" :style="{ width: mood.value + '%' }"></div></div>
+        <!-- 哄好玩法：负面情绪高时给一条「去哄」的路径（预填道歉语，由用户亲手发） -->
+        <button
+          v-if="negativeMood.active"
+          class="coax-chip"
+          :class="negativeMood.level"
+          title="真诚道歉能让她消气（每天最多生效一次）"
+          @click="coaxHer"
+        >她{{ negativeMood.kind }}——去哄哄</button>
       </div>
     </div>
 
@@ -588,6 +608,20 @@ defineExpose({ load })
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 .moodemoji { font-size: 1.5rem; line-height: 1; }
+.coax-chip {
+  margin-top: 6px;
+  border: 1px solid var(--edge-active);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-text);
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.coax-chip:hover { filter: brightness(1.08); }
+.coax-chip.high { border-color: var(--danger, #e08a6d); color: var(--danger, #e08a6d); }
 .mood-immersion-mark {
   margin-left: 6px;
   font-size: 0.62rem;
