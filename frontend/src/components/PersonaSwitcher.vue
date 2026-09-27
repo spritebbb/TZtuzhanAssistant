@@ -163,9 +163,9 @@ watch(() => props.show, value => { if (value) void load() })
               {{ genOpen ? '收起生成器' : 'AI 生成人格卡' }}
             </button>
             <button class="import" :disabled="!!busy || disabled" @click="fileInput?.click()">
-              {{ busy === 'import' ? '加载中…' : '加载 .md 人格卡' }}
+              {{ busy === 'import' ? '加载中…' : '加载人格卡 / 人格包' }}
             </button>
-            <input ref="fileInput" class="hidden" type="file" accept=".md,text/markdown,text/plain" @change="onFile" />
+            <input ref="fileInput" class="hidden" type="file" accept=".md,.zip,text/markdown,text/plain,application/zip" @change="onFile" />
           </div>
           <div v-if="genOpen" class="generator">
             <textarea

@@ -2,6 +2,9 @@
 """Markdown 人格卡档案与热切换接口。"""
 from __future__ import annotations
 
+import io
+import zipfile
+
 from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -9,6 +12,10 @@ from ..core import persona as persona_runtime
 from ..core import persona_generator, persona_profiles
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
+
+# NP-13 人格包：zip 根 = persona.md + portraits/{五档}.png（任意子集）
+_PACK_MAX_BYTES = 30 * 1024 * 1024
+_PORTRAIT_STATES = ("low", "plain", "lazy", "happy", "excited")
 
 
 def _busy_response() -> JSONResponse | None:
@@ -60,6 +67,40 @@ async def api_personas_generate(request: Request):
     return {"ok": True, "markdown": card, "name": persona_generator.card_name(card)}
 
 
+def _unpack_persona_pack(data: bytes) -> tuple[bytes, dict[str, bytes]]:
+    """解析人格包 zip → (persona.md 字节, {档位: png 字节})。
+
+    安全面：拒绝 zip-slip（绝对路径 / .. / 反斜杠）、超包体上限；
+    persona.md 必须在 zip 根；portraits/ 只收五档白名单 png，其余条目忽略。
+    """
+    if len(data) > _PACK_MAX_BYTES:
+        raise persona_profiles.PersonaProfileError("人格包过大（上限 30MB）")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise persona_profiles.PersonaProfileError("不是有效的 zip 文件") from exc
+    with zf:
+        names = zf.namelist()
+        md_name = "persona.md"
+        if md_name not in names:
+            raise persona_profiles.PersonaProfileError("人格包根目录缺少 persona.md")
+        portraits: dict[str, bytes] = {}
+        for name in names:
+            if name == md_name:
+                continue
+            parts = name.split("/")
+            # zip-slip 防御：绝对路径、..、反斜杠分隔一律拒绝
+            if name.startswith("/") or "\\" in name or ".." in parts:
+                raise persona_profiles.PersonaProfileError(f"人格包包含不安全的路径：{name}")
+            if len(parts) == 2 and parts[0] == "portraits" and parts[1].startswith("_"):
+                continue  # macOS 元数据等下划线开头条目忽略
+            if len(parts) == 2 and parts[0] == "portraits":
+                state = parts[1][: -len(".png")] if parts[1].endswith(".png") else ""
+                if state in _PORTRAIT_STATES:
+                    portraits[state] = zf.read(name)
+        return zf.read(md_name), portraits
+
+
 @router.post("/import")
 async def api_personas_import(file: UploadFile):
     busy = _busy_response()
@@ -67,13 +108,27 @@ async def api_personas_import(file: UploadFile):
         return busy
     try:
         data = await file.read(1024 * 1024 + 1)
-        profile = persona_profiles.import_card(file.filename or "persona.md", data)
+        filename = file.filename or "persona.md"
+        portraits: dict[str, bytes] = {}
+        if filename.lower().endswith(".zip"):
+            # NP-13 人格包：卡 + 立绘。卡走既有 import_card 路径（目录/设置/激活
+            # 逻辑零重复），立绘解包到该人格目录的 portraits/ 下。
+            data, portraits = _unpack_persona_pack(data)
+            filename = "persona.md"
+        profile = persona_profiles.import_card(filename, data)
+        if portraits:
+            from ..core.persona_profiles import _ROOT
+
+            target = _ROOT / str(profile["id"]) / "portraits"
+            target.mkdir(parents=True, exist_ok=True)
+            for state, png in portraits.items():
+                (target / f"{state}.png").write_bytes(png)
         profile = _activate(profile["id"])
         # 触发创建该人格的私有 current 会话，切回时会继续原来的对话。
         from ..session.store import CURRENT_SESSION_ID, get_messages
 
         await get_messages(CURRENT_SESSION_ID)
-        return {"ok": True, "persona": profile}
+        return {"ok": True, "persona": profile, "portraits": sorted(portraits)}
     except persona_profiles.PersonaProfileError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 

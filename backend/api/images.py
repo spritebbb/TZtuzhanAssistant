@@ -60,17 +60,42 @@ async def persona_cutout():
 
 @router.get("/persona/full")
 async def persona_full():
-    """菟菚透明全身立绘（抠图，用于主区角色背景）。"""
+    """菟菚透明全身立绘（抠图，用于主区角色背景）。
+
+    NP-13：激活人格自带 portraits/plain.png 时优先（立绘随人格包走），
+    否则回退全局默认。
+    """
+    active = _active_portrait("plain")
+    if active is not None:
+        return FileResponse(active, media_type="image/png")
     if _PERSONA_FULL.exists():
         return FileResponse(_PERSONA_FULL, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 
+def _active_portrait(state: str):
+    """激活人格包内的立绘路径；未带立绘/状态非法/读取失败返回 None。"""
+    if state not in _PERSONA_STATE_NAMES:
+        return None
+    try:
+        from ..core.persona_profiles import active_card_path
+
+        path = active_card_path().parent / "portraits" / f"{state}.png"
+    except Exception:
+        return None
+    return path if path.is_file() else None
+
+
 @router.get("/persona/full/{state}")
 async def persona_full_state(state: str):
-    """按五档心情返回差分立绘；资产缺失时安全回退到基础立绘。"""
+    """按五档心情返回差分立绘；人格包立绘优先，缺档回退包内 plain，再回退全局。"""
     if state not in _PERSONA_STATE_NAMES:
         return JSONResponse({"ok": False, "error": "未知立绘状态"}, status_code=404)
+    active = _active_portrait(state)
+    if active is None and state != "plain":
+        active = _active_portrait("plain")
+    if active is not None:
+        return FileResponse(active, media_type="image/png")
     path = _PERSONA_STATES / f"{state}.png"
     if path.exists():
         return FileResponse(path, media_type="image/png")
