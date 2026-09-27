@@ -8,6 +8,14 @@ interface Window {
     focusWindow: () => Promise<boolean>
     setActiveSession: (sessionId: string | null) => Promise<boolean>
     onInitiativeMessage: (cb: (message: { text: string; image?: string | null }) => void) => (() => void)
+    /** NP-10 桌面四件套（仅桌面壳注入） */
+    setAlwaysOnTop: (on: boolean) => Promise<boolean>
+    getAlwaysOnTop: () => Promise<boolean>
+    setLaunchAtLogin: (on: boolean) => Promise<boolean>
+    getLaunchAtLogin: () => Promise<boolean>
+    setMainHotkey: (hotkey: string) => Promise<boolean>
+    getMainHotkey: () => Promise<string>
+    getHotkeyChoices: () => Promise<string[]>
   }
   /** L09 本地语音输入桥（仅桌面版注入；PWA 里为 undefined，按钮应禁用） */
   tuzhanStt?: {
