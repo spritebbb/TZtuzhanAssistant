@@ -103,7 +103,11 @@ async def api_backup_run():
         return JSONResponse({"ok": False, "error": "应用处于锁定态，解锁后再备份"}, status_code=423)
     from ..maintenance import loop
 
-    dest = await _run_backup_async()
+    try:
+        dest = await _run_backup_async()
+    except loop.BackupInProgress:
+        # DF-14：并发备份（连点/与周期任务撞车）→ 409，不报假 500
+        return JSONResponse({"ok": False, "error": "已有一次备份正在进行，稍等片刻"}, status_code=409)
     if dest is None:
         return JSONResponse({"ok": False, "error": "备份失败，详见后端日志"}, status_code=500)
     return {"ok": True, "name": Path(dest).name}
