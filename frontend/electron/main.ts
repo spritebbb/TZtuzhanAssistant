@@ -429,8 +429,9 @@ function applyAlwaysOnTop(on: boolean): void {
 
 function applyMainHotkey(hotkey: string): boolean {
   const accel = HOTKEY_CHOICES.includes(hotkey) ? hotkey : DEFAULT_HOTKEY
-  try { globalShortcut.unregister(currentHotkey) } catch { /* 首次或未注册时忽略 */ }
-  const ok = globalShortcut.isSupported(accel) && globalShortcut.register(accel, () => {
+  if (currentHotkey) { try { globalShortcut.unregister(currentHotkey) } catch { /* 首次或未注册时忽略 */ } }
+  // DF-11：回退键与用户自选键必须同 toggle 语义（此前回退键「只召唤不收起」）
+  const toggleMain = () => {
     if (!mainWindow) return
     if (mainWindow.isVisible() && !mainWindow.isMinimized()) mainWindow.hide()
     else {
@@ -438,22 +439,26 @@ function applyMainHotkey(hotkey: string): boolean {
       mainWindow.show()
       mainWindow.focus()
     }
-  })
-  currentHotkey = ok ? accel : DEFAULT_HOTKEY
-  if (!ok) {
-    // 用户选的键被占用：回退默认键再试一次；仍失败则本轮无热键
-    try { globalShortcut.unregister(DEFAULT_HOTKEY) } catch { /* ignore */ }
-    currentHotkey = DEFAULT_HOTKEY
-    globalShortcut.register(DEFAULT_HOTKEY, () => {
-      if (!mainWindow) return
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-    })
   }
-  const prefs = loadUiPrefs()
-  saveUiPrefs({ ...prefs, hotkeyMain: currentHotkey })
-  return ok
+  let ok = globalShortcut.isSupported(accel) && globalShortcut.register(accel, toggleMain)
+  if (ok) {
+    currentHotkey = accel
+    // DF-11：只有用户选择的键真正注册成功才写偏好——此前一次瞬时占用就会把
+    // 回退后的默认键静默改写进 ui-prefs.json，用户自选键永久丢失。
+    const prefs = loadUiPrefs()
+    saveUiPrefs({ ...prefs, hotkeyMain: accel })
+    return true
+  }
+  // 用户选的键被占用：回退默认键再试一次；仍失败则本轮无热键。
+  // 回退注册不写回偏好——下次启动优先重试用户自选键。
+  try { globalShortcut.unregister(DEFAULT_HOTKEY) } catch { /* ignore */ }
+  currentHotkey = ''
+  if (accel !== DEFAULT_HOTKEY && globalShortcut.isSupported(DEFAULT_HOTKEY)
+      && globalShortcut.register(DEFAULT_HOTKEY, toggleMain)) {
+    currentHotkey = DEFAULT_HOTKEY
+    return true
+  }
+  return false
 }
 
 ipcMain.handle('ui:set-always-on-top', (_e, on: boolean) => {
