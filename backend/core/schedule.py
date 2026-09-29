@@ -280,15 +280,21 @@ def _utc_hour_floor(dt: datetime) -> datetime:
 
 def _record_event(user_id: str, block_id: str, occurrence: str, kind: str,
                   payload: dict, occurred_at: str, computed_at: str) -> bool:
-    """写虚构生活事件（幂等：唯一键冲突即已写过）。"""
-    cur = db.conn.execute(
-        "INSERT OR IGNORE INTO character_life_events "
-        "(user_id, block_id, occurrence, kind, payload_json, namespace, occurred_at, computed_at) "
-        "VALUES (?, ?, ?, ?, ?, 'character_fiction', ?, ?)",
-        (user_id, block_id, occurrence, kind,
-         json.dumps(payload, ensure_ascii=False), occurred_at, computed_at),
-    )
-    db.conn.commit()
+    """写虚构生活事件（幂等：唯一键冲突即已写过）。
+
+    必须持全局写锁：db.conn 是全库共享连接，锁外 COMMIT 会把任意持锁多语句
+    事务（级联删除/冲突解决/reset 大事务）的半截内容提前提交，把本可回滚的
+    操作变成半删状态（2026-09-29 缺陷审查 DF-2）。
+    """
+    with db._lock:
+        cur = db.conn.execute(
+            "INSERT OR IGNORE INTO character_life_events "
+            "(user_id, block_id, occurrence, kind, payload_json, namespace, occurred_at, computed_at) "
+            "VALUES (?, ?, ?, ?, ?, 'character_fiction', ?, ?)",
+            (user_id, block_id, occurrence, kind,
+             json.dumps(payload, ensure_ascii=False), occurred_at, computed_at),
+        )
+        db.conn.commit()
     return cur.rowcount == 1
 
 
