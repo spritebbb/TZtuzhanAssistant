@@ -170,6 +170,32 @@ def test_pack_over_hard_limit_rejected() -> None:
         assert "过大" in str(exc), exc
 
 
+
+def test_portrait_write_failure_rolls_back() -> None:
+    """DF-13：立绘写盘失败（磁盘满等）→ 回滚整次导入，不留半成品人格。"""
+    from unittest.mock import patch
+    from pathlib import Path as _Path
+
+    from backend.core import persona_profiles as _pp
+
+    pack = _make_pack({
+        "persona.md": CARD.encode("utf-8"),
+        "portraits/plain.png": PNG_BYTES,
+    })
+    before = {p["id"] for p in client.get(
+        "/api/personas", headers={"Origin": "http://127.0.0.1:8801", "Sec-Fetch-Site": "same-origin"}
+    ).json()["personas"]} if True else set()
+    with patch.object(_Path, "write_bytes", side_effect=OSError(28, "No space left on device")):
+        r = _upload("rollback.zip", pack)
+    assert r.status_code == 500, r.status_code
+    assert "已取消本次导入" in r.text, r.text
+    after = client.get(
+        "/api/personas", headers={"Origin": "http://127.0.0.1:8801", "Sec-Fetch-Site": "same-origin"}
+    ).json()["personas"]
+    new_ids = [p["id"] for p in after if p["id"] not in before]
+    assert not new_ids, f"写盘失败后不得留下半成品人格：{new_ids}"
+
+
 def main() -> None:
     test_import_valid_pack_and_portrait_follows()
     test_missing_state_falls_back_to_pack_plain()
@@ -179,7 +205,8 @@ def main() -> None:
     test_corrupt_zip_rejected()
     test_pack_over_one_mb_imports()
     test_pack_over_hard_limit_rejected()
-    print("\n=== NP-13 人格包: 8 项全部通过 ===")
+    test_portrait_write_failure_rolls_back()
+    print("\n=== NP-13 人格包: 9 项全部通过 ===")
 
 
 if __name__ == "__main__":
