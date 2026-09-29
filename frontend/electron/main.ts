@@ -562,25 +562,41 @@ ipcMain.handle('set-active-session', (_e, sessionId: string | null) => {
   return true
 })
 
-app.whenReady().then(async () => {
-  const backendReady = await startBackend()
-  if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或可用 Python，或后端在 30 秒内未能启动。详情见主窗口的排查清单。')
-  createWindow(backendReady)
-  createTray()
-  attachDesktopExtras()
-
-  // NP-10：恢复持久化的窗口偏好（置顶 + 全局热键；失败回退默认）
-  const uiPrefs = loadUiPrefs()
-  if (uiPrefs.alwaysOnTop) mainWindow?.setAlwaysOnTop(true)
-  applyMainHotkey(uiPrefs.hotkeyMain)
-
-  // NP-11：迷你速聊窗（懒创建；热键即时注册）
-  applyMiniHotkey()
-
-  app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
+// DF-4 单实例锁：双开会导致同一主动消息双弹系统通知、全局热键被第二实例
+// 注册失败而静默失灵、以及从第二实例退出时对共享后端误归档当前会话。
+// （自启 --hidden 托盘驻留 + 用户手动双击图标是最容易触发的日常组合。）
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  // 第二实例启动被拒 → 把已有主窗带到前台（最符合「我又点了一次图标」的预期）
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
   })
-})
+
+  app.whenReady().then(async () => {
+    const backendReady = await startBackend()
+    if (!backendReady) dialog.showErrorBox('菟菚后端启动失败', '未找到后端文件或可用 Python，或后端在 30 秒内未能启动。详情见主窗口的排查清单。')
+    createWindow(backendReady)
+    createTray()
+    attachDesktopExtras()
+
+    // NP-10：恢复持久化的窗口偏好（置顶 + 全局热键；失败回退默认）
+    const uiPrefs = loadUiPrefs()
+    if (uiPrefs.alwaysOnTop) mainWindow?.setAlwaysOnTop(true)
+    applyMainHotkey(uiPrefs.hotkeyMain)
+
+    // NP-11：迷你速聊窗（懒创建；热键即时注册）
+    applyMiniHotkey()
+
+    app.on('activate', async () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
+    })
+  })
+}
 
 /** L09/L10 桌面能力接线：本地 STT worker 宿主 + 桌面宠物窗口管理器。 */
 let sttHost: SttHost | null = null
@@ -590,7 +606,10 @@ function attachDesktopExtras(): void {
   const rootDir = process.env.NODE_ENV === 'production' && _dirname.includes('resources')
     ? resolve(_dirname, '../../')          // 打包版：resources/app.asar → 项目根
     : resolve(_dirname, '../../')          // 开发版：dist-electron → 项目根
-  const isDev = !process.env.VITE_DEV_SERVER_URL ? false : true
+  // 与 170/335 行同口径：node_modules electron（含 vite preview / electron . 直跑）都是
+  // dev 布局；只有 electron-builder 打包后才是 backend/.venv。用 VITE_DEV_SERVER_URL
+  // 判定会把「直接跑 dist 的窗口」误判成打包版，STT worker 退到 PATH python stub。
+  const isDev = !app.isPackaged
 
   // L09：本地 STT worker（python 解释器复用后端启动器的探测链）
   sttHost = new SttHost({
