@@ -350,12 +350,20 @@ def stats(user_id: str) -> dict:
     }
 
 
-def forget_thoughts_for_source(user_id: str, source_type: str, source_id: int) -> None:
-    """来源消失 → 心事作废（不留幽灵惦记）。"""
+def forget_thoughts_for_source(
+    user_id: str, source_type: str, source_id: int, *, commit: bool = True
+) -> None:
+    """来源消失 → 心事作废（不留幽灵惦记）。
+
+    commit=False：作废语句并入外层更大删除事务（如 delete_document 级联），
+    由调用方统一提交——自带 commit 会把外层事务的半截内容提前落盘，外层
+    后续步骤失败即产出「产物已删、活动文档还在」的半删状态（DF-9）。
+    """
     with db._lock:
         db.conn.execute(
             "UPDATE pending_thoughts SET status = 'dismissed' "
             "WHERE user_id = ? AND source_type = ? AND source_id = ? AND status = 'pending'",
             (user_id, source_type, int(source_id)),
         )
-        db.conn.commit()
+        if commit:
+            db.conn.commit()

@@ -59,7 +59,14 @@ def delete_fact_everywhere(user_id: str, fact_id: int) -> bool:
     if not deleted_ids:
         return False
     for deleted_id in deleted_ids:
-        invalidate_for_source(user_id, "fact", deleted_id)
+        try:
+            invalidate_for_source(user_id, "fact", deleted_id)
+        except Exception:
+            # DF-9：事实行已提交删除，事件作废失败不得让整个删除操作以异常
+            # 收场——那样只会留下「事件仍指向已删事实」更久的幽灵。
+            logger.exception(
+                "[记忆生命周期] 事件作废失败（事实已删，事件残留）：fact_id={}", deleted_id
+            )
         try:
             from .pending_thoughts import forget_thoughts_for_source
 
