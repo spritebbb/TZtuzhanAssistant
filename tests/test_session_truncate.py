@@ -143,12 +143,43 @@ def test_regenerate_mutex_and_no_repersist() -> None:
     print("[OK] regenerate：不重复落 user 消息，回复正常落库（mock 轮）")
 
 
+def test_truncate_waits_for_inflight_generation() -> None:
+    """DF-10：truncate 必须等在途生成（持 pipeline._user_lock）结束才执行，
+    否则截断先落、旧回复后落，已删气泡「复活」。"""
+    import asyncio as _aio
+
+    from backend.api.sessions import TruncatePayload, api_sessions_truncate
+    from backend.core.pipeline import _user_lock
+    from backend.core.persona_profiles import active_user_id
+
+    uid = active_user_id()
+
+    async def scenario():
+        async with _user_lock(uid):
+            task = _aio.create_task(api_sessions_truncate(TruncatePayload(keep_count=1)))
+            await _aio.sleep(0.05)
+            assert not task.done(), "持锁期间 truncate 必须阻塞等待"
+        # 直接调用端点返回原生 dict（未经 FastAPI 响应层）
+        body = await task
+        assert body.get("ok") is True, body
+        return body["removed"]
+
+    _seed("互斥前问", "互斥前答")
+    removed = asyncio.run(scenario())
+    # 前序用例留下 [user1, bot]，再 seed 两条 = 4 条；keep=1 → 删 3 条
+    assert removed == 3, removed
+    after = asyncio.run(_session_store.get_messages("current"))
+    assert [m["role"] for m in after] == ["user"]
+    print("[OK] DF-10 truncate：与在途生成互斥，锁释放后才截断")
+
+
 def main() -> None:
     test_truncate_boundaries()
     test_truncate_endpoint_contract()
     test_regenerate_requires_last_user()
     test_regenerate_mutex_and_no_repersist()
-    print("\n=== NP-08 消息重发: 4 项全部通过 ===")
+    test_truncate_waits_for_inflight_generation()
+    print("\n=== NP-08 消息重发: 5 项全部通过 ===")
 
 
 if __name__ == "__main__":
