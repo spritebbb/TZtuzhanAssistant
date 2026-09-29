@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import zipfile
 
 from fastapi import APIRouter, Request, UploadFile
@@ -143,8 +144,18 @@ async def api_personas_import(file: UploadFile):
 
             target = _ROOT / str(profile["id"]) / "portraits"
             target.mkdir(parents=True, exist_ok=True)
-            for state, png in portraits.items():
-                (target / f"{state}.png").write_bytes(png)
+            try:
+                for state, png in portraits.items():
+                    (target / f"{state}.png").write_bytes(png)
+            except OSError as exc:
+                # DF-13：立绘写盘失败（磁盘满/坏档）→ 回滚本次导入。否则留下
+                # 「有卡无立绘」的半成品，而 import_card 对同名目录只会加后缀
+                # 新建——重导必产生重复人格，残档也没有任何用户侧清理入口。
+                shutil.rmtree(_ROOT / str(profile["id"]), ignore_errors=True)
+                return JSONResponse(
+                    {"ok": False, "error": f"立绘写入失败，已取消本次导入：{exc}"},
+                    status_code=500,
+                )
         profile = _activate(profile["id"])
         # 触发创建该人格的私有 current 会话，切回时会继续原来的对话。
         from ..session.store import CURRENT_SESSION_ID, get_messages
