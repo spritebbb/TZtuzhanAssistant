@@ -200,17 +200,21 @@ async function send() {
   await runBotStream(text, { ephemeral: sendEphemeral })
 }
 
-// NP-08 重发切片：仅当最后一条是 bot（且非临时）时可重新生成
+// NP-08 重发切片：仅当最后一条是 bot（且非临时）时可重新生成。
+// DF-15：带图消息不参与重发——regenerate 只回填文字描述，图片本体丢失，
+// 语义变质（诚实降级：宁可不给按钮）。
 const canRegenerate = computed(() =>
   !busy.value && !initializing.value && messages.value.length > 0
   && messages.value[messages.value.length - 1].role === 'bot'
   && !messages.value[messages.value.length - 1].ephemeral
+  && !messages.value[messages.value.length - 1].image
 )
-// 仅当最后一条是 user（且非临时）时可编辑重发
+// 仅当最后一条是 user（且非临时）时可编辑重发；带图同理隐藏（编辑回填只带文字）
 const canEditLastUser = computed(() =>
   !busy.value && !initializing.value && messages.value.length > 0
   && messages.value[messages.value.length - 1].role === 'user'
   && !messages.value[messages.value.length - 1].ephemeral
+  && !messages.value[messages.value.length - 1].image
 )
 const actionError = ref('')
 
@@ -221,7 +225,7 @@ async function regenerateLast() {
   busy.value = true
   actionError.value = ''
   // 只截掉最后那条 bot 回复（保留 user 消息）；语义=「你把那句话又说了一遍」，
-  // userdb 侧正常重跑（记账/记忆由每日限额与置信度合并消化重复）。
+  // userdb 侧正常重跑；连点由后端 60s 节流挡住（DF-8）。
   const removed = await truncateSession(messages.value.length - 1)
   if (removed === null) {
     busy.value = false

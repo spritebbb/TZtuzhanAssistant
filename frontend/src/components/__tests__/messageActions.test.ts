@@ -99,6 +99,22 @@ describe('消息重发操作条（NP-08）', () => {
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('想说的话')
   })
 
+
+  it('DF-15：末条带图时不出重发/编辑按钮（重发只回填文字描述，图片本体丢失）', async () => {
+    const sessions = (await import('../../api/sessions')) as unknown as { getMessages: ReturnType<typeof vi.fn> }
+    sessions.getMessages.mockResolvedValue([
+      { role: 'user', content: '第一问', ts: 1 },
+      { role: 'bot', content: '这是图片：一只猫', image: '/api/images/x.png', ts: 2 },
+    ] as Message[])
+
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'current' },
+      global: { stubs: { ToolBar: true, ConfirmPanel: true, Portrait: true } },
+    })
+    await flushPromises()
+    expect(wrapper.find('button.msg-action').exists()).toBe(false)
+  })
+
   it('临时消息不出操作条', async () => {
     const sessions = (await import('../../api/sessions')) as unknown as { getMessages: ReturnType<typeof vi.fn> }
     sessions.getMessages.mockResolvedValue([
