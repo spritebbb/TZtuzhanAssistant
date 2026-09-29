@@ -124,8 +124,8 @@ async def api_chat(
     if regenerate:
         # 重发切片：必须站在一条 user 消息上重新生成（历史末条为 user）。
         # 语义取「你把这句话又说了一遍」：pipeline 走完全正常路径（含记账与
-        # 记忆提取，由每日限额与置信度合并消化重复），本端点只跳过 sessions
-        # 侧的 user 重复落库；text 回填为落库的那条 user 消息内容。
+        # 记忆提取），本端点只跳过 sessions 侧的 user 重复落库；text 回填为
+        # 落库的那条 user 消息内容。
         if not msgs or msgs[-1].get("role") != "user":
             return JSONResponse(
                 {"ok": False, "error": "最后一条不是你的消息，无法重新生成"}, status_code=400
@@ -133,6 +133,22 @@ async def api_chat(
         text = str(msgs[-1].get("content") or "").strip()
         if not text:
             return JSONResponse({"ok": False, "error": "原消息内容为空，无法重新生成"}, status_code=400)
+        # DF-8 节流：重发本身语义合法，但连点「重新生成」会以每轮一条的速度
+        # 向 long_memory 冲刷重复原文、并反复驱动情绪入账——60 秒内只放行一次。
+        uid = _user_id(session_id)
+        try:
+            from ..core.userdb import kv_get, kv_set
+
+            now_ts = time.time()
+            last = kv_get(uid, "regen:last_at")
+            if last and now_ts - float(last) < 60:
+                return JSONResponse(
+                    {"ok": False, "error": "刚刚才重新生成过，稍等一下再试"},
+                    status_code=429,
+                )
+            kv_set(uid, "regen:last_at", str(now_ts))
+        except Exception:
+            logger.warning("[chat] 重发节流检查失败，按放行处理")
 
     if not ephemeral and not regenerate:
         # 普通对话立即持久化；临时对话只存在于当前浏览器内存。

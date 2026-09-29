@@ -535,6 +535,32 @@ def apply_impulse(
 
     # 情绪记忆：记录一次冲击（让她短期「还记得刚刚的情绪」）
     if emotional_hit:
+        # DF-8：同一句原文当日只做一次情绪事件入账（情绪记忆/长期档案/事件级
+        # 记忆/张力）。重发「再说一遍」不该把同一件事反复记成新的冲击——此前
+        # 连点「重新生成」可以无限刷 mood、把同一段原文反复灌进情绪档案。
+        # mood delta 不在此限：每轮±15 是她对这句话当下的反应，语义上成立。
+        import hashlib
+
+        from .userdb import kv_get, kv_set
+
+        day = datetime.now().strftime("%Y%m%d")
+        seen_key = f"emo_hit_seen:{user_id}:{day}"
+        try:
+            fingerprints = set((kv_get(user_id, seen_key) or "").split(",")) - {""}
+        except Exception:
+            fingerprints = set()
+        fp = hashlib.md5(
+            f"{emotional_hit}\x00{text or ''}".encode("utf-8")
+        ).hexdigest()[:12]
+        if fp in fingerprints:
+            logger.debug("[state] 情绪事件当日已入账，跳过重复：{}", emotional_hit)
+            return load_state(user_id)
+        fingerprints.add(fp)
+        try:
+            kv_set(user_id, seen_key, ",".join(sorted(fingerprints))[-2000:])
+        except Exception:
+            pass  # 去重记账失败不阻断情绪演化本体
+
         memory = _decay_emotion_memory(_load_emotion_memory(user_id), datetime.now())
         memory.append({
             "ts": datetime.now().isoformat(timespec="seconds"),
