@@ -9,6 +9,7 @@ import asyncio
 import json
 import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -64,6 +65,11 @@ def checkpoint_all() -> None:
     # 只能跳过而不是尝试以明文打开密文库。
     from ..storage import runtime
 
+    # 迁移闸门期（enable/重置等正在做库快照与拷贝）：checkpoint 会重写主库
+    # 文件，与迁移引擎的页级导出并发会让 manifest 等价校验失败（迁移 500）。
+    if runtime.migration_gate_engaged():
+        logger.debug("[维护] 迁移闸门期：跳过 checkpoint")
+        return
     encrypted_key = None
     if runtime.encrypted_mode():
         try:
@@ -78,8 +84,29 @@ def checkpoint_all() -> None:
             _checkpoint_one(p, encrypted_key=encrypted_key)
 
 
+class BackupInProgress(RuntimeError):
+    """已有一次备份在进行（DF-14：API 连点与周期任务撞车时不再互相干扰）。"""
+
+
+_backup_lock = threading.Lock()
+
+
 def backup() -> Path | None:
-    """创建带校验清单的每日快照；任一必需项失败则不留下成功目录。"""
+    """创建带校验清单的每日快照；任一必需项失败则不留下成功目录。
+
+    DF-14 并发互斥：备份含 WAL checkpoint + 整目录拷贝 + 末尾轮转（rmtree 旧
+    目录），两路并发时轮转方删目录、另一方刚列完目录会抛错——实际快照已成功
+    却对外报失败。同一时刻只允许一路备份，撞车立即抛 BackupInProgress。
+    """
+    if not _backup_lock.acquire(blocking=False):
+        raise BackupInProgress("已有一次备份在进行")
+    try:
+        return _backup_impl()
+    finally:
+        _backup_lock.release()
+
+
+def _backup_impl() -> Path | None:
     from ..storage import runtime
 
     try:
