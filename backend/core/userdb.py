@@ -2064,6 +2064,37 @@ class UserDB:
 
         return {int(row["id"]) for row in rows} - policy_expired_ids(user_id, database=self)
 
+    @_locked
+    def recallable_long_memory_ids(self, user_id: str, record_ids: list[int]) -> set[int]:
+        """lm 分区权威存在性闸门（P3-29）：返回 ids 中 long_memory 仍存在的子集。
+
+        长记忆无 status/expires 字段，存在即可召回（pinned 不影响召回权）。
+        """
+        clean_ids = sorted({int(value) for value in record_ids})
+        if not clean_ids:
+            return set()
+        marks = ",".join("?" for _ in clean_ids)
+        rows = self.conn.execute(
+            f"SELECT id FROM long_memory WHERE user_id = ? AND id IN ({marks})",
+            (user_id, *clean_ids),
+        ).fetchall()
+        return {int(row["id"]) for row in rows}
+
+    @_locked
+    def existing_kb_chunk_ids(self, user_id: str, chunk_ids: list[int]) -> set[int]:
+        """kb 分区权威存在性闸门（P3-29）：chunk 行存在且所属文档仍在才返回。"""
+        clean_ids = sorted({int(value) for value in chunk_ids})
+        if not clean_ids:
+            return set()
+        marks = ",".join("?" for _ in clean_ids)
+        rows = self.conn.execute(
+            "SELECT c.id FROM kb_chunks c "
+            "JOIN kb_documents d ON d.id = c.doc_id AND d.user_id = c.user_id "
+            f"WHERE c.user_id = ? AND c.id IN ({marks})",
+            (user_id, *clean_ids),
+        ).fetchall()
+        return {int(row["id"]) for row in rows}
+
     # ---- 用户画像（user_profile）----
 
     @_locked

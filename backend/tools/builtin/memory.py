@@ -12,13 +12,37 @@ from ..base import ToolRegistry, tool_failure
 from ...core import userdb
 from ...core.current_user import current_user_id
 from ...core.log import logger
-from ...core.vector_store import search as vec_search
 
 _TOP_K = 6
 
 
 def _uid() -> str:
     return current_user_id.get()
+
+
+def _pool_gated_hits(uid: str, hits: list) -> list:
+    """跨分区向量命中按 kind 分池回查权威表（P3-29）。
+
+    薄壳版 search 丢 kind，小整数 record_id 跨分区碰撞时会回错表（facts 命中
+    被当成 long_memory 内容返回）。lm/facts 池闸门故障 fail-open；其余分区
+    （topic/diary/…）无本工具的权威映射，宁少勿错直接跳过。
+    """
+    pools: dict[str, list] = {}
+    for h in hits:
+        pools.setdefault(str(h.meta.get("kind") or ""), []).append(h)
+    gated: list = []
+    for kind, khits in pools.items():
+        try:
+            if kind == "lm":
+                alive = userdb.db.recallable_long_memory_ids(uid, [h.record_id for h in khits])
+            elif kind == "facts":
+                alive = userdb.db.recallable_fact_ids(uid, [h.record_id for h in khits])
+            else:
+                continue
+        except Exception:
+            alive = {h.record_id for h in khits}
+        gated.extend(h for h in khits if h.record_id in alive)
+    return gated
 
 
 async def _memory_search(query: str = "", top_k: int = 0) -> str:
@@ -43,18 +67,16 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
     except Exception:
         facts = [h["content"] for h in userdb.db.search_facts(uid, query, k)]
 
-    # 3) 向量检索兜底（显式工具调用时无论如何都查一次稠密向量）
-    # 说明：vec_search 是 vector_store 薄壳的 search()，返回 [(record_id, distance)]
-    # 元组列表（内部已把 SearchHit 转成元组），此处 for rid, dist in vec 正确。
+    # 3) 向量检索兜底（显式工具调用时无论如何都查一次稠密向量）。
+    # P3-29：必须用带 SearchHit.meta 的完整版 search——薄壳丢 kind，跨分区
+    # id 碰撞会回错表；命中再经 _pool_gated_hits 按权威表分池过滤。
     try:
-        vec = await asyncio.to_thread(vec_search, uid, query, k, None)
-        for rid, dist in vec:
-            row = userdb.db.conn.execute(
-                "SELECT content FROM long_memory WHERE user_id=? AND id=?",
-                (uid, rid),
-            ).fetchone()
-            if row and row["content"] not in lm and len(lm) < k:
-                lm.append(row["content"])
+        from ...core.memory import vector_store as vs
+
+        hits = await asyncio.to_thread(vs.search, uid, query, k, None)
+        for h in _pool_gated_hits(uid, hits):
+            if h.text and h.text not in lm and len(lm) < k:
+                lm.append(h.text)
     except Exception as e:
         # 向量兜底失败只影响召回丰富度，不阻断主流程；记日志而非静默吞掉
         logger.warning("[memory_search] 向量兜底检索失败: {}", e)

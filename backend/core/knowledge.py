@@ -597,8 +597,25 @@ def recall_knowledge(user_id: str, query: str, top_k: int | None = None) -> list
         logger.warning("[知识库] 检索失败：{}", query[:30])
         return []
     results: list[dict] = []
-    for hit in hits:
-        if hit.distance > config.kb_recall_max_distance:
+    # P3-29 权威闸门：距离达标后再回查 SQLite——chunk 已删或所属文档已删的
+    # 命中是孤儿向量（删除失败残留），直接丢弃并惰性清理；查库异常 fail-open。
+    in_range = [h for h in hits if h.distance <= config.kb_recall_max_distance]
+    from .userdb import db
+
+    try:
+        alive_chunk_ids = db.existing_kb_chunk_ids(user_id, [h.record_id for h in in_range])
+    except Exception:
+        logger.warning("[知识库] 召回闸门查询失败，本次跳过存在性过滤")
+        alive_chunk_ids = {h.record_id for h in in_range}
+    orphan_ids = [h.record_id for h in in_range if h.record_id not in alive_chunk_ids]
+    if orphan_ids:
+        try:
+            vector_store.delete_many(user_id, "kb", orphan_ids)
+            logger.info("[知识库] 闸门清理 {} 条孤儿向量：{}", len(orphan_ids), orphan_ids[:5])
+        except Exception:
+            pass
+    for hit in in_range:
+        if hit.record_id not in alive_chunk_ids:
             continue
         results.append({
             "text": hit.text,

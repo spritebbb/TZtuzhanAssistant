@@ -114,6 +114,35 @@ def _tfidf_candidates(
     return scored[:top_k]
 
 
+def _gate_lm_hits(user_id: str, hits: list) -> tuple[list, list[int]]:
+    """lm 向量命中的 SQLite 权威闸门（P3-29）：返回 (存活 hits, 孤儿 record_ids)。
+
+    删除失败留下的孤儿向量在向量库里仍有原文，不挡会在召回里「复活」已删对话。
+    查库异常时 fail-open（沿用 mem 闸门取舍：闸门只防孤儿，不阻断召回）。
+    """
+    try:
+        alive_ids = db.recallable_long_memory_ids(user_id, [h.record_id for h in hits])
+    except Exception:
+        return list(hits), []
+    alive = [h for h in hits if h.record_id in alive_ids]
+    orphans = [h.record_id for h in hits if h.record_id not in alive_ids]
+    return alive, orphans
+
+
+def _cleanup_orphans(user_id: str, kind: str, orphans: list[int]) -> None:
+    """惰性清理闸门判定出的孤儿向量（尽力而为，失败不影响召回）。"""
+    if not orphans:
+        return
+    try:
+        from . import vector_store as vec
+
+        removed = vec.delete_many(user_id, kind, orphans)
+        if removed:
+            logger.info("[记忆] 闸门清理 {} 条 {} 孤儿向量：{}", removed, kind, orphans[:5])
+    except Exception:
+        pass
+
+
 async def _with_expansion(
     user_id: str,
     query: str,
@@ -150,13 +179,13 @@ async def _with_expansion(
 
             vector_limit = LONG_TERM_TOP_K * 4 if kind == "facts" else LONG_TERM_TOP_K
             hits = await asyncio.to_thread(vec.search, user_id, query, vector_limit, kind)
-            allowed_fact_ids = (
-                db.recallable_fact_ids(user_id, [h.record_id for h in hits])
-                if kind == "facts" else None
-            )
-            for h in hits:
-                if allowed_fact_ids is not None and h.record_id not in allowed_fact_ids:
-                    continue
+            if kind == "facts":
+                allowed_fact_ids = db.recallable_fact_ids(user_id, [h.record_id for h in hits])
+                alive = [h for h in hits if h.record_id in allowed_fact_ids]
+            else:
+                alive, orphans = _gate_lm_hits(user_id, hits)
+                _cleanup_orphans(user_id, "lm", orphans)
+            for h in alive:
                 if h.text and h.text not in vec_docs:
                     vec_docs.append(h.text)
         except Exception:
@@ -196,7 +225,9 @@ async def recall(user_id: str, query: str, *, mock: bool = False) -> list[str]:
             from . import vector_store as vec
 
             hits = await asyncio.to_thread(vec.search, user_id, query, LONG_TERM_TOP_K, "lm")
-            for h in hits:
+            alive, orphans = _gate_lm_hits(user_id, hits)
+            _cleanup_orphans(user_id, "lm", orphans)
+            for h in alive:
                 if h.text and h.text not in base:
                     base.append(h.text)
         except Exception:
