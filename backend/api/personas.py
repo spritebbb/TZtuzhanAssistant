@@ -126,7 +126,10 @@ async def api_personas_import(file: UploadFile):
     if busy:
         return busy
     try:
-        data = await file.read(1024 * 1024 + 1)
+        # 读取上限必须 ≥ 包体上限（_PACK_MAX_BYTES）：此前按 1MB 截断读取，zip
+        # 目录在文件尾部，截断后 BadZipFile——五档立绘包（天然超 1MB）全部导入
+        # 失败且被误报为「不是有效的 zip 文件」；>1MB 的裸 .md 卡还会被静默截断。
+        data = await file.read(_PACK_MAX_BYTES + 1)
         filename = file.filename or "persona.md"
         portraits: dict[str, bytes] = {}
         if filename.lower().endswith(".zip"):
