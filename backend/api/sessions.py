@@ -82,8 +82,15 @@ async def api_sessions_truncate(payload: TruncatePayload):
 
     仅接受 'current'——归档是只读历史，不参与重发。被删消息已提取的记忆不回滚。
     """
+    from ..core.pipeline import _user_lock
+    from ..core.persona_profiles import active_user_id
+
     try:
-        removed = await truncate_session(CURRENT_SESSION_ID, payload.keep_count)
+        # DF-10：与在途流式生成互斥（生成全程持 pipeline._user_lock，回复落库
+        # 在锁内收尾）。没有这道闸：截断先落库、旧回复随后落库，已删气泡会
+        # 「复活」并混进之后的归档。
+        async with _user_lock(active_user_id()):
+            removed = await truncate_session(CURRENT_SESSION_ID, payload.keep_count)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     if removed is None:
