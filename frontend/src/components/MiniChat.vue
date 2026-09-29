@@ -27,7 +27,9 @@ const confirmResponding = ref(false)
 const errorLine = ref('')
 let controller: AbortController | null = null
 
-// 答完 3 秒自动隐藏（拍板：说完即走；内容永远在主窗历史里，不丢）
+// 答完 3 秒自动隐藏（拍板：说完即走；内容永远在主窗历史里，不丢）。
+// DF-12：打字/点按都会取消定时器——此前键盘输入不续期，回复完成 3 秒内
+// 开始打下一句会把窗口从手底下抽走，后续按键打进前一个应用。
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleHide() {
   if (hideTimer) clearTimeout(hideTimer)
@@ -132,6 +134,7 @@ function onEnterKey(e: KeyboardEvent) {
         aria-label="快问快答"
         placeholder="问点什么…（Enter 发送）"
         :disabled="false"
+        @input="cancelHide"
         @keydown.enter.exact="onEnterKey"
       />
       <button v-if="busy" class="mini-stop" aria-label="停止生成" title="停止" @click="stop">■</button>
