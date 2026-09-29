@@ -1,7 +1,12 @@
 // NP-11 迷你速聊窗回归：直连 streamChat（current 会话）、IME 守卫、
-// busy 时禁止重复发送、confirm_request 引导去主窗、错误可见、停止。
+// busy 时禁止重复发送、confirm_request 窗内允许/拒绝（DF-7：原「去主窗口」
+// 引导是断头路）、错误可见、停止。
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const apiFetchMock = vi.hoisted(() => vi.fn(async () => ({
+  json: async () => ({ ok: true, allow: true }),
+})))
 
 const streamChatMock = vi.hoisted(() => vi.fn(async (
   _text: string,
@@ -18,6 +23,9 @@ const streamChatMock = vi.hoisted(() => vi.fn(async (
   cb.onDone?.('回答内容')
 }))
 
+vi.mock('../../api', () => ({
+  apiFetch: apiFetchMock,
+}))
 vi.mock('../../api/chat', () => ({
   streamChat: streamChatMock,
 }))
@@ -84,9 +92,9 @@ describe('MiniChat 迷你速聊窗（NP-11）', () => {
     expect(streamChatMock).not.toHaveBeenCalled()
   })
 
-  it('confirm_request 显示引导去主窗口；错误信息可见', async () => {
+  it('confirm_request 窗内提供允许/拒绝并调 POST /api/confirm（DF-7）；错误信息可见', async () => {
     streamChatMock.mockImplementationOnce(async (_t, _s, _sig, cb) => {
-      cb.onConfirmRequest?.({})
+      cb.onConfirmRequest?.({ request_id: 'req-1', tool: 'delete_file', message: '删除文件' })
       cb.onDone?.('')
     })
     const wrapper = mountMini()
@@ -94,12 +102,37 @@ describe('MiniChat 迷你速聊窗（NP-11）', () => {
     await input.setValue('删个文件')
     await input.trigger('keydown.enter')
     await flushPromises()
-    expect(wrapper.text()).toContain('主窗口')
+    expect(wrapper.text()).toContain('需要你确认')
+    const allow = wrapper.get('button.mini-btn.allow')
+    wrapper.get('button.mini-btn.deny')
+    await allow.trigger('click')
+    await flushPromises()
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    const call = apiFetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(call[0]).toBe('/api/confirm')
+    expect(call[1].method).toBe('POST')
+    expect(String(call[1].body)).toContain('request_id=req-1')
+    expect(String(call[1].body)).toContain('allow=true')
+    expect(wrapper.text()).toContain('已允许')
 
     streamChatMock.mockRejectedValueOnce(new Error('HTTP 500'))
     await input.setValue('再来一次')
     await input.trigger('keydown.enter')
     await flushPromises()
     expect(wrapper.text()).toContain('HTTP 500')
+  })
+
+  it('confirm_request 缺 request_id 时退回主窗口引导（不渲染按钮）', async () => {
+    streamChatMock.mockImplementationOnce(async (_t, _s, _sig, cb) => {
+      cb.onConfirmRequest?.({})
+      cb.onDone?.('')
+    })
+    const wrapper = mountMini()
+    const input = wrapper.get('input[aria-label="快问快答"]')
+    await input.setValue('奇怪响应')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+    expect(wrapper.text()).toContain('主窗口')
+    expect(wrapper.find('button.mini-btn.allow').exists()).toBe(false)
   })
 })
