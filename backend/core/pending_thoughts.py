@@ -131,7 +131,8 @@ def sync_pending_thoughts(user_id: str) -> int:
         ):
             added += 1
     if added:
-        db.conn.commit()
+        with db._lock:  # 锁外 commit 会把他人持锁事务的半截内容提前落盘
+            db.conn.commit()
         logger.info("[心事] 挂上 {} 条未完成心事：{}", added, user_id)
     return added
 
