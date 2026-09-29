@@ -138,6 +138,38 @@ def test_corrupt_zip_rejected() -> None:
     print("[OK] 坏 zip 400")
 
 
+def test_pack_over_one_mb_imports() -> None:
+    """DF-3 回归：>1MB 的包必须完整导入——此前 API 层按 1MB 截断读取，zip
+    目录在尾部被截掉，五档立绘包（天然超 1MB）全部被误报「不是有效的 zip」。"""
+    big_png = PNG_BYTES + b"\x00" * (1200 * 1024)  # ~1.2MB，跨过旧 1MB 截断线
+    pack = _make_pack({
+        "persona.md": CARD.encode("utf-8"),
+        "portraits/plain.png": big_png,
+    })
+    r = _upload("big.zip", pack)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ok"] is True and d["portraits"] == ["plain"], d
+    from backend.core import persona_profiles as _pp
+
+    saved = (_pp.active_card_path().parent / "portraits" / "plain.png").read_bytes()
+    assert len(saved) == len(big_png), "大立绘应完整落盘不被截断"
+
+
+def test_pack_over_hard_limit_rejected() -> None:
+    """30MB 硬上限必须真实生效（修复前该分支因 1MB 截断而不可达）。"""
+    from backend.api import personas as _personas
+    from backend.core import persona_profiles as _pp
+
+    big_png = PNG_BYTES + b"\x00" * (30 * 1024 * 1024)
+    pack = _make_pack({"persona.md": CARD.encode("utf-8"), "portraits/plain.png": big_png})
+    try:
+        _personas._unpack_persona_pack(pack)
+        raise AssertionError("超过 30MB 的包应被拒绝")
+    except _pp.PersonaProfileError as exc:
+        assert "过大" in str(exc), exc
+
+
 def main() -> None:
     test_import_valid_pack_and_portrait_follows()
     test_missing_state_falls_back_to_pack_plain()
@@ -145,7 +177,9 @@ def main() -> None:
     test_pack_without_md_rejected()
     test_zip_slip_rejected()
     test_corrupt_zip_rejected()
-    print("\n=== NP-13 人格包: 6 项全部通过 ===")
+    test_pack_over_one_mb_imports()
+    test_pack_over_hard_limit_rejected()
+    print("\n=== NP-13 人格包: 8 项全部通过 ===")
 
 
 if __name__ == "__main__":
