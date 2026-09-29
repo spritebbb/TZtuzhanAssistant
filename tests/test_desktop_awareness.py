@@ -20,7 +20,10 @@ os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"
-os.environ.pop("DESKTOP_AWARENESS", None)  # 锁定默认关闭断言
+# 锁定默认关闭断言：必须用 setdefault 而非 pop——本机 .env 若写了
+# DESKTOP_AWARENESS=1，import 时 load_dotenv（不覆盖已存在变量）会保留
+# 我们设的 0；用 pop 则 .env 的 1 原样进入 config，用户机上此用例恒红。
+os.environ.setdefault("DESKTOP_AWARENESS", "0")
 
 _TEST_TMP = Path(tempfile.mkdtemp(prefix="tz_aware_test_"))
 _TEST_TMP.mkdir(parents=True, exist_ok=True)
@@ -52,16 +55,17 @@ def test_categorize_matrix() -> None:
         ("Code.exe", False, 5.0, "code"),
         ("WindowsTerminal.exe", False, 0.0, "code"),
         ("chrome.exe", False, 1.0, "browse"),
-        ("msedge.exe", True, 1.0, "browse"),  # 浏览器全屏仍归 browse
+        ("msedge.exe", True, 1.0, "fullscreen"),  # DF-6：全屏最优先——F11 看视频不许归 browse 照发主动
         ("Stellaris.exe", True, 2.0, "fullscreen"),  # 未知全屏 → fullscreen（不猜游戏）
         ("Spotify.exe", False, 2.0, "other"),
         ("", False, 0.0, "other"),
-        ("PotPlayer.exe", True, 500.0, "idle"),  # 空闲优先于全屏
+        ("PotPlayer.exe", True, 500.0, "fullscreen"),  # DF-6：全屏挂机也静默（「全屏信号已覆盖她该闭嘴」）
+        ("PotPlayer.exe", False, 500.0, "idle"),  # 非全屏的空闲仍归 idle
     ]
     for name, fs, idle, expect in cases:
         got = categorize(name, fullscreen=fs, idle_seconds=idle)
         assert got == expect, (name, fs, idle, got, expect)
-    print("[OK] 类别归类矩阵：9 例全中（空闲优先 / 不猜游戏 / 未知归 other）")
+    print("[OK] 类别归类矩阵：10 例全中（全屏最优先 / 不猜游戏 / 未知归 other）")
 
 
 def test_api_off_by_default_and_no_probe() -> None:

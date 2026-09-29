@@ -102,11 +102,15 @@ _IDLE_AFTER_SECONDS = 300.0
 
 
 def categorize(process_name: str, *, fullscreen: bool, idle_seconds: float) -> str:
-    """前台应用类别（v1 五类）：idle / code / browse / fullscreen / other。
+    """前台应用类别（v1 五类）：fullscreen / idle / code / browse / other。
 
-    保守取向：输入空闲优先、宁归 other 不猜、不设 game 类（全屏信号已覆盖
-    「她该闭嘴」的诉求）。process_name 取可执行文件名（小写，不含路径）。
+    保守取向：全屏最优先、宁归 other 不猜、不设 game 类。全屏判定必须先于
+    code/browse（DF-6）：否则 F11 全屏浏览器看视频（最普遍的「看视频」形态）
+    会归 browse，主动性静默被架空——docstring 里「全屏信号已覆盖她该闭嘴」
+    的设计意图即全屏优先。process_name 取可执行文件名（小写，不含路径）。
     """
+    if fullscreen:
+        return "fullscreen"
     if idle_seconds >= _IDLE_AFTER_SECONDS:
         return "idle"
     name = (process_name or "").strip().lower()
@@ -114,8 +118,6 @@ def categorize(process_name: str, *, fullscreen: bool, idle_seconds: float) -> s
         return "code"
     if name and any(h in name for h in _BROWSE_HINTS):
         return "browse"
-    if fullscreen:
-        return "fullscreen"
     return "other"
 
 
@@ -155,7 +157,11 @@ def _input_idle_seconds() -> float:
         info = _LASTINPUTINFO()
         info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
         if u32.GetLastInputInfo(ctypes.byref(info)):
-            return max(0.0, float(ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000.0)
+            # DF-6：GetTickCount 默认按 signed 32 位解释，开机 24.8~49.7 天区间
+            # 读出负值、与 dwTime（c_ulong 无符号）相减得大负数被 max(0) 钳成 0
+            # ——长期不关机的台机 idle 永远失效。显式声明无符号 32 位返回。
+            k32.GetTickCount.restype = wintypes.ULONG
+            return max(0.0, float(k32.GetTickCount() - info.dwTime) / 1000.0)
         return 0.0
     except Exception:
         return 0.0
