@@ -40,7 +40,7 @@ def _activity(uid: str, title: str) -> int:
 
 
 def _thought(uid: str, content: str, *, source_type: str = "activity",
-             source_id: int | None = None) -> int:
+             source_id: int | None = None, kind: str = "resume_reading") -> int:
     # 唯一键 (user, kind, source_id)：每次换一个来源活动，避免撞唯一约束
     if source_id is None:
         source_id = _activity(uid, f"书{content[:6]}")
@@ -48,11 +48,29 @@ def _thought(uid: str, content: str, *, source_type: str = "activity",
         cur = db.conn.execute(
             "INSERT INTO pending_thoughts "
             "(user_id, kind, source_type, source_id, content, earliest_at, expires_at, "
-            "priority, created_at) VALUES (?, 'resume_reading', ?, ?, ?, ?, ?, 5, ?)",
-            (uid, source_type, int(source_id or 0), content,
+            "priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 5, ?)",
+            (uid, kind, source_type, int(source_id or 0), content,
              (NOW - timedelta(hours=1)).isoformat(timespec="seconds"),
              (NOW + timedelta(days=3)).isoformat(timespec="seconds"),
              NOW.isoformat(timespec="seconds")),
+        )
+        db.conn.commit()
+    return int(cur.lastrowid)
+
+
+_CHAIN_SEQ = [9000]
+
+
+def _chain(uid: str, status: str = "waiting") -> int:
+    _CHAIN_SEQ[0] += 1  # 唯一键 (user, source_event_id, rule_id)：链间不撞
+    with db._lock:
+        cur = db.conn.execute(
+            "INSERT INTO event_chains (user_id, source_event_id, rule_id, rule_version, "
+            "node, status, due_at, attempt, created_at, updated_at) "
+            "VALUES (?, ?, 'promise_aftermath', 1, 'aftermath', ?, ?, 0, ?, ?)",
+            (uid, _CHAIN_SEQ[0], status,
+             (NOW - timedelta(hours=1)).isoformat(timespec="seconds"),
+             NOW.isoformat(timespec="seconds"), NOW.isoformat(timespec="seconds")),
         )
         db.conn.commit()
     return int(cur.lastrowid)
@@ -140,12 +158,41 @@ def test_length_cap_and_provider() -> int:
     return 0
 
 
+def test_event_chain_source_lifecycle() -> int:
+    """NP-15：event_chain 源按状态判定——waiting 可注入；done/cancelled 立即失效。"""
+    uid = "f03-chain"
+    db.ensure_user(uid)
+    cid = _chain(uid, "waiting")
+    tid = _thought(uid, "一起完成的那件事有了结果，可以自然地回望一句",
+                   source_type="event_chain", source_id=cid, kind="chain_aftermath")
+    # 修前缺口：event_chain 源被一刀切判失效，chain_aftermath 心事永远注入不了
+    hits = pt.context_candidates(uid, "上次那件事结果怎么样", turn_id=501)
+    assert [int(t["id"]) for t in hits] == [tid], "waiting 链的心事应可语境注入"
+    # 链收束（回望已表达）→ 语境路径不再重复
+    with db._lock:
+        db.conn.execute("UPDATE event_chains SET status='done' WHERE id=?", (cid,))
+        db.conn.commit()
+    assert pt.context_candidates(uid, "上次那件事结果怎么样", turn_id=502) == []
+    # 用户取消（cancel_chain 不级联心事）→ 语境与主动两条路径都必须立即失效
+    cid2 = _chain(uid, "waiting")
+    _thought(uid, "另一件一起完成的那件事有了结果，也想回望一句",
+             source_type="event_chain", source_id=cid2, kind="chain_aftermath")
+    with db._lock:
+        db.conn.execute("UPDATE event_chains SET status='cancelled' WHERE id=?", (cid2,))
+        db.conn.commit()
+    assert pt.context_candidates(uid, "那件事怎么样", turn_id=503) == []
+    assert pt.next_thought_for_stage(uid, "熟悉") is None, "主动路径不得提起已取消链的回望"
+    print("[OK] event_chain 源：waiting 可注入；done/cancelled 双路径立即失效")
+    return 0
+
+
 def main() -> int:
     failed = (
         test_relevance_gate()
         + test_receipt_and_not_expressed()
         + test_ephemeral_and_source_gone()
         + test_length_cap_and_provider()
+        + test_event_chain_source_lifecycle()
     )
     if failed:
         print(f"\n=== F03 心事门控：{failed} 项失败 ===")

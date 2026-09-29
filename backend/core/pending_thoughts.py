@@ -155,8 +155,13 @@ def next_thought_for_stage(user_id: str, stage: str) -> dict | None:
     sync_pending_thoughts(user_id)
     allowed = {"resume_reading"} if stage == "初识" else set(_THOUGHT_KINDS)
     for thought in due_thoughts(user_id):
-        if thought["kind"] in allowed:
-            return thought
+        if thought["kind"] not in allowed:
+            continue
+        # 与语境路径同款来源检查：来源删除只作废部分类型（cancel_chain 不级联
+        # 心事），主动路径也必须复核，否则会提起用户已取消/已收束的回望。
+        if not _source_alive(user_id, thought):
+            continue
+        return thought
     return None
 
 
@@ -206,11 +211,21 @@ def _bigrams(text: str) -> set[str]:
 
 
 def _source_alive(user_id: str, thought: dict) -> bool:
-    """来源必须仍存在（活动/事实/开放问题）；来源消失的候选直接失效。"""
+    """来源必须仍存在（活动/事实/开放问题/回望链）；来源消失的候选直接失效。"""
     source_type = str(thought.get("source_type") or "")
     source_id = thought.get("source_id")
     if source_id is None:
         return False
+    if source_type == "event_chain":
+        # P2-04 回望链按状态判定：waiting/due 才活着。done=回望已表达（语境
+        # 路径别再重复）；cancelled=用户明确「算了」；expired=过期收尾。
+        with db._lock:
+            row = db.conn.execute(
+                "SELECT 1 FROM event_chains WHERE user_id = ? AND id = ? "
+                "AND status IN ('waiting', 'due')",
+                (user_id, int(source_id)),
+            ).fetchone()
+        return row is not None
     table = {"activity": "activities", "fact": "facts", "open_question": "open_questions"}.get(source_type)
     if table is None:
         return False
