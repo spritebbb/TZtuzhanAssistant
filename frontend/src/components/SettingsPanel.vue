@@ -38,8 +38,11 @@ const panelLoadError = ref('')
 const backupBusy = ref(false)
 const backupStatus = ref<BackupStatus | null>(null)
 const backupStatusLine = ref('')
-// 超 3 天未备份黄色提醒（任务书阈值）
-const backupStale = computed(() => (backupStatus.value?.age_days ?? 0) > 3)
+// 超 3 天未备份黄色提醒（任务书阈值）。
+// DF-15：完全没有备份（裸奔态）才是最需要黄色提醒的场景——此前 age_days
+// 为空时恒不提醒，最危险的状态反而只有一行小字。
+const backupStale = computed(() =>
+  !backupStatus.value?.has_backup || (backupStatus.value?.age_days ?? 0) > 3)
 
 async function refreshBackupStatus() {
   try {
