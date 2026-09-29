@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -62,17 +63,20 @@ async def api_backup_status():
             from ..maintenance.encrypted_backup import load_encrypted_manifest
 
             if runtime.encrypted_mode() and not runtime.locked():
-                # 解锁态：verify_files 会校验 sha256 与加密容器结构
-                load_encrypted_manifest(folder, verify_files=True)
+                # 解锁态：verify_files 会校验 sha256 与加密容器结构。
+                # DF-5：全量 sha256 + integrity_check 是秒级到数十秒的纯 IO，
+                # 必须挪到线程池——在事件循环上直接跑会把整个后端（含正在
+                # 流式的聊天 SSE）冻结到大库校验结束。
+                await asyncio.to_thread(load_encrypted_manifest, folder, verify_files=True)
             else:
                 # 加密备份在明文态/锁定态无法校验文件内容：manifest 结构仍然可查
-                load_encrypted_manifest(folder, verify_files=False)
+                await asyncio.to_thread(load_encrypted_manifest, folder, verify_files=False)
                 verify = "skip"
                 verify_error = "加密备份需在解锁态校验文件内容"
         else:
             from ..maintenance.backup_manifest import load_manifest
 
-            load_manifest(folder, verify_files=True)
+            await asyncio.to_thread(load_manifest, folder, verify_files=True)
     except Exception as exc:  # noqa: BLE001 - 校验失败正是演习要暴露的
         verify = "fail"
         verify_error = str(exc)
