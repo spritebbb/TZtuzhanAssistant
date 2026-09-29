@@ -805,7 +805,8 @@ def forget_activity_data(user_id: str, activity_id: int) -> None:
     try:
         from .pending_thoughts import forget_thoughts_for_source
 
-        forget_thoughts_for_source(user_id, "activity", activity_id)
+        # 本函数契约是「只做数据不提交」：心事作废同样并入外层事务（DF-9）
+        forget_thoughts_for_source(user_id, "activity", activity_id, commit=False)
     except Exception:
         logger.warning("[共同活动] 心事级联清理失败：activity_id={}", activity_id)
 
