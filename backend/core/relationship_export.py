@@ -29,24 +29,31 @@ from .userdb import db
 BUNDLE_KIND = "tuzhan-relationship-bundle"
 BUNDLE_VERSION = 1
 
+# 主键别名表：主键列不叫 id、且主键值就是别一张表的外键（activity_lists.
+# activity_id 即 activities.id）。preview 的引用校验与 restore 的 id_maps
+# 登记都按此表取行主键；通用循环只重命名 "id" 主键，这类表由此表兜住。
+_BUNDLE_PK: dict[str, str] = {"activity_lists": "activity_id"}
+
 # 类别 → 表清单（导出与恢复顺序无关；全部表都在 userdb.reset 双清单里）
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
-               "learning_candidates", "manager_memories"),
+               "learning_candidates", "manager_memories", "user_preferences"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
              "persona_evolution_log", "tavern_sessions"),
-    "tasks": ("tasks", "promises", "open_questions"),
+    "tasks": ("tasks", "promises", "open_questions", "watches"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
         "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
+        "activity_lists", "list_items",
     ),
     "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
-               "domain_trust_events", "domain_trust_snapshot"),
-    "knowledge": ("kb_documents", "kb_chunks", "knowledge_opinions", "knowledge_opinion_sources",
+               "domain_trust_events", "domain_trust_snapshot", "event_chains",
+               "relationship_dimension_ledger", "humor_usage"),
+    "knowledge": ("kb_documents", "kb_chunks", "document_segments", "knowledge_opinions", "knowledge_opinion_sources",
                   "shared_resources", "resource_grants"),
     "conversations": ("messages",),
 }
@@ -126,6 +133,15 @@ _REFERENCE_RULES = (
     _rule_static("knowledge_opinion_sources", "opinion_id", "knowledge_opinions"),
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
+    # 换机漏表批（DF-1）：activity_lists 主键即 activities.id（rowid alias），
+    # 走通用引用重写后 id_maps 记录的新值与 activities 一致，list_items 再对齐。
+    _rule_static("activity_lists", "activity_id", "activities"),
+    _rule_static("list_items", "activity_id", "activity_lists"),
+    _rule_static("relationship_dimension_ledger", "event_id", "relationship_events"),
+    _rule_static("event_chains", "source_event_id", "relationship_events"),
+    _rule_static("event_chains", "result_id", "pending_thoughts"),
+    _rule_static("humor_usage", "term_id", "user_terms"),
+    _rule_static("document_segments", "document_id", "kb_documents"),
     _rule_static("facts", "conflicts_with_fact_id", "facts", frozenset()),
     _rule_static("memory_policy", "fact_id", "facts", frozenset()),
     _rule_static("memory_annotations", "fact_id", "facts", frozenset()),
@@ -234,7 +250,10 @@ def _validate_references(data: dict[str, list[dict]]) -> list[str]:
                 )
                 broken = True
                 break
-            if not any(int(candidate.get("id") or 0) == value for candidate in ref_rows):
+            if not any(
+                int(candidate.get(_BUNDLE_PK.get(ref_table, "id")) or 0) == value
+                for candidate in ref_rows
+            ):
                 errors.append(f"引用断裂：{table} 的 {ref_table}.id={value} 在备份中不存在")
                 broken = True
                 break
@@ -350,7 +369,10 @@ def preview_restore(bundle: dict, target_user_id: str) -> dict:
         "errors": errors,
         "counts": counts,
         "total": sum(counts.values()),
-        "kv_exported": len((bundle.get("kv") or {}).get("exported") or {}),
+        "kv_exported": sum(
+            1 for key in ((bundle.get("kv") or {}).get("exported") or {})
+            if match_spec(key) is not None
+        ),
         "target_user_id": target_user_id,
         "source_user_id": bundle.get("source_user_id"),
     }
@@ -441,6 +463,12 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     if table == "companion_requests":
                         # 同上：回应消息不在包内，清空编号。
                         values["response_message_id"] = None
+                    if table == "user_preferences":
+                        # 换机漏表批（DF-1）：教学偏好的来源消息不在包内，清空编号。
+                        values["source_message_id"] = None
+                    if table == "humor_usage":
+                        # 同上：使用场合的轮次不在包内，清空编号（梗本身与 term 保留）。
+                        values["source_turn_id"] = None
                     if table == "user_meta":
                         # P2-17：消息游标是旧库的全局编号，新库消息 id 从 1 重新
                         # 计数——原样带入会让事实/画像提炼永远取不到新消息
@@ -498,6 +526,11 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         id_maps[table][old_id] = (
                             new_text_id if new_text_id is not None else int(cur.lastrowid)
                         )
+                    elif table in _BUNDLE_PK and values.get(_BUNDLE_PK[table]) is not None:
+                        # 主键别名表：按别名登记映射（新值已由引用规则重写为
+                        # activities 的新 id），下游 list_items 据此解析。
+                        pk_name = _BUNDLE_PK[table]
+                        id_maps[table][int(row[pk_name])] = int(values[pk_name])
                 restored[table] = len(rows)
             # 二阶段：自引用回填（引用行与被引用行的新 id 都已确定）
             for table, column, ref_table, referencing_old_id, old_value in self_fixups:
@@ -518,6 +551,11 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     (datetime.now().isoformat(timespec="seconds"), target_user_id),
                 )
             for key, value in kv_export.items():
+                if match_spec(key) is None:
+                    # P3-44 同族补口（DF-1）：导出侧只收登记键（kv_registry），
+                    # 恢复侧同样只接受登记键——恶意备份不得借 kv 通道写任意
+                    # 键（state:rest / proactive:done:* 等运行态状态机）。
+                    continue
                 db.conn.execute(
                     "INSERT INTO kv_store (user_id, key, value) VALUES (?, ?, ?) "
                     "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value",
