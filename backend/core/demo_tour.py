@@ -126,7 +126,7 @@ TOUR_STEPS: tuple[dict, ...] = (
         "kind": "chat",
         "title": "并行子代理（Agent 核心）",
         "shows": "一次派发多个子代理分头干活，再汇总成结论",
-        "prompt": "帮我比较一下 Python 和 Node.js 做后端，从性能、生态、学习成本三个方面分析。",
+        "prompt": "用并行子代理比较一下 Python 和 Node.js 做后端，从性能、生态、学习成本三个方面分析。",
         "tools": ["agent_fanout"],
         "check": "工具面板出现 agent_fanout，且结论是按三个维度横向比较的，不是串行罗列",
     },

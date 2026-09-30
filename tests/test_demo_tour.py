@@ -87,12 +87,14 @@ def test_steps_shape_and_groups() -> int:
 
 def test_key_prompts_trigger_capability() -> int:
     steps = {s["id"]: s for s in TOUR_STEPS}
-    catalog = load_catalog()
 
-    # 并行子代理步：命中 parallel-analysis（该技能指令使用 agent_fanout）
+    # 并行子代理步：强工具诉求词「并行子代理」直接触发工具循环
+    # （2026-09-30 parallel-analysis 技能随 skills 收缩删除，接线改走触发词）
+    from backend.core.pipeline import _tool_loop_enabled
+
     fanout_prompt = steps["fanout"]["prompt"]
-    hits = [s.name for s in match_skills(fanout_prompt, catalog)]
-    assert "并行分析" in hits, hits
+    assert _tool_loop_enabled(fanout_prompt, None, [], ephemeral=False, mock=False), \
+        f"fanout 步提示词应触发工具循环: {fanout_prompt}"
 
     # 浏览器步：MCP 按需注入应暴露 playwright 工具
     from backend.core.config import config
