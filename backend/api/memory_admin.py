@@ -330,6 +330,45 @@ async def api_learning_candidates(include_revoked: bool = Query(False)):
     return {"ok": True, "items": items}
 
 
+# ---- 38项#22 兴趣源管理（授权域 CRUD：只有登记过的主题才会被外部检索）----
+@router.get("/interest-feeds")
+async def api_interest_feeds_list():
+    from ..core.userdb import db
+
+    uid = active_user_id()
+    items = await asyncio.to_thread(db.list_interest_feeds, uid)
+    return {"ok": True, "items": [dict(r) for r in items]}
+
+
+@router.post("/interest-feeds")
+async def api_interest_feeds_add(body: dict = Body(...)):
+    """登记授权兴趣源：{keywords: str, label?: str}；重复关键词 409。"""
+    from ..core.userdb import db
+
+    keywords = str(body.get("keywords") or "").strip()
+    if not keywords or len(keywords) > 60:
+        return JSONResponse({"ok": False, "error": "keywords 必填且 ≤60 字"}, status_code=422)
+    uid = active_user_id()
+    feed_id = await asyncio.to_thread(
+        db.add_interest_feed, uid, keywords, str(body.get("label") or "")
+    )
+    if feed_id is None:
+        return JSONResponse({"ok": False, "error": "这个兴趣源已经登记过了"}, status_code=409)
+    logger.info("[兴趣源] {} 登记授权源：{}", uid, keywords[:40])
+    return {"ok": True, "id": feed_id}
+
+
+@router.delete("/interest-feeds/{feed_id}")
+async def api_interest_feeds_remove(feed_id: int):
+    from ..core.userdb import db
+
+    uid = active_user_id()
+    removed = await asyncio.to_thread(db.remove_interest_feed, uid, feed_id)
+    if not removed:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    return {"ok": True}
+
+
 @router.post("/learning-candidates/{candidate_id}/confirm")
 async def api_learning_confirm(candidate_id: int):
     from ..core.learning_pipeline import LearningError, confirm

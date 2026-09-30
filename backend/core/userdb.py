@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 50  # v50: L12-L14 远程三层骨架归档（6 表定义移除，老库残表留为无害孤儿）
+_SCHEMA_VERSION = 51  # v51: 38项#22 兴趣源两表（interest_feeds 授权 / interest_feed_items 素材）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -408,6 +408,29 @@ CREATE TABLE IF NOT EXISTS experience_metrics (
     updated_at TEXT NOT NULL,
     UNIQUE (user_id, kind, value, day)
 );
+-- 38项#22 兴趣源：用户授权的外部信息主题（ feeds=授权清单，items=拉取的素材，
+-- 出牌置 used_at；两者均可由用户重新授权/重新拉取重建，不进关系包）。
+CREATE TABLE IF NOT EXISTS interest_feeds (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    keywords    TEXT NOT NULL,          -- 检索关键词（如「星穹铁道 版本资讯」）
+    label       TEXT NOT NULL DEFAULT '', -- 展示名（设置页/导出用）
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    last_pull_at TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    UNIQUE (user_id, keywords)
+);
+CREATE TABLE IF NOT EXISTS interest_feed_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    feed_id     INTEGER NOT NULL,
+    content     TEXT NOT NULL,          -- LLM 压缩后的一条素材（≤80 字）
+    created_at  TEXT NOT NULL,
+    used_at     TEXT,                   -- 主动分享出牌后置位；NULL=未用
+    FOREIGN KEY (feed_id) REFERENCES interest_feeds(id)
+);
+CREATE INDEX IF NOT EXISTS idx_feed_items_unused
+    ON interest_feed_items(user_id, used_at);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1752,6 +1775,73 @@ class UserDB:
             (user_id, start.isoformat(), end.isoformat()),
         ).fetchall()
 
+    # ---- 38项#22 兴趣源 ----
+    @_locked
+    def add_interest_feed(self, user_id: str, keywords: str, label: str = "") -> int | None:
+        """登记一个授权兴趣源；关键词重复返回 None。"""
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO interest_feeds (user_id, keywords, label, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, keywords.strip()[:60], label.strip()[:40], datetime.now().isoformat(timespec="seconds")),
+        )
+        self.conn.commit()
+        return cur.lastrowid if cur.rowcount else None
+
+    def list_interest_feeds(self, user_id: str, *, only_enabled: bool = False) -> list:
+        sql = "SELECT id, keywords, label, enabled, last_pull_at, created_at FROM interest_feeds WHERE user_id=?"
+        if only_enabled:
+            sql += " AND enabled=1"
+        with self._lock:
+            return self.conn.execute(sql + " ORDER BY id", (user_id,)).fetchall()
+
+    @_locked
+    def remove_interest_feed(self, user_id: str, feed_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM interest_feeds WHERE user_id=? AND id=?", (user_id, feed_id)
+        )
+        self.conn.execute(
+            "DELETE FROM interest_feed_items WHERE user_id=? AND feed_id=?", (user_id, feed_id)
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    @_locked
+    def set_feed_pulled(self, feed_id: int) -> None:
+        self.conn.execute(
+            "UPDATE interest_feeds SET last_pull_at=? WHERE id=?",
+            (datetime.now().isoformat(timespec="seconds"), feed_id),
+        )
+        self.conn.commit()
+
+    @_locked
+    def add_feed_items(self, user_id: str, feed_id: int, contents: list[str]) -> int:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.executemany(
+            "INSERT INTO interest_feed_items (user_id, feed_id, content, created_at) VALUES (?, ?, ?, ?)",
+            [(user_id, feed_id, c[:80], now) for c in contents],
+        )
+        self.conn.commit()
+        return len(contents)
+
+    def unused_feed_items(self, user_id: str, *, max_age_days: int = 5, limit: int = 3) -> list:
+        """未分享且仍在保鲜期内的素材（出牌候选）。"""
+        with self._lock:
+            return self.conn.execute(
+                "SELECT i.id, i.content, f.keywords FROM interest_feed_items i "
+                "JOIN interest_feeds f ON f.id = i.feed_id "
+                "WHERE i.user_id=? AND i.used_at IS NULL "
+                "AND date(i.created_at) >= date('now', ?) ORDER BY i.id LIMIT ?",
+                (user_id, f"-{int(max_age_days)} days", limit),
+            ).fetchall()
+
+    @_locked
+    def mark_feed_item_used(self, user_id: str, item_id: int) -> None:
+        self.conn.execute(
+            "UPDATE interest_feed_items SET used_at=? WHERE user_id=? AND id=?",
+            (datetime.now().isoformat(timespec="seconds"), user_id, item_id),
+        )
+        self.conn.commit()
+
     # ---- long memory ----
     @_locked
     def add_long_memory(self, user_id: str, content: str, pinned: bool = False) -> int:
@@ -2477,6 +2567,7 @@ class UserDB:
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
                 "tavern_sessions",
                 "situation_files",
+                "interest_feeds", "interest_feed_items",
                 "voice_profiles", "voice_manifests",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
