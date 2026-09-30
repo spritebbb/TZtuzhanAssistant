@@ -323,8 +323,16 @@ def _opinion_hash(stance: str, spans: list[dict]) -> str:
 def save_opinion(
     user_id: str, document_id: int, stance: str, source_spans: list[dict | int], *,
     origin: str = "user", confidence: float = 1.0,
+    verdict: dict | None = None,
 ) -> dict:
-    """保存一条角色观点；每个来源必须是该用户该文档的真实知识分块。"""
+    """保存一条角色观点；每个来源必须是该用户该文档的真实知识分块。
+
+    verdict（岗位一·观点一致性）：由 extract_opinions 前置判定后传入，
+    {"action": add/supersede/corroborate, "target_id": int|None, "reason": str}：
+    - corroborate → 佐证目标观点（confidence 上调、新 span 并入、写决策日志，不新增行）；
+    - supersede → 正常新增后把目标标为 superseded（保留演化链，不物理删）；
+    - add / None / 非法 → 与旧行为完全一致（add 也写决策日志，审计完整）。
+    """
     from .userdb import db
 
     stance = _normalize_stance(stance)
@@ -390,6 +398,41 @@ def save_opinion(
                 )
                 db.conn.commit()
             return get_opinion(user_id, int(existing["id"]))
+
+        # 岗位一：佐证分支——不新增行，confidence 上调 + 新 span 并入目标观点
+        action = str((verdict or {}).get("action") or "add").strip().lower()
+        target_id = (verdict or {}).get("target_id")
+        reason = str((verdict or {}).get("reason") or "")[:120] or "-"
+        if action == "corroborate" and target_id is not None:
+            target = db.conn.execute(
+                "SELECT id,status FROM knowledge_opinions WHERE user_id=? AND id=?",
+                (user_id, int(target_id)),
+            ).fetchone()
+            if target is not None and target["status"] == "active":
+                db.conn.execute(
+                    "UPDATE knowledge_opinions SET confidence=MIN(1.0, confidence+0.1),"
+                    "updated_at=? WHERE id=? AND user_id=?",
+                    (now, int(target_id), user_id),
+                )
+                # 新 span 并入（表有 UNIQUE 约束，重复 span 静默跳过）
+                for span, source_hash in source_rows:
+                    db.conn.execute(
+                        "INSERT OR IGNORE INTO knowledge_opinion_sources "
+                        "(user_id,opinion_id,chunk_id,start_offset,end_offset,source_hash) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (user_id, int(target_id), span["chunk_id"],
+                         span["start"], span["end"], source_hash),
+                    )
+                db.conn.execute(
+                    "INSERT INTO knowledge_opinion_decisions "
+                    "(user_id,new_opinion_id,target_opinion_id,action,reason,created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (user_id, int(target_id), int(target_id), "corroborate", reason, now),
+                )
+                db.conn.commit()
+                return get_opinion(user_id, int(target_id))
+            # 目标失效（已删/已撤销）→ 按普通 add 落库
+
         cur = db.conn.execute(
             "INSERT INTO knowledge_opinions "
             "(user_id,document_id,stance,opinion_hash,origin,confidence,version,status,created_at,updated_at) "
@@ -404,6 +447,30 @@ def save_opinion(
                 "VALUES (?,?,?,?,?,?)",
                 (user_id, opinion_id, span["chunk_id"], span["start"], span["end"], source_hash),
             )
+        # 崗位一：supersede —— 新觀點落庫後把被取代者標記（保留演化鏈，不物理刪）
+        effective_action = "add"
+        if action == "supersede" and target_id is not None:
+            target = db.conn.execute(
+                "SELECT id,status FROM knowledge_opinions WHERE user_id=? AND id=?",
+                (user_id, int(target_id)),
+            ).fetchone()
+            if target is not None and target["status"] == "active":
+                db.conn.execute(
+                    "UPDATE knowledge_opinions SET status='superseded',superseded_by=?,"
+                    "version=version+1,updated_at=? WHERE id=? AND user_id=?",
+                    (opinion_id, now, int(target_id), user_id),
+                )
+                effective_action = "supersede"
+            else:
+                action, effective_action = "add", "add"
+        db.conn.execute(
+            "INSERT INTO knowledge_opinion_decisions "
+            "(user_id,new_opinion_id,target_opinion_id,action,reason,created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (user_id, opinion_id,
+             int(target_id) if effective_action == "supersede" else None,
+             effective_action, reason, now),
+        )
         db.conn.commit()
     return get_opinion(user_id, opinion_id)
 
@@ -567,8 +634,20 @@ async def extract_opinions(user_id: str, document_id: int) -> list[dict]:
                  if isinstance(i, int) and 0 <= int(i) < len(chunk_ids)]
         if not stance or not spans:
             continue
+        # 岗位一：入库前一致性判定（同主题现有观点 → add/supersede/corroborate）。
+        # fail-open=add：判定挂了与旧行为完全一致。用户手输不走这里
+        # （save_opinion 直调不传 verdict）——用户说啥是啥。
+        verdict = None
         try:
-            saved.append(save_opinion(user_id, document_id, stance, spans, origin="assistant"))
+            from .consistency_judge import judge_opinion
+
+            related = relevant_opinions(user_id, stance, limit=5)
+            verdict = await judge_opinion(stance, related)
+        except Exception:  # noqa: BLE001
+            verdict = None
+        try:
+            saved.append(save_opinion(user_id, document_id, stance, spans,
+                                      origin="assistant", verdict=verdict))
         except KnowledgeError:
             continue
         if len(saved) >= 2:
