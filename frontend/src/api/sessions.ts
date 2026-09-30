@@ -11,6 +11,8 @@ export interface Message {
   draft?: ActivityDraft | null
   ephemeral?: boolean
   ts: number
+  /** 显示层拆行标记：本条是与前一条同属一条数据消息的续行（仅前端显示用，不参与 API 交互）。 */
+  continuation?: boolean
 }
 
 export interface MessageExplanation {

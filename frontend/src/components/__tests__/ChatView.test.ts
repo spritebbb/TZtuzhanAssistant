@@ -157,3 +157,77 @@ describe('ChatView silent reply', () => {
     wrapper.unmount()
   })
 })
+
+// 方案 A 显示层拆条（2026-09-30 用户拍板）：多行 bot 回复按行拆成多个气泡，
+// 数据层仍是一条消息。断言当场流式、历史加载、整轮反馈按钮三个口径。
+describe('ChatView split-line display', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('streams a multi-line reply into one bubble per line, done text authoritative', async () => {
+    mockStream.mockImplementation(async (_text, _session, _signal, cb) => {
+      cb.onPiece?.('你还真折腾这个\n\n')
+      cb.onPiece?.('升级完我哪里不一样了，')
+      cb.onPiece?.('说来听听')
+      cb.onDone?.('你还真折腾这个\n\n升级完我哪里不一样了，说来听听')
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const input = wrapper.getComponent(ChatInput)
+    input.vm.$emit('update:input', '我今天给你做了超级多的升级')
+    await wrapper.vm.$nextTick()
+    input.vm.$emit('send')
+    await flushPromises()
+
+    const bubbles = wrapper.findAll('.msg.bot .bubble')
+    expect(bubbles).toHaveLength(2)
+    expect(bubbles[0].text()).toBe('你还真折腾这个')
+    expect(bubbles[1].text()).toContain('升级完我哪里不一样了，说来听听')
+    // 整轮反馈按钮只出现在数据消息（组尾）上，续行不带
+    expect(wrapper.findAll('.fbbtn')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('loads history with the same split so refresh keeps the one-line-per-bubble look', async () => {
+    const { getMessages } = await import('../../api/sessions')
+    vi.mocked(getMessages).mockResolvedValue([
+      { role: 'user', content: '在吗', ts: 1 },
+      { role: 'bot', content: '嗯\n你先忙吧\n回头聊', ts: 2 },
+    ])
+    const wrapper = mount(ChatView, {
+      props: { sessionId: 'current' },
+      global: { stubs: { ToolBar: true, ConfirmPanel: true, Portrait: true } },
+    })
+    await flushPromises()
+
+    const bubbles = wrapper.findAll('.msg.bot .bubble')
+    expect(bubbles).toHaveLength(3)
+    expect(bubbles.map((b) => b.text())).toEqual(['嗯', '你先忙吧', '回头聊'])
+    wrapper.unmount()
+  })
+
+  it('interim reset clears already-split lines before the final text streams', async () => {
+    mockStream.mockImplementation(async (_text, _session, _signal, cb) => {
+      cb.onPiece?.('过渡语第一行\n过渡语第二行\n')
+      cb.onTool?.({ type: 'interim_reset' })
+      cb.onPiece?.('正文来了\n第二截')
+      cb.onDone?.('正文来了\n第二截')
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const input = wrapper.getComponent(ChatInput)
+    input.vm.$emit('update:input', '查个东西')
+    await wrapper.vm.$nextTick()
+    input.vm.$emit('send')
+    await flushPromises()
+
+    const bubbles = wrapper.findAll('.msg.bot .bubble')
+    expect(bubbles).toHaveLength(2)
+    expect(bubbles[0].text()).toBe('正文来了')
+    expect(wrapper.text()).not.toContain('过渡语')
+    wrapper.unmount()
+  })
+})

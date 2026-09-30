@@ -10,6 +10,7 @@ import ChatInput from './ChatInput.vue'
 import Portrait from './Portrait.vue'
 import type { PendingRequest } from './ConfirmPanel.vue'
 import { autoPlayTts, stopTts } from '../utils/tts'
+import { splitBotText, splitMessageForDisplay } from '../utils/botSplit'
 import { portraitBondFor, portraitMoodFor, type PortraitBond, type PortraitMood } from '../utils/portrait'
 import { refreshVisualState } from '../state/visualState'
 
@@ -78,8 +79,9 @@ async function checkGreeting(sessionId: string | null) {
       // 重开会话仍可见，避免旧会话的问候插进刚清空的新视图。
       if (seq !== loadSeq || busy.value || streaming.value) return
       const message: Message = { role: 'bot', content: d.greeting, ts: Date.now() / 1000 }
-      messages.value.push(message)
-      autoPlayTts(message.content, ttsKey(message, messages.value.length - 1))
+      // 拆行显示（botSplit.ts 模块头）：问候也按人格卡「一截一截发出」的口径上屏
+      messages.value.push(...splitMessageForDisplay(message))
+      autoPlayTts(message.content, ttsKey(messages.value[messages.value.length - 1], messages.value.length - 1))
       scrollToBottom()
     }
   } catch { /* 问候失败不影响主流程 */ }
@@ -177,7 +179,9 @@ async function loadMessages(id: string | null) {
   messages.value = []
   if (id) {
     const msgs = await getMessages(id)
-    if (seq === loadSeq) messages.value = msgs
+    // 拆行显示（botSplit.ts 模块头）：加载历史与当场生成走同一拆分口径，
+    // 刷新/切会话回来不会从「多条气泡」变回「一条长消息」
+    if (seq === loadSeq) messages.value = msgs.flatMap(splitMessageForDisplay)
   }
   closeSearch()
   scrollToBottom()
@@ -200,6 +204,33 @@ async function send() {
   await runBotStream(text, { ephemeral: sendEphemeral })
 }
 
+// 数据消息计数：拆行续条（continuation）不是独立数据消息，重发/编辑的
+// truncate keep_count 必须按数据库真实条数算，否则拆行后会把历史多截掉。
+const dataMessageCount = () => messages.value.filter((m) => !m.continuation).length
+
+// 末组完整文本：续行 join('\n') 拼回组尾——regenerate 要把整段原话「再说一遍」，
+// 不是只重说拆行后的最后一截。
+// 组尾（数据消息）不带 continuation 标记、前面的行才带：先收组尾，再向组头
+// 收集 continuation 续行，遇到上一条数据消息（上一组组尾/user 消息）停。
+function lastGroupText(): string {
+  const arr = messages.value
+  if (!arr.length) return ''
+  const parts: string[] = [arr[arr.length - 1].content]
+  for (let i = arr.length - 2; i >= 0; i--) {
+    if (!arr[i].continuation) break
+    parts.unshift(arr[i].content)
+  }
+  return parts.join('\n')
+}
+
+// 移除末组（组头到组尾）：regenerate 截断后前端同步清掉整组气泡
+function popLastGroup() {
+  while (messages.value.length && messages.value[messages.value.length - 1].continuation) {
+    messages.value.pop()
+  }
+  messages.value.pop()
+}
+
 // NP-08 重发切片：仅当最后一条是 bot（且非临时）时可重新生成。
 // DF-15：带图消息不参与重发——regenerate 只回填文字描述，图片本体丢失，
 // 语义变质（诚实降级：宁可不给按钮）。
@@ -220,19 +251,18 @@ const actionError = ref('')
 
 async function regenerateLast() {
   if (!canRegenerate.value) return
-  const last = messages.value[messages.value.length - 1]
-  const original = last.content
+  const original = lastGroupText()
   busy.value = true
   actionError.value = ''
   // 只截掉最后那条 bot 回复（保留 user 消息）；语义=「你把那句话又说了一遍」，
-  // userdb 侧正常重跑；连点由后端 60s 节流挡住（DF-8）。
-  const removed = await truncateSession(messages.value.length - 1)
+  // userdb 侧正常重跑；连点由后端 60s 节流挡住（DF-8）。拆行组下按数据条数截。
+  const removed = await truncateSession(dataMessageCount() - 1)
   if (removed === null) {
     busy.value = false
     actionError.value = '重新生成失败：截断没有成功，稍后再试'
     return
   }
-  messages.value.pop()
+  popLastGroup()
   await runBotStream(original, { ephemeral: false, regenerate: true })
 }
 
@@ -240,7 +270,7 @@ function editLastUser() {
   if (!canEditLastUser.value) return
   const last = messages.value[messages.value.length - 1]
   const text = last.content
-  void truncateSession(messages.value.length - 1).then((removed) => {
+  void truncateSession(dataMessageCount() - 1).then((removed) => {
     if (removed === null) {
       actionError.value = '编辑失败：截断没有成功，稍后再试'
       return
@@ -267,8 +297,43 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
   currentRequestId = requestId
   streaming.value = true
   scrollToBottom()
-  // 气泡守卫：切会话/清空后 botIndex 已失效，回调直接丢弃
-  const bubble = () => messages.value[botIndex]
+  // 气泡守卫：切会话/清空后组已失效，回调直接丢弃。拆行组模型下原消息对象恒为
+  // 组尾（数组最后一条）——流式期间 proactive 会被 busy 暂存不会插入，末条即本组。
+  // 注意不能用对象引用相等判定：reactive 数组读出的是 Proxy 包装，原始 botMsg
+  // 永远不 === 数组元素；这里维护组尾下标（插行时后移）做位置判定。
+  let tailIndex = botIndex
+  const bubble = () => {
+    const last = messages.value[tailIndex]
+    return messages.value.length - 1 === tailIndex && last && last.role === 'bot' ? last : undefined
+  }
+  // 拆行状态：tailLine 是尚未写完的当前行（显示在组尾气泡），已完成的整行
+  // 定型为续条插到组尾之前——模拟「一句一发」的节奏（botSplit.ts 模块头）。
+  let tailLine = ''
+  // 把整组重置回单条空原对象（interim_reset/onReset：过渡语清空，正文重流）
+  const resetGroup = () => {
+    tailLine = ''
+    messages.value.splice(botIndex, messages.value.length - botIndex, botMsg)
+    botMsg.content = ''
+    tailIndex = messages.value.length - 1
+  }
+  // 以最终全文权威重拆整组：流式期间的逐步拆行只是视觉预览，done 才是后端
+  // 落库的最终文本（中途失败/重置路径下二者可能不一致，以此对齐刷新后的显示）
+  const rebuildGroup = (fullText: string) => {
+    tailLine = ''
+    const lines = splitBotText(fullText)
+    if (!lines) {
+      messages.value.splice(botIndex, messages.value.length - botIndex, botMsg)
+      botMsg.content = fullText
+      tailIndex = messages.value.length - 1
+      return
+    }
+    const parts: Message[] = lines.slice(0, -1).map((line) => ({
+      role: 'bot' as const, content: line, ephemeral: sendEphemeral, ts: botMsg.ts, continuation: true,
+    }))
+    botMsg.content = lines[lines.length - 1]
+    messages.value.splice(botIndex, messages.value.length - botIndex, ...parts, botMsg)
+    tailIndex = messages.value.length - 1
+  }
 
   try {
     await streamChat(text, curSessionId, ctrl.signal, {
@@ -276,24 +341,34 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
         const b = bubble()
         if (!b) return
         currentStream.value += piece
-        b.content = currentStream.value
+        tailLine += piece
+        const lines = tailLine.split('\n')
+        tailLine = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          messages.value.splice(messages.value.length - 1, 0, {
+            role: 'bot', content: line.trim(), ephemeral: sendEphemeral, ts: botMsg.ts, continuation: true,
+          })
+          tailIndex += 1
+        }
+        b.content = tailLine
         scrollToBottom()
       },
-      onTool: (ev) => handleToolEvent(ev, bubble),
+      onTool: (ev) => handleToolEvent(ev, bubble, resetGroup),
       onDone: (done) => {
         const b = bubble()
         if (!b) return
         if (!done && !b.image && !b.draft) {
-          messages.value.splice(botIndex, 1)
+          messages.value.splice(botIndex, messages.value.length - botIndex)
           currentStream.value = ''
           streaming.value = false
           scrollToBottom()
           return
         }
-        b.content = done
+        rebuildGroup(done)
         currentStream.value = done
         streaming.value = false
-        autoPlayTts(done, ttsKey(b, botIndex))
+        autoPlayTts(done, ttsKey(b, messages.value.length - 1))
         scrollToBottom()
       },
       onError: (err) => {
@@ -306,7 +381,7 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
         const b = bubble()
         if (!b) return
         currentStream.value = ''
-        b.content = ''
+        resetGroup()
       },
       onImageStart: () => {
         const b = bubble()
@@ -317,7 +392,8 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
         const b = bubble()
         if (!b) return
         // 与后端持久化格式保持一致：图片挂在当前 bot 消息上（后端只存一条
-        // content+image 的 bot 消息），不再额外 push 一条气泡，避免刷新后布局变化
+        // content+image 的 bot 消息），不再额外 push 一条气泡，避免刷新后布局变化。
+        // 拆行组模型下组尾即数据消息本体，图片显示在最后一行文字之后。
         b.image = url
         scrollToBottom()
       },
@@ -334,10 +410,10 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
       },
     }, null, requestId, sendEphemeral, opts.regenerate === true)
   } catch (e: unknown) {
-    if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
-      messages.value[botIndex].content = '（已停止）'
+    if ((e as Error).name === 'AbortError' && bubble() && !bubble()!.content) {
+      bubble()!.content = '（已停止）'
     } else if ((e as Error).name !== 'AbortError' && bubble()) {
-      messages.value[botIndex].content = '（网络错误：' + (e as Error).message + '）'
+      bubble()!.content = '（网络错误：' + (e as Error).message + '）'
     }
   } finally {
     busy.value = false
@@ -377,7 +453,7 @@ const toolLabels: Record<string, string> = {
   generate_image: '正在画图…',
 }
 
-function handleToolEvent(ev: ToolProgressEvent, bubble?: () => Message | undefined) {
+function handleToolEvent(ev: ToolProgressEvent, bubble?: () => Message | undefined, onGroupReset?: () => void) {
   // 过渡语：工具选择轮模型说的话先上屏（等价 onPiece），消灭「正在思考…」盲等
   if (ev.type === 'interim') {
     const b = bubble?.()
@@ -387,12 +463,14 @@ function handleToolEvent(ev: ToolProgressEvent, bubble?: () => Message | undefin
     scrollToBottom()
     return
   }
-  // 最终正文流式前清空过渡语（后端保证此刻还没有最终正文，RESET 即安全）
+  // 最终正文流式前清空过渡语（后端保证此刻还没有最终正文，RESET 即安全）。
+  // 拆行组下同时把组重置回单条空原对象：过渡语期间可能已按行拆出续条，正文
+  // 重流前必须清干净，否则续行会与新正文拼接错位。
   if (ev.type === 'interim_reset') {
     const b = bubble?.()
     if (!b) return
     currentStream.value = ''
-    b.content = ''
+    onGroupReset?.()
     return
   }
   if (ev.type === 'thinking') {
@@ -427,8 +505,37 @@ async function handleImageFile(f: File | null) {
   currentRequestId = requestId
   streaming.value = true
   toolStatus.value = ''
-  // 气泡守卫：切会话/清空后 botIndex 已失效，回调直接丢弃，避免写 undefined
-  const bubble = () => messages.value[botIndex]
+  // 气泡守卫：拆行组模型下原消息对象恒为组尾（数组最后一条），与 runBotStream
+  // 同型——reactive Proxy 下不能用引用相等，维护组尾下标判定
+  let tailIndex = botIndex
+  const bubble = () => {
+    const last = messages.value[tailIndex]
+    return messages.value.length - 1 === tailIndex && last && last.role === 'bot' ? last : undefined
+  }
+  // 拆行状态（同 runBotStream：整行定型续条、尾行留在组尾）
+  let tailLine = ''
+  const resetGroup = () => {
+    tailLine = ''
+    messages.value.splice(botIndex, messages.value.length - botIndex, botMsg)
+    botMsg.content = ''
+    tailIndex = messages.value.length - 1
+  }
+  const rebuildGroup = (fullText: string) => {
+    tailLine = ''
+    const lines = splitBotText(fullText)
+    if (!lines) {
+      messages.value.splice(botIndex, messages.value.length - botIndex, botMsg)
+      botMsg.content = fullText
+      tailIndex = messages.value.length - 1
+      return
+    }
+    const parts: Message[] = lines.slice(0, -1).map((line) => ({
+      role: 'bot' as const, content: line, ts: botMsg.ts, continuation: true,
+    }))
+    botMsg.content = lines[lines.length - 1]
+    messages.value.splice(botIndex, messages.value.length - botIndex, ...parts, botMsg)
+    tailIndex = messages.value.length - 1
+  }
   try {
     const { description: desc, imageUrl } = await uploadVision(f)
     if (!bubble()) return
@@ -457,22 +564,32 @@ async function handleImageFile(f: File | null) {
       onPiece: (piece) => {
         const b = bubble()
         if (!b) return
-        b.content += piece
+        tailLine += piece
+        const lines = tailLine.split('\n')
+        tailLine = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          messages.value.splice(messages.value.length - 1, 0, {
+            role: 'bot', content: line.trim(), ts: botMsg.ts, continuation: true,
+          })
+          tailIndex += 1
+        }
+        b.content = tailLine
         scrollToBottom()
       },
-      onTool: (ev) => handleToolEvent(ev, bubble),
+      onTool: (ev) => handleToolEvent(ev, bubble, resetGroup),
       onDone: (done) => {
         const b = bubble()
         if (!b) return
         if (!done && !b.image && !b.draft) {
-          messages.value.splice(botIndex, 1)
+          messages.value.splice(botIndex, messages.value.length - botIndex)
           streaming.value = false
           scrollToBottom()
           return
         }
-        b.content = done
+        rebuildGroup(done)
         streaming.value = false
-        autoPlayTts(done, ttsKey(b, botIndex))
+        autoPlayTts(done, ttsKey(b, messages.value.length - 1))
         scrollToBottom()
       },
       onError: (err) => {
@@ -484,7 +601,7 @@ async function handleImageFile(f: File | null) {
       onReset: () => {
         const b = bubble()
         if (!b) return
-        b.content = ''
+        resetGroup()
       },
       onExplanation: (value) => {
         const b = bubble()
@@ -496,10 +613,10 @@ async function handleImageFile(f: File | null) {
       },
     }, imageUrl, requestId)
   } catch (e: unknown) {
-    if ((e as Error).name === 'AbortError' && bubble() && !messages.value[botIndex].content) {
-      messages.value[botIndex].content = '（已停止）'
+    if ((e as Error).name === 'AbortError' && bubble() && !bubble()!.content) {
+      bubble()!.content = '（已停止）'
     } else if ((e as Error).name !== 'AbortError' && bubble()) {
-      messages.value[botIndex].content = '⚠️ ' + (e as Error).message
+      bubble()!.content = '⚠️ ' + (e as Error).message
     }
   } finally {
     busy.value = false
@@ -635,12 +752,12 @@ function stopInitiativeStream() {
 
 // 与消息列表最后一条 content 比对去重（与数据库端「最后一条 bot content 相同
 // 则跳过」的幂等逻辑一致），避免组件重挂载后 notifiedKey 重置导致同一条消息
-// 被 SSE 首帧 + 主进程转发推成两条相邻气泡。
+// 被 SSE 首帧 + 主进程转发推成两条相邻气泡。拆行组下按整组文本比较。
 function _isDuplicateProactive(message: ProactiveMessage): boolean {
   const last = messages.value[messages.value.length - 1]
   return !!last
     && last.role === 'bot'
-    && last.content === message.text
+    && lastGroupText() === message.text
     && (last.image ?? null) === (message.image ?? null)
 }
 
@@ -697,15 +814,15 @@ function handleProactiveMessage(input: ProactiveMessage | string) {
     return
   }
   // 追加为 bot 消息气泡。主动消息后端已写入会话 messages 表（落库 + 幂等），
-  // 这里即时展示。
+  // 这里即时展示。拆行显示与回复/问候同口径（botSplit.ts 模块头）。
   const botMessage: Message = {
     role: 'bot',
     content: message.text,
     image: message.image ?? null,
     ts: Date.now() / 1000,
   }
-  messages.value.push(botMessage)
-  autoPlayTts(botMessage.content, ttsKey(botMessage, messages.value.length - 1))
+  messages.value.push(...splitMessageForDisplay(botMessage))
+  autoPlayTts(botMessage.content, ttsKey(messages.value[messages.value.length - 1], messages.value.length - 1))
   scrollToBottom()
   // 桌面通知：窗口可见时由主进程轮询弹；但若页面隐藏（窗口最小化/后台标签页），
   // SSE 通道仍会先消费消息，主进程 30s 轮询再取时就已空 → 通知丢失。因此这里
