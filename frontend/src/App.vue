@@ -365,6 +365,11 @@ onMounted(async () => {
   } catch { /* 启动期 flags 读取失败：保持默认布局降级（非用户操作失败） */ }
   document.addEventListener('keydown', onKeydown)
   window.addEventListener(NOTIFY_EVENT, onNotify)
+  // 38项#25 截图热键暂存兜底：ChatView 未挂载（不在聊天页）时先存全局，
+  // ChatView 挂载时消费——聊天页时 ChatView 自己的监听即时处理并清此暂存
+  window.electronAPI?.onHotkeyScreenshot((shot) => {
+    ;(window as any).__pendingShot = shot
+  })
   // 应用锁：启动先确认锁态（已初始化的用户重启后处于锁定态）
   await refreshLockAvailability()
   // 运行期任何 423（后台轮询/面板请求撞上锁定）也会唤起锁屏
