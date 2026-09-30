@@ -46,11 +46,34 @@ def _pool_gated_hits(uid: str, hits: list) -> list:
 
 
 async def _memory_search(query: str = "", top_k: int = 0) -> str:
-    """语义检索长期记忆与事实，返回相关内容。"""
+    """语义检索长期记忆与事实，返回相关内容。
+
+    #27 相对时间推理：query 含「上周/前天/N天前」等表达时，解析出绝对日期范围
+    （时间线索行）并附范围内对话原文（限量）——lm/facts 是提炼后的记忆，
+    「上周我们聊了什么」的原始答案在 messages 表里。
+    """
     if not query:
         return tool_failure("（缺少检索内容）")
     uid = _uid()
     k = max(1, min(top_k or _TOP_K, 20))
+
+    # 0) 相对时间解析（纯函数，失败即无时间线索）
+    time_line = ""
+    transcript_part = ""
+    try:
+        from ...core.relative_time import resolve_ranges
+        from datetime import date as _date
+
+        ranges = resolve_ranges(query, _date.today())
+        if ranges:
+            r = ranges[0]
+            time_line = f"【时间线索】『{r.label}』= {r.start} ~ {r.end}（含端点）"
+            rows = userdb.db.messages_between(uid, _date.fromisoformat(r.start), _date.fromisoformat(r.end))
+            if rows:
+                lines = [f"{row['role']}: {str(row['content'])[:80]}" for row in rows[-12:]]
+                transcript_part = "【该时段对话原文（末 12 条）】\n" + "\n".join(lines)
+    except Exception:
+        pass  # 时间解析失败不影响主检索
 
     # 1) 关键词 + 语义混合检索长期记忆原文
     try:
@@ -82,10 +105,14 @@ async def _memory_search(query: str = "", top_k: int = 0) -> str:
         logger.warning("[memory_search] 向量兜底检索失败: {}", e)
 
     parts = []
+    if time_line:
+        parts.append(time_line)
     if lm:
         parts.append("【长期记忆】\n" + "\n".join(f"- {m}" for m in lm[:k]))
     if facts:
         parts.append("【长期事实】\n" + "\n".join(f"- {f}" for f in facts[:k]))
+    if transcript_part:
+        parts.append(transcript_part)
     if not parts:
         return "（未找到相关记忆）"
     return "\n\n".join(parts)
