@@ -39,7 +39,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
                "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
-               "learning_candidates", "manager_memories", "user_preferences"),
+               "learning_candidates", "manager_memories", "user_preferences", "profile_evolution_log"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
              "persona_evolution_log", "tavern_sessions"),
@@ -134,6 +134,8 @@ _REFERENCE_RULES = (
     _rule_static("knowledge_opinion_sources", "opinion_id", "knowledge_opinions"),
     _rule_static("knowledge_opinion_decisions", "new_opinion_id", "knowledge_opinions", frozenset()),
     _rule_static("knowledge_opinion_decisions", "target_opinion_id", "knowledge_opinions", frozenset()),
+    _rule_static("profile_evolution_log", "old_id", "user_profile", frozenset()),
+    _rule_static("profile_evolution_log", "new_id", "user_profile", frozenset()),
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
     # 换机漏表批（DF-1）：activity_lists 主键即 activities.id（rowid alias），

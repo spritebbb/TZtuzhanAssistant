@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 47  # v47: 岗位一知识观点冲突合并（superseded_by 演化链 + 决策日志表）
+_SCHEMA_VERSION = 48  # v48: 岗位二画像演变留痕（user_profile.status + profile_evolution_log）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -144,7 +144,20 @@ CREATE TABLE IF NOT EXISTS user_profile (
     category TEXT NOT NULL,   -- basic / likes / dislikes / habits / personality / other
     content  TEXT NOT NULL,   -- 画像条目（如「喜欢下雨天」）
     source   TEXT NOT NULL DEFAULT 'llm',  -- 来源（llm / manual / date）
+    status   TEXT NOT NULL DEFAULT 'active', -- v48 岗位二：active / archived（replace 演化不物理删）
     ts       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS profile_evolution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    old_id INTEGER NOT NULL,
+    old_content TEXT NOT NULL,
+    new_id INTEGER,
+    new_content TEXT,
+    op TEXT NOT NULL,                -- v48 岗位二：replace（append-only 审计，演变轨迹）
+    reason TEXT NOT NULL,
+    decided_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS user_terms (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1249,6 +1262,14 @@ class UserDB:
             self.conn.execute(
                 "ALTER TABLE knowledge_opinions ADD COLUMN superseded_by INTEGER"
             )
+        # v48 岗位二：user_profile 增加 status 列（旧库 ALTER 补齐；旧行全部 active）
+        profile_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(user_profile)")
+        }
+        if "status" not in profile_columns:
+            self.conn.execute(
+                "ALTER TABLE user_profile ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+            )
         # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
         # L02：共创壳增加 subtype 与结构化大纲列（旧库 ALTER 补齐）
         writing_columns = {
@@ -2151,17 +2172,65 @@ class UserDB:
         return cur.lastrowid
 
     @_locked
-    def get_profile(self, user_id: str, category: str | None = None) -> list[dict]:
-        """读取画像条目；category 为空返回全部（按分类分组排序）。"""
+    def get_profile(self, user_id: str, category: str | None = None, *,
+                    include_archived: bool = False) -> list[dict]:
+        """读取画像条目；category 为空返回全部（按分类分组排序）。
+
+        岗位二：默认只返回 active（归档=被演化取代的旧值，注入与提炼均不应
+        再消费）；管理面板要看全量时传 include_archived=True。
+        """
+        status_filter = "" if include_archived else " AND status = 'active'"
         if category:
             rows = self.conn.execute(
-                "SELECT id, category, content, source, ts FROM user_profile WHERE user_id = ? AND category = ? ORDER BY id",
+                f"SELECT id, category, content, source, status, ts FROM user_profile "
+                f"WHERE user_id = ? AND category = ?{status_filter} ORDER BY id",
                 (user_id, category),
             ).fetchall()
         else:
             rows = self.conn.execute(
-                "SELECT id, category, content, source, ts FROM user_profile WHERE user_id = ? ORDER BY id",
+                f"SELECT id, category, content, source, status, ts FROM user_profile "
+                f"WHERE user_id = ?{status_filter} ORDER BY id",
                 (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @_locked
+    def archive_profile(self, user_id: str, profile_id: int) -> bool:
+        """岗位二：归档一条画像（replace 演生的旧值；不物理删，面板可恢复）。"""
+        cur = self.conn.execute(
+            "UPDATE user_profile SET status='archived' WHERE user_id = ? AND id = ?",
+            (user_id, profile_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    @_locked
+    def log_profile_evolution(self, user_id: str, category: str, old_id: int,
+                              old_content: str, new_id: int | None, new_content: str | None,
+                              op: str, reason: str) -> None:
+        """岗位二：写一条画像演变事件（append-only；消费方 profile_diff）。"""
+        self.conn.execute(
+            "INSERT INTO profile_evolution_log "
+            "(user_id, category, old_id, old_content, new_id, new_content, op, reason, decided_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (user_id, category, old_id, old_content, new_id, new_content, op,
+             reason[:200], datetime.now().isoformat(timespec="seconds")),
+        )
+        self.conn.commit()
+
+    @_locked
+    def profile_diff(self, user_id: str, since: str | None = None, limit: int = 50) -> list[dict]:
+        """岗位二：演变轨迹查询——M8 叙事（快照/双视角/季节）的「我们怎么变了」素材。"""
+        if since:
+            rows = self.conn.execute(
+                "SELECT * FROM profile_evolution_log WHERE user_id = ? AND decided_at >= ? "
+                "ORDER BY id DESC LIMIT ?",
+                (user_id, since, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM profile_evolution_log WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+                (user_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
