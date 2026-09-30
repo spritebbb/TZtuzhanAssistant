@@ -138,6 +138,7 @@ async def extract_profile(user_id: str, day=None, *, rows=None, done=0) -> bool:
             ],
             temperature=0.3,
             max_tokens=400,
+            thinking=False,  # 思考段与小预算共享 max_tokens，不关会吃光正文（空响应→JSON 解析失败）
         )
         data = _parse_json(resp)
     except Exception:

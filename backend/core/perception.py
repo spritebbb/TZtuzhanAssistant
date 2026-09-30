@@ -164,6 +164,7 @@ async def perceive(text: str, *, mock: bool = False, persona_name: str = "菟菚
             temperature=0.1,
             max_tokens=_PERCEPTION_MAX_TOKENS,
             perception=True,  # 走感知层独立小模型（未配置则复用主 LLM）
+            thinking=False,   # 小预算 JSON 任务：思考段会吃光 max_tokens 导致空正文
         )
         result = _parse_json(raw)
         if result is None:

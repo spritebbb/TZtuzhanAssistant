@@ -306,6 +306,7 @@ async def _compress_older(user_id: str, previous: str) -> str:
         task="batch_other",
         temperature=0.2,
         max_tokens=400,
+        thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
     )
     lines = [
         ln.strip().lstrip("-•· ").strip()

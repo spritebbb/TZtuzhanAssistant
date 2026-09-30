@@ -527,6 +527,7 @@ async def viewpoint_draft(user_id: str, activity_id: int) -> dict:
                 },
             ],
             max_tokens=300,
+            thinking=False,  # 小预算短输出：思考段会吃光 max_tokens 致正文空
         )
     except Exception as exc:
         raise ActivityError("草稿生成失败，请稍后再试，或直接代她写下这一段") from exc
@@ -760,6 +761,7 @@ async def propose_discussion_question(
             [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
             max_tokens=100,
             temperature=0.65,
+            thinking=False,  # 小预算短输出：思考段会吃光 max_tokens 致正文空
         )
         question = " ".join(str(raw or "").split())
         from .persona_profiles import persona_name_for_user_id

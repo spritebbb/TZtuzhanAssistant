@@ -257,7 +257,8 @@ async def generate_tuzhan_turn(user_id: str, activity_id: int) -> dict:
             ),
         },
     ]
-    text = (await chat(msgs, max_tokens=500, temperature=0.9)).strip()
+    text = (await chat(msgs, max_tokens=500, temperature=0.9, thinking=False)
+    ).strip()  # thinking=False：小预算下思考会吃光 max_tokens 致正文空
     text = _clean(text, _MAX_TURN, "她写的这一段", required=False)
     if not text:
         raise ActivityError("她这轮没接上，稍后再试一次")

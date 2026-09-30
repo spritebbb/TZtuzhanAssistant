@@ -66,6 +66,7 @@ async def extract_triples(
             ],
             temperature=0.3,
             max_tokens=600,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         triples = _parse_triples(resp)
         return triples[:12]
@@ -121,6 +122,7 @@ async def extract_profile(text: str, *, mock: bool = False) -> list[dict]:
             [{"role": "system", "content": "只输出 JSON 数组，不要任何解释。"}, {"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=400,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = json.loads(_strip_json_fence(resp))
         return data[:5] if isinstance(data, list) else []
@@ -152,6 +154,7 @@ async def reconcile(user_id: str, existing: list[str], new_text: str, *, mock: b
             [{"role": "system", "content": "只输出 JSON 数组，不要任何解释。"}, {"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=400,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = json.loads(_strip_json_fence(resp))
         return data if isinstance(data, list) and all(isinstance(x, str) for x in data) else existing

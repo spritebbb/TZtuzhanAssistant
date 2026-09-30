@@ -280,6 +280,7 @@ async def write_daily_diary(user_id: str, day: date, transcript: str) -> dict:
             temperature=0.65,
             max_tokens=520,
             task="batch_diary",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = _parse_json(resp)
         content = str(data.get("content") or "").strip()
@@ -415,6 +416,7 @@ async def extract_promises(user_id: str, day: date, transcript: str) -> int:
             temperature=0.2,
             max_tokens=300,
             task="extract",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = _parse_json(resp)
     except Exception:
@@ -463,6 +465,7 @@ async def extract_terms(user_id: str, day: date, transcript: str) -> int:
             temperature=0.2,
             max_tokens=240,
             task="extract",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = _parse_json(resp)
     except Exception:
@@ -510,6 +513,7 @@ async def extract_style_map(user_id: str, day: date, transcript: str) -> int:
             temperature=0.2,
             max_tokens=240,
             task="extract",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = _parse_json(resp)
     except Exception:
@@ -582,6 +586,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
             temperature=0.3,
             max_tokens=400,
             task="extract",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         data = _parse_json(resp)
     except Exception:

@@ -285,7 +285,8 @@ async def generate_proactive_message(user_id: str) -> str | None:
     if not msgs:
         return None
     try:
-        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        text = await chat(msgs, max_tokens=100, temperature=0.85,
+                          thinking=False)  # 小预算：思考会吃光预算
         text = text.strip()[:200] or None
     except Exception as e:
         logger.warning("[主动性] LLM 生成失败: {}", e)
@@ -337,7 +338,8 @@ async def generate_proactive_content(user_id: str) -> ProactiveMessage | None:
     if not msgs:
         return None
     try:
-        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        text = await chat(msgs, max_tokens=100, temperature=0.85,
+                          thinking=False)  # 小预算：思考会吃光预算
         text = text.strip()[:200]
     except Exception as e:
         logger.warning("[主动性] LLM 生成失败: {}", e)
@@ -1050,6 +1052,7 @@ async def _maybe_rhythm_followup(user_id: str) -> str | None:
             ],
             max_tokens=60,
             temperature=0.85,
+            thinking=False,  # 小预算：思考会吃光预算
         )
 
     text = await _arbited_proactive(
@@ -1117,7 +1120,8 @@ async def _generate_archive_suggest(user_id: str) -> str | None:
     if not msgs:
         return None
     try:
-        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        text = await chat(msgs, max_tokens=100, temperature=0.85,
+                          thinking=False)  # 小预算：思考会吃光预算
         return text.strip()[:200] or None
     except Exception as e:
         logger.warning("[主动性] 归档建议生成失败: {}", e)
@@ -1197,7 +1201,8 @@ async def _produce_companion_request(user_id: str) -> str | None:
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": offer_prompt(user_id, candidate)},
         ]
-        return (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
+        return (await chat(msgs, max_tokens=80, temperature=0.85,
+                           thinking=False)).strip()[:200]  # 小预算：思考会吃光预算
 
     text = await _arbited_proactive(
         user_id,
@@ -1244,7 +1249,8 @@ async def maybe_express_pending_thoughts(user_id: str) -> str | None:
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": build_express_prompt(thought)},
         ]
-        return (await chat(msgs, max_tokens=80, temperature=0.85)).strip()[:200]
+        return (await chat(msgs, max_tokens=80, temperature=0.85,
+                           thinking=False)).strip()[:200]  # 小预算：思考会吃光预算
 
     text = await _arbited_proactive(
         user_id,
@@ -1366,7 +1372,8 @@ async def _generate_promise_followup(user_id: str, promise: dict) -> str | None:
     if not msgs:
         return None
     try:
-        text = await chat(msgs, max_tokens=100, temperature=0.85)
+        text = await chat(msgs, max_tokens=100, temperature=0.85,
+                          thinking=False)  # 小预算：思考会吃光预算
         return text.strip()[:200] or None
     except Exception as e:
         logger.warning("[主动性] 约定跟进生成失败: {}", e)
