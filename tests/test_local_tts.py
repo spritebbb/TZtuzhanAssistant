@@ -150,16 +150,21 @@ def test_mood_emotion_dispatch() -> None:
     # 情绪参考：约定路径存在才启用，否则回退主 ref（优雅降级）
     profile = {"ref_path": "reference_audios/castorice/zh-neutral.wav",
                "ref_text": "主参考文本"}
+    neutral_ref, neutral_prompt = local_tts._emotion_ref(profile, "neutral")
+    if (Path("GPT-SoVITS") / "reference_audios/castorice/zh-neutral.wav").is_file():
+        # 部署机：三档统一走约定路径 + 配套文本（主 ref 文件可能已换新音频，
+        # manifest 旧文本不再可靠）
+        assert neutral_ref.endswith("zh-neutral.wav") and "丹恒" in neutral_prompt
+    else:
+        assert neutral_ref == profile["ref_path"], "缺档回退主 ref"
     happy_ref, happy_prompt = local_tts._emotion_ref(profile, "happy")
     if happy_ref != profile["ref_path"]:
-        assert happy_ref.endswith("zh-happy.wav") and "克星" in happy_prompt
-    neutral_ref, _ = local_tts._emotion_ref(profile, "neutral")
-    assert neutral_ref == profile["ref_path"], "neutral 恒用主 ref"
+        assert happy_ref.endswith("zh-happy.wav") and "预言" in happy_prompt
     missing_ref, missing_prompt = local_tts._emotion_ref(profile, "sad")
     if not (Path("GPT-SoVITS") / "reference_audios/castorice/zh-sad.wav").is_file():
         assert missing_ref == profile["ref_path"], "缺档回退主 ref"
     else:
-        assert missing_ref.endswith("zh-sad.wav") and "斗篷" in missing_prompt
+        assert missing_ref.endswith("zh-sad.wav") and "死而复生" in missing_prompt
     print("[OK] 情绪分派：mood 档位/越界回退/约定路径降级")
 
 
