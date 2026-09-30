@@ -1,14 +1,18 @@
 """人格加载与动态注入。
 
-人格源文件是项目内的 persona-菟菚.md（唯一人格来源），
-这里只负责读取，并按用户状态注入动态字段（阶段 / 称呼 / 关系状态）。
+人格卡由人格库（persona_profiles）管理：首启把仓库的 persona-菟菚.md
+迁移为 data/personas/default/persona.md，此后运行时只加载 data 下的卡——
+对仓库源的后续 git 提交不会自动同步，改卡要以 data 下的文件为准。
+这里按「路径 + mtime」失效缓存读取（手改卡文件、热切换人格后下一次调用
+自动重读，无需重启进程），并按用户状态注入动态字段（阶段 / 称呼 / 关系状态）。
 """
 from datetime import datetime
 
 from . import affection as _affection
 from .config import config
 
-_persona_cache: str | None = None
+# (路径, mtime, 文本)；外部既有协议 ``_persona_cache = None`` 仍兼容（强制重读）。
+_persona_cache: tuple[str, float, str] | None = None
 
 _WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
@@ -29,18 +33,27 @@ def _now_line() -> str:
 
 
 def load_persona() -> str:
-    """读取人格文件（带缓存）。"""
+    """读取当前人格卡（路径 + mtime 失效缓存）。"""
     global _persona_cache
-    if _persona_cache is None:
-        # 人格库负责把原始卡迁入独立档案，并返回当前热切换的人格卡。
-        # 延迟 import 避免 config / persona_profiles 初始化时形成循环依赖。
-        from .persona_profiles import active_card_path
+    # 人格库负责把原始卡迁入独立档案，并返回当前热切换的人格卡。
+    # 延迟 import 避免 config / persona_profiles 初始化时形成循环依赖。
+    from .persona_profiles import active_card_path
 
-        path = active_card_path()
-        if not path.exists():
-            raise FileNotFoundError(f"人格文件不存在: {path}")
-        _persona_cache = path.read_text(encoding="utf-8")
-    return _persona_cache
+    path = active_card_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    if (
+        _persona_cache is not None
+        and _persona_cache[0] == str(path)
+        and _persona_cache[1] == mtime
+    ):
+        return _persona_cache[2]
+    if not path.exists():
+        raise FileNotFoundError(f"人格文件不存在: {path}")
+    _persona_cache = (str(path), mtime, path.read_text(encoding="utf-8"))
+    return _persona_cache[2]
 
 
 _STAGE_FRAMING = {

@@ -33,6 +33,7 @@ async def main() -> None:
         default_uid = profiles.active_user_id()
         db.add_fact(default_uid, "默认人格记忆")
         await store.append_messages("current", [{"role": "user", "content": "默认人格会话", "ts": 1.0}])
+        assert "菟菚" in persona_runtime.load_persona()  # default 阶段建立缓存
 
         card = b"""---\nname: Luna\ntheme: light\nvoice: zh-CN-XiaoyiNeural\nsubtitle: moon companion\n---\n\n# Luna\n\nYou are Luna.\n"""
         luna = profiles.import_card("persona-Luna.md", card)
@@ -51,7 +52,14 @@ async def main() -> None:
 
         luna_uid = profiles.active_user_id()
         assert luna_uid != default_uid
-        persona_runtime._persona_cache = None
+        # load_persona 缓存按「路径 + mtime」失效：热切换人格、手改卡文件后
+        # 都无需清缓存或重启进程（旧 _persona_cache = None 协议仍兼容）
+        luna_card = persona_runtime.load_persona()
+        assert "You are Luna." in luna_card, "热切换人格后 load_persona 必须自动换卡"
+        profiles.active_card_path().write_text(
+            luna_card + "\n手改卡生效标记\n", encoding="utf-8"
+        )
+        assert "手改卡生效标记" in persona_runtime.load_persona(), "手改卡文件后无需重启即生效"
         prompt = persona_runtime.build_system_prompt(
             stage="熟悉",
             address=None,
