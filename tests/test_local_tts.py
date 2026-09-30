@@ -154,7 +154,7 @@ def test_mood_emotion_dispatch() -> None:
     if (Path("GPT-SoVITS") / "reference_audios/castorice/zh-neutral.wav").is_file():
         # 部署机：三档统一走约定路径 + 配套文本（主 ref 文件可能已换新音频，
         # manifest 旧文本不再可靠）
-        assert neutral_ref.endswith("zh-neutral.wav") and "丹恒" in neutral_prompt
+        assert neutral_ref.endswith("zh-neutral.wav") and "摇摆不定" in neutral_prompt
     else:
         assert neutral_ref == profile["ref_path"], "缺档回退主 ref"
     happy_ref, happy_prompt = local_tts._emotion_ref(profile, "happy")
