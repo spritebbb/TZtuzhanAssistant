@@ -42,6 +42,19 @@ _STAGE_ORDER = {"初识": 0, "熟悉": 1, "亲密": 2, "恋人": 3}
 # 在生成成功后登记 7 天冷却。进程内字典，键 user_id；重启即失效（冷却表在库里）。
 _PROACTIVE_VARIANT_KEY: dict[str, str] = {}
 
+# 38项#31 软勿扰：桌面感知探测到「IDE + 输入密集」时不硬静默，只把本轮次级源
+# 仲裁的 necessity 阈值抬升（与 cost_guard soft 档 necessity_bump 同型）——
+# 她在写代码时少打扰，但不是不打扰。标志由 _tick_once 每轮开头重置、门内置位，
+# _arbited_proactive 算阈值时消费；fullscreen 硬静默语义不变。
+_SOFT_FOCUS_IDLE_SEC = 60.0  # code 类别下，距上次键鼠输入 < 60s 视为输入密集
+_SOFT_FOCUS_BUMP = 0.15      # 软降级幅度：necessity 阈值 +0.15（更挑剔地挑话说）
+_soft_focus_active = False   # 本轮 tick 是否处于软勿扰（进程内，随 tick 刷新）
+
+
+def _soft_focus_bump() -> float:
+    """本轮次级源 necessity 阈值的软勿扰抬升（0.0 = 未处于软勿扰）。"""
+    return _SOFT_FOCUS_BUMP if _soft_focus_active else 0.0
+
 
 class ProactiveMessage(TypedDict):
     text: str
@@ -354,7 +367,8 @@ _last_global_run = 0.0
 
 async def _tick_once() -> int:
     """执行一轮主动检查，返回实际主动的消息条数。"""
-    global _last_global_run
+    global _last_global_run, _soft_focus_active
+    _soft_focus_active = False  # 38项#31：软勿扰标志随每轮 tick 刷新，不跨 tick 残留
     now = time.time()
     if now - _last_global_run < config.proactive_global_cooldown_sec:
         return 0
@@ -372,12 +386,21 @@ async def _tick_once() -> int:
 
     # NP-14 桌面感知：用户前台全屏（游戏/视频/演示）时本轮主动整体静默——
     # 分寸感是人格的一部分；开关默认关闭，关闭时不探测（隐私默认）。
+    # 38项#31 软勿扰：前台是 IDE 且输入密集（< 60s）时不硬静默，改软降级——
+    # 置 _soft_focus_active，_arbited_proactive 的 necessity 阈值 +0.15；
+    # 开着 IDE 但没动（idle 高）/ browse / other 不降级。
     try:
         if config.desktop_awareness:
             from .desktop_probe import probe_foreground
 
-            if probe_foreground().get("category") == "fullscreen":
+            probe = probe_foreground()
+            if probe.get("category") == "fullscreen":
                 return 0
+            if (probe.get("category") == "code"
+                    and float(probe.get("idle_seconds") or 0.0) < _SOFT_FOCUS_IDLE_SEC):
+                _soft_focus_active = True
+                logger.info("[主动性] 检测到写代码且输入密集，本轮软勿扰：次级源阈值抬升 {:.2f}",
+                            _SOFT_FOCUS_BUMP)
     except Exception:
         logger.exception("[主动性] 桌面感知门异常，按放行处理")
 
@@ -742,8 +765,9 @@ async def _arbited_proactive(
                 gate_proactive_candidate,
             )
 
-            # D10：soft 档非紧急主动更挑剔（阈值 +0.15）；hard/extreme 在下方成本闸整体暂停
-            threshold = NECESSITY_THRESHOLD + necessity_bump()
+            # D10：soft 档非紧急主动更挑剔（阈值 +0.15）；hard/extreme 在下方成本闸整体暂停。
+            # 38项#31 软勿扰：本轮 tick 桌面感知到 IDE+输入密集时同型抬升（少打扰≠不打扰）。
+            threshold = NECESSITY_THRESHOLD + necessity_bump() + _soft_focus_bump()
             if not gate_proactive_candidate(necessity, threshold=threshold):
                 logger.info("[主动仲裁] {} necessity {:.2f} 未达 {:.2f}，淘汰",
                             source, float(necessity["necessity"]), threshold)
