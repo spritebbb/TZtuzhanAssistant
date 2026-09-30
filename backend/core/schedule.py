@@ -40,10 +40,11 @@ class ScheduleBlock:
     mood_delta_per_hour: float
 
 
-# 周模板：2026-09-08 加量——晚间切块（18-21/21-23）、周三/周五分化（蛲蛲联机夜/
-# 周五城市倾向）。地点全部来自正典；活动 id 稳定不变；schema v22 兼容（模板只进
-# kv 状态与事件 payload，无表结构变更）。
-WEEKLY_TEMPLATE: tuple[ScheduleBlock, ...] = (
+# 通用兜底周模板（10 块）：不含任何作者私货——周三晚不特化，weekday-night
+# 覆盖全部工作日。人格化差异（菟菚的周三蛲蛲联机夜等）迁入人格数据
+# backend/resources/personas/<人格id>/schedule_template.json（38 项清单 #17），
+# 由 weekly_template() 惰性加载；资源缺失/损坏时走本兜底，行为可预期。
+_FALLBACK_TEMPLATE: tuple[ScheduleBlock, ...] = (
     ScheduleBlock("weekday-morning", (0, 1, 2, 3, 4), "08:00", "12:00", "P-01",
                   "research_reading", "home", -0.5, 0.0),
     ScheduleBlock("weekday-noon", (0, 1, 2, 3, 4), "12:00", "14:00", "P-01",
@@ -52,10 +53,7 @@ WEEKLY_TEMPLATE: tuple[ScheduleBlock, ...] = (
                   "afternoon_stay", "home", -0.5, 0.0),
     ScheduleBlock("weekday-evening", (0, 1, 2, 3, 4), "18:00", "21:00", "P-01",
                   "evening_work", "home", -0.8, 0.0),
-    # 周三晚 21 点后固定「蛲蛲联机夜」（C-01 叙事用法拍板）；其余工作日晚间休闲
-    ScheduleBlock("weekday-wed-night", (2,), "21:00", "23:00", "P-02",
-                  "late_night", "home", -0.8, 0.1),
-    ScheduleBlock("weekday-night", (0, 1, 3, 4), "21:00", "23:00", "P-01",
+    ScheduleBlock("weekday-night", (0, 1, 2, 3, 4), "21:00", "23:00", "P-01",
                   "evening_stay", "home", -0.5, 0.0),
     ScheduleBlock("weekday-late", (0, 1, 2, 3, 4), "23:00", "02:00", "P-02",
                   "late_night", "home", -1.5, -0.2),
@@ -76,6 +74,97 @@ def _minutes(hhmm: str) -> int:
     return int(h) * 60 + int(m)
 
 
+# ---- 人格周模板资源（38 项清单 #17：作者私货进人格数据，代码留通用兜底）----
+_PERSONAS_ROOT = Path(__file__).resolve().parents[1] / "resources" / "personas"
+
+# 缓存（资源路径 → (mtime, blocks)）；手改资源文件无需重启进程（同 her_profile）
+_TEMPLATE_CACHE: dict[str, tuple[float, tuple[ScheduleBlock, ...]]] = {}
+
+
+def _valid_hhmm(value: object) -> bool:
+    """严格 HH:MM：两位时两位分、数值在合法区间。"""
+    if not isinstance(value, str):
+        return False
+    parts = value.split(":")
+    if len(parts) != 2 or len(parts[0]) != 2 or len(parts[1]) != 2:
+        return False
+    if not (parts[0].isdigit() and parts[1].isdigit()):
+        return False
+    return 0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59
+
+
+def _parse_template(data: object) -> tuple[ScheduleBlock, ...]:
+    """解析周模板 JSON 载荷；任何结构/值域不合法抛 ValueError（整包回退兜底）。"""
+    if not isinstance(data, dict) or data.get("format_version") != 1:
+        raise ValueError("schedule_template 必须是 format_version=1 的 JSON 对象")
+    raw_blocks = data.get("blocks")
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise ValueError("blocks 必须是非空数组")
+    blocks: list[ScheduleBlock] = []
+    for raw in raw_blocks:
+        if not isinstance(raw, dict):
+            raise ValueError("块必须是对象")
+        missing = [f for f in ScheduleBlock.__dataclass_fields__ if f not in raw]
+        if missing:
+            raise ValueError(f"块字段不完整，缺 {missing}: {raw.get('id')!r}")
+        weekdays = raw["weekdays"]
+        if not isinstance(weekdays, list) or not weekdays or not all(
+            isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 6
+            for d in weekdays
+        ):
+            raise ValueError(f"weekdays 必须是 0-6 的非空整数数组: {raw.get('id')!r}")
+        for field in ("start_local", "end_local"):
+            if not _valid_hhmm(raw[field]):
+                raise ValueError(f"{field} 必须是合法 HH:MM: {raw.get('id')!r}")
+        for field in ("id", "location_id", "activity", "presence"):
+            if not isinstance(raw[field], str) or not raw[field]:
+                raise ValueError(f"{field} 必须是非空字符串: {raw.get('id')!r}")
+        deltas: list[float] = []
+        for field in ("energy_delta_per_hour", "mood_delta_per_hour"):
+            value = raw[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{field} 必须是数值: {raw.get('id')!r}")
+            deltas.append(float(value))
+        blocks.append(ScheduleBlock(
+            id=raw["id"], weekdays=tuple(weekdays),
+            start_local=raw["start_local"], end_local=raw["end_local"],
+            location_id=raw["location_id"], activity=raw["activity"],
+            presence=raw["presence"],
+            energy_delta_per_hour=deltas[0], mood_delta_per_hour=deltas[1],
+        ))
+    return tuple(blocks)
+
+
+def weekly_template(path: Path | None = None) -> tuple[ScheduleBlock, ...]:
+    """当前人格的周模板；资源缺失/损坏 fail-soft 回退 ``_FALLBACK_TEMPLATE``。
+
+    mtime 缓存（同 her_profile：手改资源即时生效，无需重启）。``path`` 显式
+    传入时绕过人格解析（测试用）。active_id 惰性解析——import 期不读盘。
+    """
+    target = path
+    if target is None:
+        from .persona_profiles import active_id
+
+        target = _PERSONAS_ROOT / active_id() / "schedule_template.json"
+    key = str(target)
+    try:
+        mtime = target.stat().st_mtime
+    except OSError:
+        return _FALLBACK_TEMPLATE  # 资源缺失（多数人格不带模板）：静默走通用兜底
+    hit = _TEMPLATE_CACHE.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    try:
+        blocks = _parse_template(json.loads(target.read_text(encoding="utf-8-sig")))
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        # fail-soft：模板坏了走通用兜底，不拖垮行程推进
+        logger.warning("[行程] schedule_template 资源加载失败（{}）：{}",
+                       key, str(exc)[:120])
+        return _FALLBACK_TEMPLATE
+    _TEMPLATE_CACHE[key] = (mtime, blocks)
+    return blocks
+
+
 def _seed(user_id: str, local_date, extra: str = "") -> int:
     raw = f"{user_id}|{local_date.isoformat()}|{TEMPLATE_VERSION}|{extra}"
     return int(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8], 16)
@@ -85,7 +174,7 @@ def block_at(local_dt: datetime) -> ScheduleBlock | None:
     """本地时刻 → 当前块（跨午夜块用小时区间判断；睡眠时段返回 None）。"""
     weekday = local_dt.weekday()
     minutes = local_dt.hour * 60 + local_dt.minute
-    for block in WEEKLY_TEMPLATE:
+    for block in weekly_template():
         if weekday not in block.weekdays:
             continue
         start, end = _minutes(block.start_local), _minutes(block.end_local)
@@ -98,7 +187,7 @@ def block_at(local_dt: datetime) -> ScheduleBlock | None:
     # 跨午夜的后半段（00:00–02:00）：取前一天的 late 块
     prev_weekday = (weekday - 1) % 7
     minutes_prev = minutes + 24 * 60
-    for block in WEEKLY_TEMPLATE:
+    for block in weekly_template():
         if block.id.endswith("-late") and prev_weekday in block.weekdays:
             start, end = _minutes(block.start_local), _minutes(block.end_local)
             if start < end:
@@ -191,7 +280,7 @@ _CANON_BUCKET_PATH = (
 def load_canon_material_buckets(path: Path | None = None) -> dict[str, tuple[str, ...]]:
     """加载正典条目到活动素材桶的映射；资源损坏时安全返回空映射。"""
     target = path or _CANON_BUCKET_PATH
-    valid_activities = {block.activity for block in WEEKLY_TEMPLATE}
+    valid_activities = {block.activity for block in weekly_template()}
     try:
         payload = json.loads(target.read_text(encoding="utf-8-sig"))
         if payload.get("format_version") != 1 or not isinstance(payload.get("entries"), dict):
@@ -354,7 +443,7 @@ def advance_schedule(
         # 压缩推进：久远区间不逐小时结算，只按日均 delta 记账一次
         days = gap_hours / 24
         daily_net = sum(
-            b.energy_delta_per_hour * _block_hours(b) for b in WEEKLY_TEMPLATE
+            b.energy_delta_per_hour * _block_hours(b) for b in weekly_template()
         ) / 7.0
         state["energy_delta_today"] = round(
             float(state.get("energy_delta_today", 0.0)) + daily_net * days, 2)
@@ -434,7 +523,7 @@ def current_presence(user_id: str) -> str:
     """当前在场状态（供 P2-05 行程收尾等只读消费）。"""
     state = _load_state(user_id)
     block_id = state.get("current_block_id", "")
-    for block in WEEKLY_TEMPLATE:
+    for block in weekly_template():
         if block.id == block_id:
             return block.presence
     return "home"
