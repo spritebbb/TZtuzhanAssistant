@@ -92,7 +92,7 @@ def test_canon_material_bucket_mapping_is_complete_and_valid() -> None:
         "P-00", "P-01", "P-02", "O-01", "O-02", "O-03",
         "O-04", "O-05", "O-06", "C-01", "C-02",
     }
-    valid_activities = {block.activity for block in schedule.WEEKLY_TEMPLATE}
+    valid_activities = {block.activity for block in schedule.weekly_template()}
     assert all(set(buckets) <= valid_activities for buckets in mapping.values())
     assert set(item["activity"] for item in schedule.MATERIALS) <= {
         bucket for buckets in mapping.values() for bucket in buckets
