@@ -646,8 +646,11 @@ async def extract_opinions(user_id: str, document_id: int) -> list[dict]:
         except Exception:  # noqa: BLE001
             verdict = None
         try:
+            # 提炼观点初始 confidence=0.6（自行补充决策）：LLM 提炼非用户亲笔
+            # 不该满信，且给 corroborate 的 +0.1 留出多次佐证空间（用户手输
+            # 仍走默认 1.0）；confidence 现仅管理面板展示、不入召回排序。
             saved.append(save_opinion(user_id, document_id, stance, spans,
-                                      origin="assistant", verdict=verdict))
+                                      origin="assistant", confidence=0.6, verdict=verdict))
         except KnowledgeError:
             continue
         if len(saved) >= 2:
