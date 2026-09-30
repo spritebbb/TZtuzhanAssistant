@@ -134,10 +134,13 @@ def _http_checks() -> None:
 
     # /api/remote/task 的既有协议允许 JSON/form body token。全局 LAN 守卫不能在
     # 读取 body 前将它拒绝；路由会用同一检查函数对 body token 再次鉴权。
+    # 批 6d 起该路由按需注册：AGENT_REMOTE_TOKEN 未配置时不挂载（404/405 属预期），
+    # 此处只在路由存在时验证 body-token 协议。
     async def fake_round(*_args, **_kwargs):
         return "ok"
 
     token_ok = lambda token, _peer: token == "body-token"
+    remote_mounted = any(getattr(r, "path", "") == "/api/remote/task" for r in app.routes)
     with (
         patch("backend.tools.safety.remote_token_ok_by_peer", side_effect=token_ok),
         patch("backend.api.remote.remote_token_ok_by_peer", side_effect=token_ok),
@@ -145,7 +148,10 @@ def _http_checks() -> None:
     ):
         with TestClient(app) as client:
             response = client.post("/api/remote/task", json={"task": "ping", "token": "body-token"})
-            assert response.status_code == 200 and response.json()["ok"] is True
+            if remote_mounted:
+                assert response.status_code == 200 and response.json()["ok"] is True
+            else:
+                assert response.status_code in (404, 405), "未配 token 时应按需不注册"
 
     # reset 恰好发生在最终 bot 消息落库时，也必须给 SSE 一个终止帧。
     from backend.core.reset import ResetSuperseded
