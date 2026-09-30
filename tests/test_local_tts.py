@@ -124,7 +124,11 @@ def test_concat_wav() -> None:
     a, b = _tone_wav(440, 0.1), _tone_wav(880, 0.1)
     merged = local_tts._concat_wav([a, b])
     with wave.open(io.BytesIO(merged), "rb") as w:
-        assert w.getnframes() == int(0.2 * 32000), "样本级拼接：0.1+0.1 秒"
+        gap = int(0.18 * 32000)  # 块间自然停顿（TTS 质量批：句间硬拼会「赶」）
+        assert w.getnframes() == int(0.2 * 32000) + gap, "样本级拼接 + 0.18s 停顿"
+        w.setpos(int(0.1 * 32000))
+        mid = w.readframes(gap)
+        assert mid == b"\x00" * len(mid), "块间必须是静音帧"
     # 格式不一致 → 抛（上层回退）
     other = _tone_wav(440, 0.1, rate=16000)
     try:
@@ -132,7 +136,31 @@ def test_concat_wav() -> None:
         raise AssertionError("采样率不一致应拒绝拼接")
     except ValueError:
         pass
-    print("[OK] 拼接：同格式样本级合并；格式不一致拒绝")
+    print("[OK] 拼接：同格式样本级合并 + 0.18s 句间停顿；格式不一致拒绝")
+
+
+def test_mood_emotion_dispatch() -> None:
+    """TTS 质量批：mood → (情绪参考, 语速) 分派对齐 edge 档位表。"""
+    assert local_tts._mood_emotion_speed(85) == ("happy", 1.04)
+    assert local_tts._mood_emotion_speed(65) == ("happy", 1.04)
+    assert local_tts._mood_emotion_speed(50) == ("neutral", 0.97)
+    assert local_tts._mood_emotion_speed(34) == ("sad", 0.92)
+    assert local_tts._mood_emotion_speed(None) == ("neutral", 1.0)
+    assert local_tts._mood_emotion_speed(150) == ("neutral", 1.0)
+    # 情绪参考：约定路径存在才启用，否则回退主 ref（优雅降级）
+    profile = {"ref_path": "reference_audios/castorice/zh-neutral.wav",
+               "ref_text": "主参考文本"}
+    happy_ref, happy_prompt = local_tts._emotion_ref(profile, "happy")
+    if happy_ref != profile["ref_path"]:
+        assert happy_ref.endswith("zh-happy.wav") and "克星" in happy_prompt
+    neutral_ref, _ = local_tts._emotion_ref(profile, "neutral")
+    assert neutral_ref == profile["ref_path"], "neutral 恒用主 ref"
+    missing_ref, missing_prompt = local_tts._emotion_ref(profile, "sad")
+    if not (Path("GPT-SoVITS") / "reference_audios/castorice/zh-sad.wav").is_file():
+        assert missing_ref == profile["ref_path"], "缺档回退主 ref"
+    else:
+        assert missing_ref.endswith("zh-sad.wav") and "斗篷" in missing_prompt
+    print("[OK] 情绪分派：mood 档位/越界回退/约定路径降级")
 
 
 def test_synth_cache_and_fallback() -> None:
@@ -262,11 +290,12 @@ def main() -> None:
     test_negotiation()
     test_split_sentences()
     test_concat_wav()
+    test_mood_emotion_dispatch()
     test_synth_cache_and_fallback()
     test_voice_profiles()
     test_api_fallback_header()
     test_schema_v45()
-    print("\n=== P3-03 本地语音（fake）：7 组全部通过 ===")
+    print("\n=== P3-03 本地语音（fake）：8 组全部通过 ===")
 
 
 if __name__ == "__main__":

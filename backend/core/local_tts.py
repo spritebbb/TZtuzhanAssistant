@@ -33,6 +33,54 @@ MAX_LOCAL_CHARS = 200          # 单块上限（GPT-SoVITS 长文本质量与显
 MAX_CHUNKS = 5                 # 超出截断（朗读兜底，不做超长书）
 NEGOTIATE_TTL_SEC = 60.0
 
+# ---------------------------------------------------------------------------
+# 情绪参考分派（TTS 质量批）：合成音的感情来自参考音频的韵律克隆——恒用
+# 中立参考，输出就是「无机质、无起伏」。按 mood 切换情绪参考（约定优于配置：
+# 与 manifest 主 ref 同目录的 zh-{emotion}.wav，缺档回退主 ref）；语速档位与
+# edge-tts 的 prosody_for_mood 同表换算（+4% rate ↔ speed_factor 1.04）。
+# prompt 文本源自原情绪音频文件名（参考音频/遐蝶/emotions/，迁移时内嵌）。
+# ---------------------------------------------------------------------------
+_EMO_PROMPTS: dict[str, str] = {
+    "happy": "作为助讲的风堇小姐…真是那刻夏老师的克星呀。",
+    "sad": "果然，「黑色」的「利剑」和「斗篷」……",
+    "neutral": "这样的太阳…恐怕无法温暖来世的冥界。",
+}
+# 与 tts._PROSODY_TIERS 对齐：≥65 开心（+4%）、≥35 平淡（-3%）、<35 低落（-8%）
+_MOOD_TIERS: tuple[tuple[int, str, float], ...] = (
+    (65, "happy", 1.04),
+    (35, "neutral", 0.97),
+    (0, "sad", 0.92),
+)
+_CHUNK_GAP_SEC = 0.18  # 块间自然停顿（句号级切分后硬拼会「赶」，听感断句异常）
+
+
+def _mood_emotion_speed(mood: int | None) -> tuple[str, float]:
+    """mood → (情绪参考名, speed_factor)。None/越界回退中性。"""
+    try:
+        value = int(mood)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "neutral", 1.0
+    if value < 0 or value > 100:
+        return "neutral", 1.0
+    for floor, emotion, speed in _MOOD_TIERS:
+        if value >= floor:
+            return emotion, speed
+    return "neutral", 1.0
+
+
+def _emotion_ref(profile: dict, emotion: str) -> tuple[str, str]:
+    """情绪参考 (ref_path, prompt_text)：约定路径存在才启用，否则回退主 ref。"""
+    if emotion == "neutral":
+        return str(profile["ref_path"]), profile["ref_text"] or ""
+    ref = Path(profile["ref_path"])
+    candidate = ref.parent / f"zh-{emotion}.wav"
+    # ref 可能是相对推理服务的路径（如 reference_audios/castorice/…）；
+    # 本地部署契约下 GPT-SoVITS 在仓库根（runbook §部署位置），据此做存在性判断
+    local = candidate if candidate.is_absolute() else Path("GPT-SoVITS") / candidate
+    if local.is_file():
+        return candidate.as_posix(), _EMO_PROMPTS.get(emotion, "")
+    return str(profile["ref_path"]), profile["ref_text"] or ""
+
 _negotiate_cache: tuple[float, dict | None] = (0.0, None)
 _gpu_lock: asyncio.Semaphore | None = None
 
@@ -225,16 +273,24 @@ def _cache_path(*, provider_version: str, model_hash: str, voice: str,
     return _TTS_DIR / f"{digest}.wav"
 
 
-async def _synth_chunk_http(chunk: str, profile: dict, caps: dict) -> bytes:
-    """单块合成：POST /tts（api_v2 风格；参数以协商到的能力为准）。"""
+async def _synth_chunk_http(chunk: str, profile: dict, caps: dict, *,
+                            emotion: str = "neutral",
+                            speed_factor: float = 1.0) -> bytes:
+    """单块合成：POST /tts（api_v2 风格；参数以协商到的能力为准）。
+
+    情绪参考与语速随 mood 分派（TTS 质量批）：感情起伏由参考音频韵律克隆，
+    语速对齐 edge-tts 的 prosody_for_mood 档位。
+    """
+    ref_path, prompt_text = _emotion_ref(profile, emotion)
     payload = {
         "text": chunk,
         "text_lang": "zh",
-        "ref_audio_path": profile["ref_path"],
-        "prompt_text": profile["ref_text"] or "",
+        "ref_audio_path": ref_path,
+        "prompt_text": prompt_text,
         "prompt_lang": profile["ref_lang"] or "zh",
         "model_hash": profile["model_hash"],
         "provider_version": caps["provider_version"],
+        "speed_factor": round(speed_factor, 3),
     }
     async with _make_client(timeout=config.local_tts_timeout) as client:
         resp = await client.post(
@@ -244,12 +300,13 @@ async def _synth_chunk_http(chunk: str, profile: dict, caps: dict) -> bytes:
     return resp.content
 
 
-def _concat_wav(frames: list[bytes]) -> bytes:
-    """拼接同格式 WAV（GPT-SoVITS 单次部署输出格式一致；不一致直接抛→回退）。"""
+def _concat_wav(frames: list[bytes], *, gap_sec: float = _CHUNK_GAP_SEC) -> bytes:
+    """拼接同格式 WAV，块间插入短静音模拟句间自然停顿（GPT-SoVITS 单次部署
+    输出格式一致；不一致直接抛→回退）。"""
     outs = io.BytesIO()
     params: wave._WaveParams | None = None
     with wave.open(outs, "wb") as writer:
-        for raw in frames:
+        for idx, raw in enumerate(frames):
             with wave.open(io.BytesIO(raw), "rb") as reader:
                 p = reader.getparams()
                 if params is None:
@@ -260,6 +317,9 @@ def _concat_wav(frames: list[bytes]) -> bytes:
                 ):
                     raise ValueError("WAV 格式不一致，拒绝拼接")
                 writer.writeframes(reader.readframes(reader.getnframes()))
+            if idx < len(frames) - 1 and gap_sec > 0:
+                silence = int(params.framerate * gap_sec)  # 帧 = 采样数（单声道）
+                writer.writeframes(b"\x00" * silence * params.sampwidth * params.nchannels)
     return outs.getvalue()
 
 
@@ -286,9 +346,14 @@ async def synth_local(text: str, *, persona_id: str, mood: int | None = None) ->
         return cache_path, "gpt_sovits"
     try:
         _TTS_DIR.mkdir(parents=True, exist_ok=True)
+        emotion, speed = _mood_emotion_speed(mood)
         # GPU 单飞：按到达顺序串行，保持消息级顺序（logical_message_id 顺序）
         async with _sem():
-            frames = [await _synth_chunk_http(c, profile, caps) for c in chunks]
+            frames = [
+                await _synth_chunk_http(c, profile, caps,
+                                        emotion=emotion, speed_factor=speed)
+                for c in chunks
+            ]
         data = _concat_wav(frames) if len(frames) > 1 else frames[0]
         cache_path.write_bytes(data)
         return cache_path, "gpt_sovits"
