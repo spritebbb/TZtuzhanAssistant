@@ -75,6 +75,7 @@ _SOURCE_PROFILE: dict[str, tuple[float, float]] = {
     "initiative:watch_change": (0.35, 0.32),
     "initiative:companion_request": (0.30, 0.30),
     "initiative:interest_share": (0.22, 0.26),  # 38项#22 外部分享：更短更轻
+    "initiative:activity_invite": (0.24, 0.26),  # 38项#28 玩法邀请：短句带一个具体玩法点
     "initiative:surprise": (0.26, 0.28),
     "initiative-loop": (0.24, 0.28),
 }
