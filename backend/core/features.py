@@ -37,6 +37,13 @@ FLAG_DEFAULTS = {
     # 岗位三：她的自述记忆——daily 提取她的第一人称自述，矛盾双条并存，
     # 话题相关时提示一次交人格演绎（不自动取代、不反复盘问）。
     "her_statements_enabled": True,
+    # 38项#23 事件感：每日一条外部世界摘要进问候素材池（web_search+小 LLM
+    # 压缩，常驻循环 kv 幂等，成本闸保护）。2026-09-30 用户拍板默认开。
+    "news_digest_enabled": True,
+    # 38项#26 平淡时刻入账：daily 批次 LLM 提取平淡但有记头的当日事项，
+    # 写 facts 新 source_type=plain_moment（低 confidence + 短保留期），
+    # 不进情绪档案。2026-09-30 用户拍板（LLM 提取，默认开）。
+    "plain_moments_enabled": True,
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。

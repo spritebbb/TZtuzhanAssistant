@@ -22,7 +22,7 @@ from .log import logger
 
 TIERS = ("ok", "soft", "hard", "extreme")
 # 自主消费方：hard/extreme 档暂停；chat 与未知模块永远放行（不误伤既有调用方）
-_AUTONOMOUS_MODULES = {"initiative", "daily", "offline", "surprise", "watch", "situation"}
+_AUTONOMOUS_MODULES = {"initiative", "daily", "offline", "surprise", "watch", "situation", "news"}
 # extreme 档降级的文本路由：用户对话（chat_*/tool/vision）不降，保住交互质量
 _DOWNGRADE_TASKS = {"batch_diary", "batch_other", "extract", "judge"}
 
