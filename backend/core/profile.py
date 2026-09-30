@@ -150,21 +150,52 @@ async def extract_profile(user_id: str, day=None, *, rows=None, done=0) -> bool:
         logger.warning("[画像] {} 提炼返回格式异常（不推进游标）", user_id)
         return False
 
-    added = 0
+    # 岗位二·演变留痕：先收集全部候选，再一次批量判定「哪些候选是旧条目的
+    # 真实演变」（replace：旧归档+新顶替+写演变日志），其余走普通新增。
+    # 判定集只含 source=llm 的现有条目——manual（用户手写）绝不替代。
+    candidates: list[tuple[str, str]] = []  # (category, content)
     for cat in ("basic", "likes", "dislikes", "habits", "personality", "other"):
         items = data.get(cat)
         if not isinstance(items, list):
             continue
         for item in items:
-            # LLM 偶发输出 dict/list 而非字符串：直接跳过，避免 str() 存入垃圾文本
             if not isinstance(item, str):
                 continue
             text = item.strip()[:80]
-            if not text:
+            if text:
+                candidates.append((cat, text))
+    replace_plan: dict[int, dict] = {}  # candidate_idx -> {"old_id", "reason"}
+    if candidates:
+        try:
+            from .consistency_judge import judge_profile_evolution
+
+            llm_rows = [r for r in db.get_profile(user_id) if r.get("source") == "llm"]
+            plans = await judge_profile_evolution(
+                llm_rows, [c[1] for c in candidates])
+            for p in plans:
+                replace_plan.setdefault(p["candidate_idx"], p)  # 一候选只顶替一条
+        except Exception:  # noqa: BLE001
+            replace_plan = {}  # fail-open：全按普通新增（与旧行为一致）
+
+    replaced = added = 0
+    for idx, (cat, text) in enumerate(candidates):
+        plan = replace_plan.get(idx)
+        if plan is not None:
+            old = next((r for r in db.get_profile(user_id, include_archived=True)
+                        if r["id"] == plan["old_id"]), None)
+            new_id = db.add_profile(user_id, cat, text, "llm")
+            if old is not None and new_id is not None:
+                db.archive_profile(user_id, old["id"])
+                db.log_profile_evolution(user_id, cat, old["id"], old["content"],
+                                         new_id, text, "replace", plan["reason"])
+                replaced += 1
                 continue
-            if db.add_profile(user_id, cat, text, "llm") is not None:
-                added += 1
+            # 执行失败（旧条目已不在/新条目被 bigram 去重挡下——演变的新说法与
+            # 旧条目重叠 ≥50% 时会被挡）：按普通新增计，不写日志（行为与旧版
+            # 该候选被去重时一致，无半状态）。
+        if db.add_profile(user_id, cat, text, "llm") is not None:
+            added += 1
     db.set_last_profile_msg_id(user_id, done)
-    if added:
-        logger.info("[画像] {} 新增 {} 条画像", user_id, added)
+    if added or replaced:
+        logger.info("[画像] {} 新增 {} 条、演变 {} 条", user_id, added, replaced)
     return True

@@ -90,3 +90,76 @@ async def judge_opinion(new_stance: str, existing: list[dict]) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.warning("[判定器] 观点判定失败（fail-open=add）：{}", str(e)[:120])
         return {"action": "add", "target_id": None, "reason": f"判定失败 fail-open：{type(e).__name__}"}
+
+
+_PROFILE_EVOLUTION_PROMPT = """你是用户画像的演变判定器。下面是「现有画像条目」和本批「新提炼候选」。
+多数候选是新增信息（op=add，无需列出）；你只找**演变**：某条候选明确显示用户的某个长期特征
+**发生了真实变化**，与某条现有条目矛盾（如「爱喝咖啡」→「戒了咖啡」）。对每处演变输出一个
+replace 计划：旧条目归档、新候选顶替。
+
+判定纪律：
+- 只在变化有明确依据时判 replace：对话中明确说了改变（"我戒了/我换成了/现在改"）；
+  一次性的情绪、临时状态、偶尔行为不算演变；
+- 互补信息（新增喜好而非替代）、换个说法表达同一事实，都不是 replace；
+- 旧条目标了 [manual]（用户手写）的绝不 replace；
+- 没有演变就输出空数组。
+
+现有画像条目：
+{existing}
+
+新提炼候选：
+{candidates}
+
+只输出 JSON：{{"replaces": [{{"old_id": 整数, "candidate_idx": 整数(候选序号从0), "reason": "不超过50字"}}]}}"""
+
+
+async def judge_profile_evolution(existing: list[dict], candidates: list[str]) -> list[dict]:
+    """岗位二：一批画像候选 vs 现有画像的演变判定（一次调用判全批）。
+
+    existing: [{"id", "content", "source", ...}]（调用方应只传 source=llm 的）；
+    candidates: 本批候选文本列表（序号即 candidate_idx）。
+    返回 [{"old_id", "candidate_idx", "reason"}]；失败/无演变返回 []（fail-open：
+    全部按普通新增走，与旧行为一致）。
+    """
+    if not existing or not candidates:
+        return []
+    existing_text = "\n".join(
+        f"- [old_id={int(e['id'])}]{'[manual]' if str(e.get('source')) == 'manual' else ''} "
+        f"{str(e['content'])[:80]}" for e in existing
+    )
+    cand_text = "\n".join(f"- [idx={i}] {c[:80]}" for i, c in enumerate(candidates))
+    try:
+        from .llm import chat
+
+        resp = await chat(
+            [
+                {"role": "system", "content": _PROFILE_EVOLUTION_PROMPT},
+                {"role": "user",
+                 "content": f"现有画像条目：\n{existing_text}\n\n新提炼候选：\n{cand_text}"},
+            ],
+            temperature=0.2,
+            max_tokens=300,
+            task="judge",
+            thinking=False,  # 小预算 JSON：思考段会吃光 max_tokens 致正文空
+        )
+        start, end = resp.find("{"), resp.rfind("}")
+        data = json.loads(resp[start:end + 1]) if 0 <= start < end else {}
+        plans = data.get("replaces") if isinstance(data, dict) else None
+        if not isinstance(plans, list):
+            return []
+        valid_old = {int(e["id"]) for e in existing}
+        out: list[dict] = []
+        for p in plans:
+            if not isinstance(p, dict):
+                continue
+            try:
+                old_id, idx = int(p.get("old_id")), int(p.get("candidate_idx"))
+            except (TypeError, ValueError):
+                continue
+            if old_id in valid_old and 0 <= idx < len(candidates):
+                out.append({"old_id": old_id, "candidate_idx": idx,
+                            "reason": re.sub(r"\s+", " ", str(p.get("reason") or ""))[:120]})
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[判定器] 画像演变判定失败（fail-open=全普通新增）：{}", str(e)[:120])
+        return []
