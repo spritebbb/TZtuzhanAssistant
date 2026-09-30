@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 46  # v46: P0-1 fallback 管理记忆权威表（manager_memories）
+_SCHEMA_VERSION = 47  # v47: 岗位一知识观点冲突合并（superseded_by 演化链 + 决策日志表）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -266,10 +266,20 @@ CREATE TABLE IF NOT EXISTS knowledge_opinions (
     origin TEXT NOT NULL,             -- assistant / user
     confidence REAL NOT NULL DEFAULT 0.5,
     version INTEGER NOT NULL DEFAULT 1,
-    status TEXT NOT NULL DEFAULT 'active', -- active / revoked
+    status TEXT NOT NULL DEFAULT 'active', -- active / revoked / superseded
+    superseded_by INTEGER,            -- v47 岗位一：被哪条新观点取代（演化链，不物理删）
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (user_id, document_id, opinion_hash)
+);
+CREATE TABLE IF NOT EXISTS knowledge_opinion_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    new_opinion_id INTEGER NOT NULL,  -- 决策时的新观点（corroborate 时为佐证目标）
+    target_opinion_id INTEGER,        -- corroborate/supersede 的对象；add 为 NULL
+    action TEXT NOT NULL,             -- add / supersede / corroborate（append-only 审计）
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS knowledge_opinion_sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1231,6 +1241,14 @@ class UserDB:
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.executescript(_SCHEMA)
         self.conn.executescript(_TRIGGERS_SQL)
+        # v47 岗位一：knowledge_opinions 增加 superseded_by 列（旧库 ALTER 补齐）
+        opinion_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(knowledge_opinions)")
+        }
+        if "superseded_by" not in opinion_columns:
+            self.conn.execute(
+                "ALTER TABLE knowledge_opinions ADD COLUMN superseded_by INTEGER"
+            )
         # L01：kb_documents 增加来源与解析版本列（旧库 ALTER 补齐）
         # L02：共创壳增加 subtype 与结构化大纲列（旧库 ALTER 补齐）
         writing_columns = {
