@@ -109,13 +109,15 @@ def test_source_death_invalidates_offset() -> int:
 def test_metrics_aggregate_and_exclusion() -> int:
     uid = "p305-metrics"
     db.ensure_user(uid)
-    assert metrics.record(uid, "latency", "<1s")
-    assert metrics.record(uid, "latency", "<1s", count=2)
+    # 2026-09-30 批6c 观测账本合并：latency kind 已删（延迟归 telemetry），
+    # 聚合断言换仍存活的 repetition
+    assert metrics.record(uid, "repetition", "recent60")
+    assert metrics.record(uid, "repetition", "recent60", count=2)
     assert metrics.record(uid, "rule_failure", "style_guard")
     assert metrics.record(uid, "not_a_kind", "x") is False
     assert metrics.record(uid, "source_pick", "knowledge_opinions")
     total = {s["kind"]: s["total"] for s in metrics.summary(uid)}
-    assert total["latency"] == 3 and total["rule_failure"] == 1
+    assert total["repetition"] == 3 and total["rule_failure"] == 1
     # 清理
     assert metrics.clear_user(uid) == 3
     assert metrics.summary(uid) == []
