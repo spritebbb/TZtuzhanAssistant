@@ -197,15 +197,57 @@ def test_kv_registered() -> None:
     print("[OK] kv 登记：offline:pending 与 offline:last_recap")
 
 
+def test_generate_narrated_json() -> None:
+    """D11 增强：LLM 返回 JSON 讲述时逐条覆盖事件文本；长度不齐/空段回落。"""
+    db.ensure_user(UID)
+    from backend.core import cost_guard
+
+    narrated_json = (
+        '{"opening": "你回来啦，给你讲讲这几天。", "events": ['
+        '"19 号上午我在研究所做研究，还挺投入的。",'
+        '"晚上回小屋窝着，安安静静的。",'
+        '"20 号上午继续做研究。"]}'
+    )
+
+    async def chat_json(messages, **kwargs):
+        return narrated_json
+
+    with patch("backend.core.schedule.current_activity", _fake_schedule_activity), \
+            patch("backend.core.llm.chat", side_effect=chat_json) as mc, \
+            patch.object(cost_guard, "check", return_value=True):
+        recap = asyncio.run(offline_recap.generate(UID, _FROM, _TO))
+    assert recap["llm_used"] is True
+    assert recap["opening"] == "你回来啦，给你讲讲这几天。"
+    assert mc.await_count == 1, "讲述仍只允许一次 LLM"
+    texts = [e["text"] for e in recap["events"]]
+    assert texts[0] == "19 号上午我在研究所做研究，还挺投入的。", texts
+    assert "研究所" in texts[0] and "小屋" in texts[1]
+    # 事件骨架字段不丢：时间戳仍在，前端回放依赖
+    assert all(e.get("at") for e in recap["events"])
+
+    # 长度不齐：整批弃用讲述，逐条回落机械行（不错位讲串时间线）
+    async def chat_short(messages, **kwargs):
+        return '{"opening": "开场", "events": ["只有一条"]}'
+
+    with patch("backend.core.schedule.current_activity", _fake_schedule_activity), \
+            patch("backend.core.llm.chat", side_effect=chat_short), \
+            patch.object(cost_guard, "check", return_value=True):
+        recap2 = asyncio.run(offline_recap.generate(UID, _FROM, _TO))
+    assert recap2["opening"] == "开场"
+    assert recap2["events"][0]["text"].startswith("做研究"), recap2["events"][0]
+    print("[OK] generate 增强：JSON 讲述逐条覆盖、长度不齐整批回落")
+
+
 def main() -> None:
     db.conn.execute("SELECT 1")
     test_plan_deterministic_replay()
     test_trim_degrades_to_summary()
     test_generate_opening_tiers()
+    test_generate_narrated_json()
     test_maybe_generate_idempotent_and_ack()
     test_http_endpoints()
     test_kv_registered()
-    print("\n=== D11 离线补算：6 组全部通过 ===")
+    print("\n=== D11 离线补算：7 组全部通过 ===")
 
 
 if __name__ == "__main__":
