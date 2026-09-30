@@ -558,6 +558,7 @@ watch(() => props.reloadKey, () => {
 })
 
 let unsubscribeInitiativeIpc: (() => void) | undefined
+let unsubscribeShotIpc: (() => void) | undefined
 
 // NP-06：首次运行向导完成后的输入预填（与 tztuzhan:config-saved 同款轻量事件通道）
 function onPrefillInput(e: Event) {
@@ -584,6 +585,11 @@ onMounted(async () => {
   window.electronAPI?.setActiveSession(props.sessionId)
   // 订阅主进程转发的主动消息（追加气泡，与 SSE 去重）
   unsubscribeInitiativeIpc = window.electronAPI?.onInitiativeMessage((message) => handleProactiveMessage(message))
+  // 38项#25 截图求助热键：主进程抓屏推送 PNG → 转 File 走既有识图发送链路
+  // （发送前她需要看到内容，故不自动聚焦窗口——用户自己切的回来时截图已在）
+  unsubscribeShotIpc = window.electronAPI?.onHotkeyScreenshot((shot) => {
+    void handleImageFile(new File([shot.buffer], shot.name, { type: 'image/png' }))
+  })
   // D11 离线补算：重开后把她离线期间的日子逐条说给你（可跳过）；不阻塞输入
   void replayOfflineRecap()
   document.addEventListener('keydown', onKeydown)
@@ -595,6 +601,8 @@ onUnmounted(() => {
   stopInitiativeStream()
   unsubscribeInitiativeIpc?.()
   unsubscribeInitiativeIpc = undefined
+  unsubscribeShotIpc?.()
+  unsubscribeShotIpc = undefined
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener('tztuzhan:prefill-input', onPrefillInput)
   if (portraitRefreshTimer) clearTimeout(portraitRefreshTimer)

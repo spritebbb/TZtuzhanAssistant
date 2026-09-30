@@ -8,6 +8,8 @@ interface Window {
     focusWindow: () => Promise<boolean>
     setActiveSession: (sessionId: string | null) => Promise<boolean>
     onInitiativeMessage: (cb: (message: { text: string; image?: string | null }) => void) => (() => void)
+    /** 38项#25 截图求助热键（仅桌面壳注入；PWA 无） */
+    onHotkeyScreenshot: (cb: (shot: { buffer: ArrayBuffer; name: string }) => void) => (() => void)
     /** NP-10 桌面四件套（仅桌面壳注入） */
     setAlwaysOnTop: (on: boolean) => Promise<boolean>
     getAlwaysOnTop: () => Promise<boolean>
