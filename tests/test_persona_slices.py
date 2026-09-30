@@ -18,7 +18,7 @@ def test_resource_valid_and_core_resident() -> int:
 
     res = load_resource("default")
     assert res is not None, "default 资源应加载成功"
-    assert len(res["slices"]) == 12, f"切片数应为 12，当前 {len(res['slices'])}"
+    assert len(res["slices"]) == 16, f"切片数应为 16（增删切片需同步此断言），当前 {len(res['slices'])}"
     view = build_state_view(stage="初识", affection=0, energy=80, now=datetime(2026, 9, 7, 10, 0))
     out = compile_slices(view, profile_id="default")
     assert out is not None
@@ -95,10 +95,10 @@ def test_cache_and_fingerprint() -> int:
     assert first is not None and second is not None
     assert not first.cache_hit and second.cache_hit, "同指纹应命中编译缓存"
 
-    # 未被引用的键（quiet/energy_band/substage 不在任何谓词里）变化 → 指纹不变
+    # 未被引用的键变化 → 指纹不变（quiet 仍无切片引用；
+    # energy_band 已被 PS-TEX-LOW 谓词引用，不再是合格的未引用键样本）
     view_q = dict(view)
     view_q["quiet"] = True
-    view_q["energy_band"] = "low"
     third = compile_slices(view_q, profile_id="default")
     assert third is not None and third.cache_hit, "未引用键不应改变指纹"
 
