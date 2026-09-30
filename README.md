@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="#-快速开始">快速开始</a> ·
-  <a href="#-v350-更新亮点">v3.5 亮点</a> ·
+  <a href="#-v360-更新亮点">v3.6 亮点</a> ·
   <a href="#-核心能力">核心能力</a> ·
   <a href="#-能力演示新手教程">能力演示</a> ·
   <a href="#-mcp-扩展接你自己的工具">MCP 扩展</a> ·
@@ -29,18 +29,29 @@
 
 ---
 
-## 📦 v3.5.0 已发布
+## 📦 v3.6.0 已发布
 
 | 推荐下载 | 适合谁 | 下载 |
 |---|---|---|
-| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.5.0/TZtuzhanAssistant-Deploy-v3.5.0.zip) |
-| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.5.0/TZtuzhanAssistant-Deploy-Full-v3.5.0-Large.zip) |
+| **轻量部署包** | 想尽快开始使用；首次下载约 100 MB 记忆模型 | [下载 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.6.0/TZtuzhanAssistant-Deploy-v3.6.0.zip) |
+| **大杯部署包** | 更重视中文语义记忆；首次下载约 1.2 GB BGE-M3 模型 | [下载 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.6.0/TZtuzhanAssistant-Deploy-Full-v3.6.0-Large.zip) |
 
 > 两个包都不需要 Node.js。解压后双击 `Start-Tuzhan.bat`，填写一个 OpenAI 兼容的 `LLM_API_KEY` 即可开始。
 
 <p align="center">
-  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.5.0"><strong>查看完整 Release 说明 →</strong></a>
+  <a href="https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.6.0"><strong>查看完整 Release 说明 →</strong></a>
 </p>
+
+## ✨ v3.6.0 更新亮点
+
+v3.6 是「她会表达 + 记忆一致 + 对外部世界有感知」的一代（v3.5.0 以来 71 个提交，38 项改进清单收官：35 项落地）：
+
+- 🗣️ **表达质量专项**：范文对照体系（6 情境 × 14 变体按情绪带/关系阶段注入「分寸示范」，高分任务键路由）；她的回复按行拆成多截气泡显示（像真网友一句一发）。
+- 🧠 **记忆一致性三岗位**：知识观点矛盾判定（supersede 演化链/佐证加固）、用户画像演变留痕（旧条目归档不丢轨迹）、**她的自述记忆**（前后矛盾她自己演绎，不自动改写）；Mem0 实验分支默认关闭（hit@1 0.45 vs 自建 0.85 实证）。
+- 🌍 **外部世界感**：事件感（每天知道一件外面的事，打招呼能自然提起）、**兴趣源**（你授权的话题她定期去看，攒着找机会讲给你、发起「要不要一起」）、平淡时刻低权入账（会淡忘、不进情绪记忆）。
+- 💞 **关系纵深**：产物回访（一起完成的产物几天后她自己想起来问）、软勿扰（检测到你写代码输入密集时主动降频不静默）、生成质量反馈按钮（「不好」→学习候选→你确认才生效）、工作流累积（聊工作时她记得你的项目上下文）。
+- 🧭 **可用性**：相对时间推理（「上周说过的」直接命中原文）、截图求助热键 `Ctrl+Alt+S`（抓屏→识图→问她）、桌面感知升标题脱敏级（敏感域她看不见）、向量缺口定期自动补灌。
+- 🔧 **工程收敛**：远程三层骨架归档（复活点 tag 留存）、外部 Agent 桥删除、观测账本合并、MCP 对外端点按需注册（不配 token 不挂载）；schema 升级至 **v51**；全量回归 193 项全绿。
 
 ## ✨ v3.5.0 更新亮点
 
