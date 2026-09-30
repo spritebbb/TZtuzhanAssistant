@@ -94,6 +94,32 @@ def test_corroborate() -> int:
     return 0
 
 
+def test_realpath_corroborate_effective() -> int:
+    """真实路径回归（四原则·验证后落码）：extract_opinions 初始 0.6 时
+    corroborate 的 +0.1 必须实际生效（修前主路径 confidence=1.0 被 MIN 封死）。"""
+    import asyncio
+    from unittest.mock import patch, AsyncMock
+
+    from backend.core import knowledge as kb
+
+    UID4 = UID + "_real"
+    doc, chunk = _fake_doc(UID4, "real-a")
+    first = kb.save_opinion(UID4, doc, "立场A的初始版本", [{"chunk_id": chunk, "start": 0, "end": 8}],
+                            origin="assistant", confidence=0.6)
+    assert first["confidence"] == 0.6
+    # 模拟 extract_opinions 的完整链路（两次 LLM：①提炼 opinions JSON ②judge 判定）
+    opinions_json = '{"opinions": [{"stance": "立场A的强化表述", "spans": [0]}]}'
+    verdict_json = '{"action": "corroborate", "target_id": %d, "reason": "同源佐证"}' % first["id"]
+    with patch.object(kb, "relevant_opinions", return_value=[first]), \
+         patch("backend.core.llm.chat", new=AsyncMock(side_effect=[opinions_json, verdict_json])):
+        saved = asyncio.run(kb.extract_opinions(UID4, doc))
+    assert saved, "extract_opinions 应产出（佐证路径返回目标观点）"
+    after = kb.get_opinion(UID4, first["id"])
+    assert after["confidence"] == 0.7, f"佐证后应 0.6→0.7，实际 {after['confidence']}"
+    print("[OK] 真实路径 corroborate：初始 0.6 下 +0.1 实际生效（0.6→0.7）")
+    return 0
+
+
 def test_failopen_and_invalid_target() -> int:
     from backend.core.knowledge import save_opinion
 
@@ -146,6 +172,7 @@ def test_superseded_not_recalled() -> int:
 def main() -> int:
     test_supersede_chain()
     test_corroborate()
+    test_realpath_corroborate_effective()
     test_failopen_and_invalid_target()
     test_judge_failopen_unit()
     test_superseded_not_recalled()

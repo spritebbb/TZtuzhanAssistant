@@ -22,8 +22,9 @@ from .log import logger
 
 _ROOT = Path(__file__).resolve().parents[1] / "resources" / "personas"
 _INJECT_MAX = 2
-# 情绪分档与 behavior.py 的行为帧口径对齐（≥70 出雀跃线）
-_HIGH, _MID = 70, 40
+# 情绪分档线取自 behavior.py 既有刻度（四原则·验证后落码）：高 ≥70（behavior
+# 的熟悉+正向线 behavior.py:126），低 <25（疲惫线 behavior.py:109），中为其余
+_HIGH, _MID = 70, 25
 
 _cache: dict[str, tuple[float, list[dict]]] = {}
 
