@@ -109,6 +109,12 @@ def backup() -> Path | None:
 def _backup_impl() -> Path | None:
     from ..storage import runtime
 
+    # 迁移闸门期跳过：备份含源库 WAL checkpoint + 目录拷贝，与迁移引擎的
+    # 页级导出并发会改写主库文件，manifest 等价校验随即失败（真实竞态：
+    # 用户点「启用加密」时恰逢周期备份 → 500，可重试但体验差）。
+    if runtime.migration_gate_engaged():
+        logger.debug("[维护] 迁移闸门期：跳过备份")
+        return None
     try:
         if runtime.encrypted_mode():
             if runtime.locked():

@@ -40,8 +40,11 @@ def _make_plaintext_data() -> None:
     from backend.agent import session as agent_session
 
     agent_session._connect().close()
-    # 运行配置（应随迁）
-    (data / "feature_flags.json").write_text(json.dumps({"compact_ui_enabled": False}), encoding="utf-8")
+    # 运行配置（应随迁）。life_templates 必须关：冷启动无冷却时后台生活事件
+    # 必触发，commit_life_event 会在 enable 的拷贝窗口内重连写源库，manifest
+    # 保守校验（防数据损坏）随即拒绝迁移——与被测功能无关的后台写库竞态。
+    (data / "feature_flags.json").write_text(json.dumps(
+        {"compact_ui_enabled": False, "life_templates_enabled": False}), encoding="utf-8")
     # 人格文件库（应明文随迁且保持可读）
     persona_dir = data / "personas" / "default"
     persona_dir.mkdir(parents=True)
