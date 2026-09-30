@@ -70,6 +70,8 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("cost:skipped_batch:{day}", "cost_guard", "D10 daily 批处理被熔断跳过的 journal 记录", "runtime"),
     KvKeySpec("offline:pending", "offline_recap", "D11 待回放的离线补算（事件+开场+state）", "runtime"),
     KvKeySpec("offline:last_recap", "offline_recap", "D11 上一次已确认/跳过的补算归档", "runtime"),
+    KvKeySpec("chat:regen_last_at", "chat", "DF-8 重发 60s 节流窗口锚点", "runtime"),
+    KvKeySpec("state:emo_hit_seen", "emotion_state", "DF-8 情绪事件当日去重指纹桶（跨天自重置）", "daily"),
 )
 
 

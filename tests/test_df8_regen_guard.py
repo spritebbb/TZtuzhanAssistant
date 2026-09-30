@@ -70,8 +70,8 @@ def test_regen_throttle() -> None:
     assert "重新生成" in r.text
     # 节流键落账，且把时钟拨前 61 秒后放行
     uid = db.conn.execute(
-        "SELECT user_id FROM kv_store WHERE key='regen:last_at' LIMIT 1").fetchone()["user_id"]
-    kv_set(uid, "regen:last_at", str(__import__("time").time() - 61))
+        "SELECT user_id FROM kv_store WHERE key='chat:regen_last_at' LIMIT 1").fetchone()["user_id"]
+    kv_set(uid, "chat:regen_last_at", str(__import__("time").time() - 61))
     with client.stream("POST", "/api/chat", data="regenerate=true&mock=true", headers=FORM_HEADERS) as resp:
         assert resp.status_code == 200, resp.status_code
     print("[OK] regenerate 60s 节流：连点 429、窗口过后放行")
@@ -81,7 +81,7 @@ def test_regen_throttle() -> None:
 def test_emotion_hit_dedupe() -> None:
     uid = "df8-emo"
     db.ensure_user(uid)
-    kv_set(uid, "regen:last_at", "")  # 隔离其他用例的 kv 视野
+    kv_set(uid, "chat:regen_last_at", "")  # 隔离其他用例的 kv 视野
     before = db.get_mood(uid)[0]
 
     apply_impulse(uid, emotion_delta=10, affection_delta=0,

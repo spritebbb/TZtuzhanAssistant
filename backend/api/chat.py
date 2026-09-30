@@ -140,13 +140,13 @@ async def api_chat(
             from ..core.userdb import kv_get, kv_set
 
             now_ts = time.time()
-            last = kv_get(uid, "regen:last_at")
+            last = kv_get(uid, "chat:regen_last_at")
             if last and now_ts - float(last) < 60:
                 return JSONResponse(
                     {"ok": False, "error": "刚刚才重新生成过，稍等一下再试"},
                     status_code=429,
                 )
-            kv_set(uid, "regen:last_at", str(now_ts))
+            kv_set(uid, "chat:regen_last_at", str(now_ts))
         except Exception:
             logger.warning("[chat] 重发节流检查失败，按放行处理")
 
