@@ -181,6 +181,72 @@ def register_provider(provider: ContextProvider) -> None:
     _PROVIDERS[provider.entry.id] = provider
 
 
+class ProjectContextProvider(ContextProvider):
+    """38项#33 工作流累积：消费 topic 分区向量（原本只写不读的死数据）。
+
+    把 topic_memory 提炼的「上次聊到的工作/项目话题」变成可注入语境：
+    - collect 按 query 语义检索 topic 分区，再与 query 做 bigram 相关性
+      校验（交集 ≥1）——工作话题才注入，无关闲聊命中不了；
+    - topic 无 SQLite 表行可重验：refresh 恒返回 None（sticky 不续，
+      靠 collect 每轮重新拉，fresh 命中不受冷却限制）；
+    - cooldown 用注册表默认 4 回合，防同一话题反复刷屏。
+    """
+
+    MAX_ITEMS = 2
+
+    def __init__(self) -> None:
+        self.entry = ContextEntry(
+            id="project_context", namespace="work/project",
+            source_type="topic_vector", priority=55.0,
+        )
+
+    def collect(self, user_id: str, query: str, state, turn_id: int) -> list[ContextCandidate]:
+        from .memory import vector_store as vec
+        from .userdb import _bigrams
+
+        clean = str(query or "").strip()
+        if not clean:
+            return []
+        query_bigrams = _bigrams(clean)
+        if not query_bigrams:
+            return []
+        try:
+            hits = vec.search(user_id, clean, top_k=3, kind="topic")
+        except Exception:
+            return []  # 向量层不可用（未安装/重建中）时静默退场，不阻塞对话
+        out: list[ContextCandidate] = []
+        for hit in hits:
+            text = str(hit.text or "").strip()
+            if not text or not (query_bigrams & _bigrams(text)):
+                continue  # 相关性校验：语义近但字面无交集的话题不注入
+            out.append(ContextCandidate(
+                entry_id=self.entry.id,
+                source_id=str(hit.record_id),
+                source_version="",
+                text=text,
+                token_count=_estimate_tokens(text),
+                source_namespace=self.entry.namespace,
+                priority=self.entry.priority,
+                relevance=1.0,
+            ))
+            if len(out) >= self.MAX_ITEMS:
+                break
+        return out
+
+    def refresh(self, user_id: str, source_id: str) -> ContextCandidate | None:
+        # topic 分区没有对应表行（只有向量），无法重验现状：恒返回 None
+        # 让 sticky 立即失效，注入与否完全由每轮 collect 的相关性命中决定。
+        return None
+
+    def render(self, candidates: list[ContextCandidate]) -> str:
+        return (
+            "这是他的项目/工作上下文（你们聊工作时攒下的话题）：\n- "
+            + "\n- ".join(c.text for c in candidates)
+            + "\n这是他的项目/工作上下文，聊到时自然提起，别汇报，"
+            "也不要当成待办清单逐条核对。"
+        )
+
+
 class PendingThoughtProvider(ContextProvider):
     """F03 未完成心事：只在话题相关时注入一条，来源失效即退场。
 
@@ -237,6 +303,8 @@ def _ensure_default_providers() -> None:
         register_provider(KnowledgeOpinionsProvider())
     if "pending_thoughts" not in _PROVIDERS:
         register_provider(PendingThoughtProvider())
+    if "project_context" not in _PROVIDERS:
+        register_provider(ProjectContextProvider())
 
 
 # ---- 生命周期（context_lifecycle 表，读写都走 userdb 连接锁语义）----
