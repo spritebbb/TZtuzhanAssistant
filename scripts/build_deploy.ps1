@@ -57,6 +57,13 @@ function Build-Package([string]$name, [bool]$full) {
         Copy-Item -LiteralPath $_.FullName -Destination $dir
     }
 
+    # 每小时心跳任务安装器（P1-04 time_tick）：进包 scripts/ 子目录——
+    # 安装器以 $PSScriptRoot 的父目录定位部署根（.venv / data 均在根下）。
+    # Start-Tuzhan.bat 首次运行时询问是否安装；不装不影响使用（后端启动
+    # 补跑走同一入口，只是离线推进粒度变粗）。
+    New-Item -ItemType Directory -Path (Join-Path $dir 'scripts') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install_time_tick.ps1') -Destination (Join-Path $dir 'scripts')
+
     if ($full) {
         $envPath = Join-Path $dir '.env.example'
         $envText = Get-Content -LiteralPath $envPath -Raw -Encoding UTF8

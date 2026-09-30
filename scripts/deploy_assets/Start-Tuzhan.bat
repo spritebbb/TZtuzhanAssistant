@@ -73,6 +73,19 @@ if not "%ENV_OK%"=="1" (
     pause
 )
 
+rem ---- 5b) first-run optional: hourly heartbeat task ----
+rem  Installs TZtuzhanAssistant-TimeTick so her daily schedule keeps advancing
+rem  while the app is closed. Local SQLite writes only, no network. Declining
+rem  is fine: backend startup catch-up covers missed periods at coarse grain.
+if not exist "%ROOT%\data\timetick_prompted" (
+    if exist "%ROOT%\scripts\install_time_tick.ps1" (
+        choice /C YN /M "Install hourly heartbeat task (her life advances while app is closed)"
+        if not errorlevel 2 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\install_time_tick.ps1" install
+    )
+)
+if not exist "%ROOT%\data" mkdir "%ROOT%\data"
+if not exist "%ROOT%\data\timetick_prompted" type nul > "%ROOT%\data\timetick_prompted"
+
 rem ---- 6) start backend if not running ----
 echo  [6/6] Checking backend on port 8801...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8801/api/health' -TimeoutSec 2; if($r.StatusCode -eq 200){exit 0} } catch {}; exit 1" >nul 2>&1
