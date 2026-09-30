@@ -117,33 +117,51 @@ def trim(events: list[dict], *, cap: int | None = None) -> list[dict]:
 
 
 async def generate(user_id: str, from_dt: datetime, to_dt: datetime) -> dict:
-    """生成一段离线补算（plan + trim + ≤1 次 LLM 开场）。"""
+    """生成一段离线补算（plan + trim + ≤1 次 LLM 讲述）。"""
     events = trim(plan(user_id, from_dt, to_dt))
     opening = _DETERMINISTIC_OPENING
+    narrated: list[str] | None = None
     llm_used = False
     if events:
         try:
             from .cost_guard import check as _cost_ok
 
             if _cost_ok("offline"):
-                opening = await _opening_line(user_id, events, from_dt, to_dt)
+                opening, narrated = await _narrate(user_id, events, from_dt, to_dt)
                 llm_used = True
         except Exception as exc:
-            logger.warning("[离线补算] {} 开场生成失败，用确定性开场: {}",
+            logger.warning("[离线补算] {} 讲述生成失败，用确定性开场: {}",
                            user_id, type(exc).__name__)
+    # 逐条覆盖为讲述版：只覆盖非 summary 行（summary 是确定性摘要，不该被
+    # 改写），narrated 与 narratable 按序对位，空段保持机械行（fail-soft）
+    narrated_iter = iter(narrated or [])
+    final_events: list[dict] = []
+    for e in events:
+        text = e["text"]
+        if narrated and not e.get("summary"):
+            nxt = next(narrated_iter, "")
+            if nxt:
+                text = nxt
+        final_events.append({**e, "text": text})
     return {
         "from": from_dt.isoformat(timespec="minutes"),
         "to": to_dt.isoformat(timespec="minutes"),
         "opening": opening,
-        "events": events,
+        "events": final_events,
         "llm_used": llm_used,
     }
 
 
-async def _opening_line(
+async def _narrate(
     user_id: str, events: list[dict], from_dt: datetime, to_dt: datetime
-) -> str:
-    """LLM 开场一句：素材=确定性事件 + 局势档案快照，禁止编造新事实。"""
+) -> tuple[str, list[str] | None]:
+    """LLM 讲述（一次调用）：久别重逢的开场 + 逐条事件的她视角改写。
+
+    事件骨架（时间/活动/地点）是确定性记录，不是创作素材——事实层只能
+    复述，感受层（心情/氛围/小情绪）是她的人格自由。响应应为 JSON：
+    {"opening": str, "events": [str, ...]}；解析失败或纯文本响应时
+    opening 取整段文本、events 返回 None（调用方保持机械行，fail-soft）。
+    """
     from .llm import chat
 
     situation_text = ""
@@ -153,25 +171,64 @@ async def _opening_line(
         situation_text = situation_context(user_id)
     except Exception:
         pass
+    try:
+        from .persona_profiles import persona_name_for_user_id
+
+        persona_name = persona_name_for_user_id(user_id)
+    except Exception:
+        persona_name = "菟菚"
+    days = max(1, round((to_dt - from_dt).total_seconds() / 86400))
     # P3-36：at 是 aware isoformat（如 2026-09-25T21:00+08:00），时间在
     # 定长第 11-16 位；旧的 [-14:-9] 负索引会切出 "25T21" 这种错值。
-    material = "\n".join(f"- [{e['at'][11:16]}] {e['text']}" for e in events[:8])
+    material = "\n".join(
+        f"- [{e['at'][5:16]}] {e['text']}" for e in events if not e.get("summary"))
     prompt = (
-        "你一个人过了几天，现在对方回来了。下面是你这段时间真实做过的事"
-        "（确定性记录，不是创作素材）和你们的世界快照。"
-        "请用你的口吻说一句自然的开场（1-2 句），带出「这段时间照常过日子」，"
-        "可以提一两件具体的事，不编造记录之外的事，不解释系统，不提数字预算。"
-        "\n\n[你这段时间做过的事]\n" + material
-        + (f"\n\n[世界快照]\n{situation_text}" if situation_text else "")
+        f"你是{persona_name}。对方离开了大约 {days} 天，这期间你一个人照常过日子。"
+        "现在对方回来了，你要跟他讲讲这段时间的事。\n\n"
+        "[你这段时间的确定性日程记录（时间 + 活动 + 地点）]\n" + material
+        + (f"\n\n[你们的世界快照]\n{situation_text}" if situation_text else "")
+        + "\n\n请输出严格的 JSON 对象（不要 markdown 代码块、不要任何多余文字）：\n"
+        '{"opening": "2-4 句开场白", "events": ["改写后的事件1", "改写后的事件2", ...]}\n'
+        "要求：\n"
+        "1. opening：你的口吻，久别重逢的自然开场，可以带点想念或小情绪，"
+        "顺势引出「这段时间照常过日子」，2-4 句；\n"
+        "2. events：把每条日程记录逐条改写成你视角的一句话讲述（每条 15-45 字），"
+        "像跟对方唠家常；保留时间、活动、地点的事实骨架；\n"
+        "3. 可以加入做这件事时的心情、氛围、小感受，但**不得发明记录之外的新事件、"
+        "新人物、新物品**，不要提任何系统和数字预算；\n"
+        "4. events 数组长度必须与日程记录条数一致，顺序一一对应。"
     )
     resp = await chat(
         [{"role": "user", "content": prompt}],
         task="batch_other",
         temperature=0.6,
-        max_tokens=200,
+        max_tokens=900,
+        thinking=False,  # 结构化输出：思考段会吃光 max_tokens 致正文空
     )
     text = (resp or "").strip()
-    return text or _DETERMINISTIC_OPENING
+    if not text:
+        return _DETERMINISTIC_OPENING, None
+    import json as _json
+
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = _json.loads(text[start:end + 1])
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            opening = str(data.get("opening") or "").strip()
+            evs = data.get("events")
+            # 不滤空串（滤了会顶位错位）：空段由调用方回落机械行
+            narrated = [str(x).strip() for x in evs] \
+                if isinstance(evs, list) else None
+            # 长度必须与非 summary 事件条数一致：错位会把时间线讲串，整批弃用
+            n_expected = sum(1 for e in events if not e.get("summary"))
+            if narrated and len(narrated) != n_expected:
+                narrated = None
+            return (opening or _DETERMINISTIC_OPENING), narrated
+    # 纯文本/无法解析：整段当开场，事件保持机械行
+    return text or _DETERMINISTIC_OPENING, None
 
 
 # ---------------------------------------------------------------------------
