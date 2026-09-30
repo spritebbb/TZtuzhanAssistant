@@ -49,6 +49,7 @@ from .turn_prompt import (
     inject_today_dates,
     inject_understanding,
     inject_wake_prompt,
+    inject_expression_exemplars,
 )
 from .userdb import db
 
@@ -1142,6 +1143,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     inject_understanding(messages, user_id, is_chitchat=is_chitchat)
     inject_preference_constraints(messages, user_id)
     inject_presence(messages, user_id)
+    inject_expression_exemplars(messages, user_id, stage)
     inject_wake_prompt(messages, sleep_gate_state)
     inject_search_context(messages, search_report)
     ctx = inject_conversation_context(messages, ctx, text, merged_msg=merged_msg)

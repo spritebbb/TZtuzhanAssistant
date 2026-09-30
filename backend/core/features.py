@@ -31,6 +31,9 @@ FLAG_DEFAULTS = {
     "memory_salience_enabled": os.getenv("FEATURE_MEMORY_SALIENCE_ENABLED", "1").lower()
         not in {"0", "false", "off"},
     "profile_enabled": True,       # 用户画像（pipeline 注入时检查，唯一活跃开关）
+    # 表达质量专项：few-shot 对照例句（resources/personas/<id>/exemplars.json）。
+    # 范文由人格作者维护，资源为空时零注入；写好后按 mtime 热加载。
+    "expression_exemplars_enabled": True,
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。

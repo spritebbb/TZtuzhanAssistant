@@ -520,6 +520,25 @@ def inject_presence(messages: list[dict], user_id: str) -> None:
         logger.exception("[pipeline] 行程可及性提示失败（不影响回复）")
 
 
+def inject_expression_exemplars(messages: list[dict], user_id: str, stage: str) -> None:
+    """表达范文（few-shot 对照例句）：资源为空时零注入，不改变任何行为。"""
+    try:
+        from .features import flag
+
+        if not flag("expression_exemplars_enabled"):
+            return
+        from .userdb import db
+
+        emotion, _ = db.get_mood(user_id)
+        from .expression_exemplars import build_block
+
+        block = build_block(user_id, stage, emotion)
+        if block:
+            messages.append({"role": "system", "content": block})
+    except Exception:  # noqa: BLE001
+        logger.exception("[pipeline] 表达范文注入失败（不影响回复）")
+
+
 def inject_stage_transition(
     messages: list[dict], user_id: str, stage: str, *, ephemeral: bool
 ) -> None:
