@@ -19,6 +19,7 @@ _FLAG_LABELS = {
     "output_hygiene_enabled": "输出卫生：回复发送前统一安全检查（关闭时保持旧流式契约）",
     "context_registry_enabled": "语境注册表：统一管理注入对话的语境（含知识观点的召回）",
     "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
+    "expression_exemplars_enabled": "表达范文：用成对例句示范她的说话分寸（资源为空时不注入；范文在人格资源里维护）",
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
     "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",
