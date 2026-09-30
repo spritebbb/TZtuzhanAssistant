@@ -201,9 +201,15 @@ class ProjectContextProvider(ContextProvider):
         )
 
     def collect(self, user_id: str, query: str, state, turn_id: int) -> list[ContextCandidate]:
+        from .config import config as _cfg
         from .memory import vector_store as vec
         from .userdb import _bigrams
 
+        # memory_v2 关闭时 topic 向量本就不写（提炼走 v2 链），读侧同门——
+        # 也避免在显式关闭 v2 的部署/测试里把 Chroma 客户端惰性拉起（持有
+        # sqlite 句柄，Windows 清理临时目录会 WinError 32）。
+        if not getattr(_cfg, "memory_v2", True):
+            return []
         clean = str(query or "").strip()
         if not clean:
             return []
