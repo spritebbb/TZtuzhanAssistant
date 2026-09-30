@@ -39,9 +39,6 @@ EXEMPT = {
     "job_runs",
     # kv_store 不走表通道（bundle["kv"] 按 kv_registry 白名单单列）
     "kv_store",
-    # 凭据/渠道绑定：安全上有意不进可分享的备份
-    "auth_sessions", "devices", "channel_bindings", "channel_inbox",
-    "channel_outbox", "push_subscriptions",
     # 声纹档案：表只是元数据，本体是音频/模型文件资产——待独立切片随文件一起走
     "voice_profiles", "voice_manifests",
 }

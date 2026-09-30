@@ -45,7 +45,6 @@ from .api import (
     shared_resources,
     situation,
     offline_recap,
-    devices,
     desktop,
     tour,
     telemetry,
@@ -270,7 +269,6 @@ def create_app() -> FastAPI:
     app.include_router(lock.router)
     app.include_router(situation.router)
     app.include_router(offline_recap.router)
-    app.include_router(devices.router)
     app.include_router(desktop.router)
     app.include_router(encryption.router)
     app.include_router(sessions.router)
