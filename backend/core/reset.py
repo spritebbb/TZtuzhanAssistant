@@ -76,13 +76,10 @@ _TABLES = (
     "manager_memories",
     "tavern_sessions",
     "situation_files",
-    "channel_bindings", "devices",
 )
 
-# 无 user_id 列的传输态/运行资产表（按整体清除——单用户产品的重置语义下
-# 等同于清渠道状态与声纹运行资产；素材本体在加密工作区不受影响）
+# 无 user_id 列的传输态/运行资产表（按整体清除；素材本体在加密工作区不受影响）
 _TABLES_NO_USER = (
-    "channel_inbox", "channel_outbox", "push_subscriptions", "auth_sessions",
     "voice_profiles", "voice_manifests",
 )
 

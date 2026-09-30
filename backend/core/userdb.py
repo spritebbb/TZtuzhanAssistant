@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 49  # v49: 岗位三她的自述（her_statements：conflict 双条并存交人格演绎）
+_SCHEMA_VERSION = 50  # v50: L12-L14 远程三层骨架归档（6 表定义移除，老库残表留为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -519,79 +519,9 @@ CREATE TABLE IF NOT EXISTS situation_files (
     updated_at     TEXT NOT NULL,
     recompiled_at  TEXT
 );
--- L12-L14 离线骨架（批次15：不接真服务，真机/账号环节留空位）：
--- L13 渠道身份绑定（一次性 6 位码）与 inbox/outbox 状态机。
-CREATE TABLE IF NOT EXISTS channel_bindings (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id               TEXT NOT NULL,
-    persona_id            TEXT NOT NULL DEFAULT '',
-    channel               TEXT NOT NULL,             -- qq_official / wechat_local
-    external_account_hash TEXT NOT NULL DEFAULT '',  -- sha256(渠道稳定 id)，不存原文
-    status                TEXT NOT NULL DEFAULT 'pending', -- pending/active/revoked
-    binding_code          TEXT NOT NULL DEFAULT '',  -- 待验证的一次性码（pending 期）
-    code_expires_at       TEXT,
-    code_attempts         INTEGER NOT NULL DEFAULT 0,
-    verified_at           TEXT,
-    revoked_at            TEXT,
-    source_version        INTEGER NOT NULL DEFAULT 1, -- 撤销后自增，阻断迟到投递
-    version               INTEGER NOT NULL DEFAULT 1,
-    created_at            TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_channel_bindings_code
-    ON channel_bindings(channel, binding_code);
-CREATE TABLE IF NOT EXISTS channel_inbox (
-    channel              TEXT NOT NULL,
-    external_message_id  TEXT NOT NULL,
-    binding_id           INTEGER,
-    payload_cipher       TEXT NOT NULL DEFAULT '',   -- 骨架期明文 JSON；接真服务前按 P3-04 加密
-    status               TEXT NOT NULL DEFAULT 'pending', -- pending/processing/done/failed/rejected
-    error                TEXT NOT NULL DEFAULT '',
-    received_at          TEXT NOT NULL,
-    PRIMARY KEY (channel, external_message_id)
-);
-CREATE TABLE IF NOT EXISTS channel_outbox (
-    logical_message_id   TEXT NOT NULL,
-    channel              TEXT NOT NULL,
-    binding_id           INTEGER,
-    payload_cipher       TEXT NOT NULL DEFAULT '',
-    status               TEXT NOT NULL DEFAULT 'queued', -- queued/unknown/delivered/failed/suppressed
-    attempts             INTEGER NOT NULL DEFAULT 0,
-    next_retry_at        TEXT,
-    provider_message_id  TEXT NOT NULL DEFAULT '',
-    last_error           TEXT NOT NULL DEFAULT '',
-    created_at           TEXT NOT NULL,
-    updated_at           TEXT NOT NULL,
-    PRIMARY KEY (logical_message_id, channel)
-);
--- L12 公网网关设备与推送注册（remote_gateway_enabled 默认关）。
-CREATE TABLE IF NOT EXISTS devices (
-    id           TEXT PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    display_name TEXT NOT NULL DEFAULT '',
-    platform     TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL DEFAULT '',
-    revoked_at   TEXT,
-    version      INTEGER NOT NULL DEFAULT 1
-);
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id              TEXT PRIMARY KEY,
-    device_id       TEXT NOT NULL,
-    endpoint_hash   TEXT NOT NULL,            -- 只存哈希；密钥材料接真服务前入密钥仓
-    created_at      TEXT NOT NULL,
-    expires_at      TEXT,
-    last_success_at TEXT NOT NULL DEFAULT '',
-    failure_count   INTEGER NOT NULL DEFAULT 0,
-    revoked_at      TEXT
-);
-CREATE TABLE IF NOT EXISTS auth_sessions (
-    id         TEXT PRIMARY KEY,
-    device_id  TEXT NOT NULL,
-    token_hash TEXT NOT NULL,                 -- sha256(token)；原文只在签发响应出现一次
-    expires_at TEXT NOT NULL,
-    revoked_at TEXT,
-    created_at TEXT NOT NULL
-);
+-- L12-L14 远程三层骨架已于 2026-09-30 归档删除（tag archive/remote-skeleton-l12-l14）。
+-- 老库中残存的 channel_bindings/channel_inbox/channel_outbox/devices/
+-- push_subscriptions/auth_sessions 表为无害孤儿，不再读写。
 -- P3-03 本地声纹（GPT-SoVITS）：人格→模型绑定与素材清单。
 -- 素材本体在加密工作区，voice_manifests 只存清单；两者均为运行资产不进关系导出。
 CREATE TABLE IF NOT EXISTS voice_manifests (
@@ -2547,8 +2477,6 @@ class UserDB:
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
                 "tavern_sessions",
                 "situation_files",
-                "channel_bindings", "channel_inbox", "channel_outbox",
-                "devices", "push_subscriptions", "auth_sessions",
                 "voice_profiles", "voice_manifests",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
