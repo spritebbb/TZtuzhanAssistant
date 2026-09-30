@@ -29,6 +29,7 @@ _BACKUPS = _DATA / "backups"
 CHECKPOINT_INTERVAL = 6 * 3600      # 6 小时
 BACKUP_INTERVAL = 24 * 3600          # 每日至少一份成功快照
 CLEAN_IMGS_INTERVAL = 1 * 3600      # 1 小时
+VECTOR_BACKFILL_INTERVAL = 6 * 3600  # 38项#6 运行期缺口向量定期补灌（6 小时）
 BACKUP_KEEP = 7                      # 保留最近 7 份备份
 IMGS_MAX_MB = 300                    # 生图目录软上限（MB）
 SCREENSHOTS_MAX_MB = 200             # 截图目录软上限（MB）
@@ -418,6 +419,7 @@ async def maintenance_loop() -> None:
 
     next_ckpt = 0.0
     next_clean = 0.0
+    next_vecback = time.time() + VECTOR_BACKFILL_INTERVAL  # 启动后先等一轮，避开启动期 embedding 预热
     while True:
         now = time.time()
         from ..storage import runtime as _rt
@@ -444,6 +446,13 @@ async def maintenance_loop() -> None:
                 await asyncio.to_thread(clean_orphan_images)
                 await asyncio.to_thread(clean_old_screenshots)
                 next_clean = now + CLEAN_IMGS_INTERVAL
+            if now >= next_vecback:
+                from .vector_backfill import backfill_all
+
+                n = await asyncio.to_thread(backfill_all)
+                if n:
+                    logger.info("[维护] 向量补灌本轮共 {} 条", n)
+                next_vecback = now + VECTOR_BACKFILL_INTERVAL
         except Exception as e:
             logger.warning(f"[维护] 周期任务异常: {e}")
         await asyncio.sleep(60)

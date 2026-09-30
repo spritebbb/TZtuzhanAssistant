@@ -572,6 +572,33 @@ def delete_many(user_id: str, kind: str, record_ids: list[int]) -> int:
         return 0
 
 
+def missing_ids(user_id: str, kind: str, record_ids: list[int]) -> list[int]:
+    """批量检查哪些 record_id 在向量库中缺失（38项#6 定期补灌的检测端）。
+
+    返回缺失的 record_id 列表；库不可读/异常时返回空列表（宁可不补，
+    不误判全缺触发无谓重灌——真正的缺口由下一轮检测再发现）。
+    """
+    if not record_ids or not enabled():
+        return []
+    try:
+        col = _collection(kind)
+        if col is None:
+            return []
+        ids = [_kid(user_id, kind, rid) for rid in record_ids]
+        with _CHROMA_LOCK:
+            got = col.get(ids=ids, include=[])
+        present = set()
+        for mid in (got.get("ids") or []):
+            # kid 格式 '{user_id}|{kind}|{record_id}'——取末段 int
+            try:
+                present.add(int(mid.rsplit("|", 1)[1]))
+            except (ValueError, IndexError):
+                continue
+        return [rid for rid in record_ids if rid not in present]
+    except Exception:
+        return []
+
+
 def count(kind: str | None = None) -> int:
     """当前向量总数（kind 可选）。"""
     if not enabled():
