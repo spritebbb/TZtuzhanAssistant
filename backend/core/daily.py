@@ -232,6 +232,15 @@ async def run_daily_batch(user_id: str, day: date) -> None:
             logger.info("[自述] {} 新增 {} 条她的自述", user_id, n)
     except Exception:  # noqa: BLE001
         logger.exception("[自述] 提取失败（不影响批次）")
+    # 38项#26 平淡时刻：低权记录平淡但有记头的当日事项（不进情绪档案）
+    try:
+        from .plain_moments import extract_plain_moments
+
+        n = await extract_plain_moments(user_id, day, rows)
+        if n:
+            logger.info("[平淡时刻] {} 新增 {} 条当日事项", user_id, n)
+    except Exception:  # noqa: BLE001
+        logger.exception("[平淡时刻] 提取失败（不影响批次）")
     await write_daily_diary(user_id, day, transcript)
     try:
         from .reunion import close_after_daily
