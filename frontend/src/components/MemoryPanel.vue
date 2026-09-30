@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import RoomPanel from './RoomPanel.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
+  confirmLearningCandidate,
   deleteFact,
   deleteStyleMapEntry,
   deleteUserTerm,
@@ -10,14 +11,17 @@ import {
   getFacts,
   getHerProfile,
   getInteractionStyle,
+  getLearningCandidates,
   getPendingThoughts,
   resetInteractionStyle,
   resolveFactConflict,
+  revokeLearningCandidate,
   updateFact,
   updateFactPinned,
   updateFactSurfacePolicy,
   type FactItem,
   type HerProfileSection,
+  type LearningCandidate,
   type PendingThought,
   type StyleMapEntry,
   type UserTerm,
@@ -63,7 +67,54 @@ const profileSections = ref<HerProfileSection[]>([])
 const userStyle = ref('')
 const userTerms = ref<UserTerm[]>([])
 const styleMapEntries = ref<StyleMapEntry[]>([])
-const activeTab = ref<'facts' | 'profile' | 'backup'>('facts')
+const activeTab = ref<'facts' | 'profile' | 'backup' | 'feedback'>('facts')
+
+// ---- 38项#32 反馈记录：reply_quality 学习候选（筛 type=reply_quality） ----
+const feedbackItems = ref<LearningCandidate[]>([])
+const feedbackLoading = ref(false)
+const feedbackBusyId = ref<number | null>(null)
+
+async function loadFeedback() {
+  feedbackLoading.value = true
+  try {
+    const items = await getLearningCandidates()
+    feedbackItems.value = items.filter((item) => item.type === 'reply_quality')
+  } catch {
+    error.value = '反馈记录读取失败，稍后再试'
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+function openFeedback() {
+  activeTab.value = 'feedback'
+  void loadFeedback()
+}
+
+async function confirmFeedback(item: LearningCandidate) {
+  feedbackBusyId.value = item.id
+  try {
+    await confirmLearningCandidate(item.id)
+    item.status = 'active'
+  } catch {
+    error.value = '确认失败，稍后再试'
+  } finally {
+    feedbackBusyId.value = null
+  }
+}
+
+async function removeFeedback(item: LearningCandidate) {
+  if (!(await confirmAction('删除这条反馈记录？', '删掉后她就当这次反馈没发生过。'))) return
+  feedbackBusyId.value = item.id
+  try {
+    await revokeLearningCandidate(item.id)
+    feedbackItems.value = feedbackItems.value.filter((f) => f.id !== item.id)
+  } catch {
+    error.value = '删除失败，稍后再试'
+  } finally {
+    feedbackBusyId.value = null
+  }
+}
 
 // ---- 她惦记的事（M5 未完成心事） ----
 const pendingThoughts = ref<PendingThought[]>([])
@@ -395,6 +446,7 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
       <div class="tab-row">
         <button :class="{ on: activeTab === 'facts' }" @click="activeTab = 'facts'">她记住的</button>
         <button :class="{ on: activeTab === 'profile' }" @click="toggleProfile">了解{{ props.personaName || '她' }}</button>
+        <button :class="{ on: activeTab === 'feedback' }" @click="openFeedback">反馈记录</button>
         <button :class="{ on: activeTab === 'backup' }" @click="activeTab = 'backup'">带走 / 恢复</button>
       </div>
       <div v-if="activeTab === 'backup'" class="entries">
@@ -496,6 +548,36 @@ watch(() => props.show, (show) => { if (show) { void load(); void loadStyle(); v
           <p v-if="thoughtStats" class="hint small">
             曾挂心 {{ thoughtStats.total }} 件 · 说过 {{ thoughtStats.expressed }} 件 · 放下 {{ thoughtStats.dismissed }} 件
           </p>
+        </article>
+      </div>
+      <div v-else-if="activeTab === 'feedback'" class="entries">
+        <p class="hint small">
+          你点过「这轮回答不好」的轮次都在这里；确认后长期入档（先只记录，不自动改她的行为），不想要的可以删除。
+        </p>
+        <p v-if="feedbackLoading" class="empty">正在翻看反馈记录…</p>
+        <p v-else-if="!feedbackItems.length" class="empty">还没有反馈记录。聊天气泡下方的「不好」可以标记不满意的一轮</p>
+        <article v-for="item in feedbackItems" :key="item.id">
+          <p class="feedback-turn">{{ item.value.turn || '（轮次摘要缺失）' }}</p>
+          <p v-if="item.value.reason" class="feedback-reason">你当时说：{{ item.value.reason }}</p>
+          <div class="provenance">
+            <span>{{ item.status === 'candidate' ? '待你确认' : '已入档' }}</span>
+            <time>{{ item.created_at.slice(0, 10) }}</time>
+          </div>
+          <div class="meta">
+            <span class="actions">
+              <button
+                v-if="item.status === 'candidate'"
+                class="primary"
+                :disabled="feedbackBusyId === item.id"
+                @click="confirmFeedback(item)"
+              >确认</button>
+              <button
+                class="danger"
+                :disabled="feedbackBusyId === item.id"
+                @click="removeFeedback(item)"
+              >删除</button>
+            </span>
+          </div>
         </article>
       </div>
       <div v-else class="entries">
@@ -618,6 +700,9 @@ textarea { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 8px
 .hint.small { margin: 0 0 10px; font-size: 11px; }
 .profile-card small { color: var(--accent); font-size: 11px; }
 .profile-card p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
+/* 38项#32 反馈记录条目 */
+.feedback-turn { color: var(--text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.feedback-reason { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .term-del { margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }
 .term-del:hover { color: #e0705a; border-color: #e0705a; }
 .style-del { margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }

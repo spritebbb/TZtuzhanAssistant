@@ -2,13 +2,16 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  confirmLearningCandidate,
   deleteFact,
   deleteStyleMapEntry,
   deleteUserTerm,
   getFacts,
   getHerProfile,
   getInteractionStyle,
+  getLearningCandidates,
   resetInteractionStyle,
+  revokeLearningCandidate,
   updateFact,
   updateFactPinned,
   resolveFactConflict,
@@ -30,6 +33,9 @@ vi.mock('../../api/memory', () => ({
   resetInteractionStyle: vi.fn(),
   deleteUserTerm: vi.fn(),
   deleteStyleMapEntry: vi.fn(),
+  getLearningCandidates: vi.fn(),
+  confirmLearningCandidate: vi.fn(),
+  revokeLearningCandidate: vi.fn(),
 }))
 vi.mock('../../api/relationship', () => ({
   exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
@@ -85,6 +91,31 @@ describe('MemoryPanel', () => {
     vi.mocked(resetInteractionStyle).mockResolvedValue()
     vi.mocked(deleteUserTerm).mockResolvedValue()
     vi.mocked(deleteStyleMapEntry).mockResolvedValue()
+    vi.mocked(getLearningCandidates).mockReset()
+    vi.mocked(confirmLearningCandidate).mockReset()
+    vi.mocked(revokeLearningCandidate).mockReset()
+    vi.mocked(getLearningCandidates).mockResolvedValue([
+      {
+        id: 11,
+        type: 'reply_quality',
+        value: { turn: '他：帮我看看代码｜她：没什么问题呀', reason: '答非所问' },
+        confidence: 1,
+        status: 'candidate',
+        created_at: '2026-09-30T12:00:00',
+        expires_at: null,
+      },
+      {
+        id: 12,
+        type: 'glossary',  // 非 reply_quality：不进反馈记录
+        value: { term: '菟菚', meaning: '名字' },
+        confidence: 0.6,
+        status: 'candidate',
+        created_at: '2026-09-30T12:00:00',
+        expires_at: null,
+      },
+    ])
+    vi.mocked(confirmLearningCandidate).mockResolvedValue()
+    vi.mocked(revokeLearningCandidate).mockResolvedValue()
   })
 
   it('shows provenance and persists the proactive-surface preference', async () => {
@@ -169,7 +200,9 @@ describe('MemoryPanel', () => {
     const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
     await flushPromises()
 
-    await wrapper.findAll('.tab-row button')[2].trigger('click')
+    // 反馈记录 tab（38项#32）加入后 tab 顺序变化：按文案定位「带走 / 恢复」
+    const backupTab = wrapper.findAll('.tab-row button').find((b) => b.text().includes('带走'))!
+    await backupTab.trigger('click')
     expect(wrapper.find('a[href="/api/relationship/export"]').exists()).toBe(true)
 
     const bundle = { kind: 'tuzhan-relationship-bundle', data: {} }
@@ -237,5 +270,34 @@ describe('MemoryPanel', () => {
 
     expect(deleteStyleMapEntry).toHaveBeenCalledWith(9)
     expect(wrapper.text()).not.toContain('倾诉烦恼时——短句为主，偶尔省略号')
+  })
+
+  it('反馈记录页签：只列 reply_quality 候选，可确认入档、可删除（38项#32）', async () => {
+    const wrapper = mount(MemoryPanel, { props: { show: true, personaName: '菟菚' } })
+    await flushPromises()
+
+    const feedbackTab = wrapper.findAll('.tab-row button').find((b) => b.text().includes('反馈记录'))!
+    await feedbackTab.trigger('click')
+    await flushPromises()
+
+    expect(getLearningCandidates).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('他：帮我看看代码｜她：没什么问题呀')
+    expect(wrapper.text()).toContain('你当时说：答非所问')
+    expect(wrapper.text()).toContain('待你确认')
+    expect(wrapper.findAll('.entries article')).toHaveLength(1)  // glossary 候选被过滤
+
+    // 确认 → 转已入档，按钮消失
+    await wrapper.get('.entries article .actions button.primary').trigger('click')
+    await flushPromises()
+    expect(confirmLearningCandidate).toHaveBeenCalledWith(11)
+    expect(wrapper.text()).toContain('已入档')
+
+    // 删除 → 走确认弹窗后调 revoke，列表移除
+    await wrapper.get('.entries article .actions button.danger').trigger('click')
+    await flushPromises()
+    await wrapper.get('.cd-btn.danger').trigger('click')
+    await flushPromises()
+    expect(revokeLearningCandidate).toHaveBeenCalledWith(11)
+    expect(wrapper.text()).toContain('还没有反馈记录')
   })
 })

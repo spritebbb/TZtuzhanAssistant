@@ -86,6 +86,19 @@ export interface VisionResult {
   imageUrl: string | null
 }
 
+// 38项#32 整轮反馈：标记「这轮回答不好」→ reply_quality 学习候选
+// （整轮方案：后端自己定位最近一轮，前端不传消息 id）
+export async function sendReplyFeedback(reason?: string): Promise<{ id: number; duplicate: boolean }> {
+  const response = await apiFetch('/api/chat/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(reason ? { reason } : {}),
+  })
+  const data = await response.json().catch(() => ({}) as Record<string, unknown>)
+  if (!response.ok || !data.ok) throw new Error(String(data.error || '反馈失败，稍后再试'))
+  return { id: Number(data.id ?? 0), duplicate: Boolean(data.duplicate) }
+}
+
 export async function uploadVision(file: File): Promise<VisionResult> {
   const fd = new FormData()
   fd.append('file', file)
