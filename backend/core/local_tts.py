@@ -41,9 +41,11 @@ NEGOTIATE_TTL_SEC = 60.0
 # prompt 文本源自原情绪音频文件名（参考音频/遐蝶/emotions/，迁移时内嵌）。
 # ---------------------------------------------------------------------------
 _EMO_PROMPTS: dict[str, str] = {
-    "happy": "作为助讲的风堇小姐…真是那刻夏老师的克星呀。",
-    "sad": "果然，「黑色」的「利剑」和「斗篷」……",
-    "neutral": "这样的太阳…恐怕无法温暖来世的冥界。",
+    # 2026-09-30 换官方游戏语音长参考（StarRail4.2_CN 数据集，.lab 官方文本，
+    # RUBY 注音标记已清洗）——原 aihobbyist 4 秒短参考韵律信息不足（无机质根因之一）
+    "happy": "若非在世界的尽头遇见了阁下，我还以为缇宁老师的预言出错了呢。",
+    "sad": "对不起…我无法令你死而复生。但你若有所求，我可以结束你漫长的困顿。",
+    "neutral": "我能看出，虽然丹恒阁下平时不爱言语表达，但他的确发自真心地珍惜身边的每一个生命，无论它们多么渺小。",
 }
 # 与 tts._PROSODY_TIERS 对齐：≥65 开心（+4%）、≥35 平淡（-3%）、<35 低落（-8%）
 _MOOD_TIERS: tuple[tuple[int, str, float], ...] = (
@@ -69,16 +71,20 @@ def _mood_emotion_speed(mood: int | None) -> tuple[str, float]:
 
 
 def _emotion_ref(profile: dict, emotion: str) -> tuple[str, str]:
-    """情绪参考 (ref_path, prompt_text)：约定路径存在才启用，否则回退主 ref。"""
-    if emotion == "neutral":
-        return str(profile["ref_path"]), profile["ref_text"] or ""
+    """情绪参考 (ref_path, prompt_text)：约定路径存在才启用，否则回退主 ref。
+
+    三档统一走约定路径 + _EMO_PROMPTS 配套文本（两者同批部署、天然同步）——
+    包括 neutral：manifest 登记的主 ref 文件与 ref_text 是旧的短参考，若
+    沿用会出现「新音频配旧文本」的对齐错乱。manifest ref 仅为约定文件
+    缺失时的兜底。
+    """
     ref = Path(profile["ref_path"])
     candidate = ref.parent / f"zh-{emotion}.wav"
     # ref 可能是相对推理服务的路径（如 reference_audios/castorice/…）；
     # 本地部署契约下 GPT-SoVITS 在仓库根（runbook §部署位置），据此做存在性判断
     local = candidate if candidate.is_absolute() else Path("GPT-SoVITS") / candidate
-    if local.is_file():
-        return candidate.as_posix(), _EMO_PROMPTS.get(emotion, "")
+    if local.is_file() and _EMO_PROMPTS.get(emotion):
+        return candidate.as_posix(), _EMO_PROMPTS[emotion]
     return str(profile["ref_path"]), profile["ref_text"] or ""
 
 _negotiate_cache: tuple[float, dict | None] = (0.0, None)
