@@ -24,20 +24,19 @@ _client_cache: dict[tuple[str, str, str, int, int], AsyncOpenAI] = {}
 _CLIENT_CACHE_MAX = 32
 
 
-def _build_http_client(timeout: int | None = None) -> httpx.AsyncClient | None:
-    """构建 LLM 请求的底层 HTTP 客户端。
+def _build_http_client(timeout: int | None = None) -> httpx.AsyncClient:
+    """构建 LLM 请求的底层 HTTP 客户端：默认无代理直连。
 
-    默认返回 None（openai SDK 自建，会读系统代理环境变量）。
-    若设置了 LLM_PROXY 环境变量，则用指定代理；设为「off/direct/none」时
-    强制直连（trust_env=False），规避本机残留的失效本地代理
-    （如 127.0.0.1:57622 这类随会话漂移的临时代理端口）导致的外网请求全挂。
+    全局出网策略见 core/netenv.py（进程启动即清代理环境变量），这里再把客户端
+    显式建成 trust_env=False 双保险——openai SDK 自建的 client 会读系统代理
+    环境变量，本机残留失效本地代理（如 127.0.0.1:57622 这类随会话漂移的端口）
+    时外网请求全挂。LLM_PROXY 逃生门保留：设为具体地址时走该代理（确需经代理
+    出网的场景），off/direct/none 与留空均直连。
     """
     proxy = (config.llm_proxy or "").strip().lower()
-    if not proxy:
-        return None
-    if proxy in ("off", "direct", "none", "no"):
-        return httpx.AsyncClient(trust_env=False, timeout=timeout or config.llm_timeout)
-    return httpx.AsyncClient(proxy=proxy, trust_env=False, timeout=timeout or config.llm_timeout)
+    if proxy and proxy not in ("off", "direct", "none", "no"):
+        return httpx.AsyncClient(proxy=proxy, trust_env=False, timeout=timeout or config.llm_timeout)
+    return httpx.AsyncClient(trust_env=False, timeout=timeout or config.llm_timeout)
 
 # 重试策略
 _MAX_RETRIES = 2                 # 最多重试 2 次（共 3 次尝试）
@@ -181,6 +180,24 @@ def _record_usage(channel: str, model: str, usage, prompt_text: str, completion_
         pass
 
 
+# ---- 思考模式开关（deepseek-flash / GLM 等思考模型）----
+# 思考模型的思考段与正文共享 max_tokens：小预算请求（画像 400、感知等）
+# 思考就能吃光预算，正文为空（finish=length, content=""），JSON 任务直接
+# 解析失败。thinking=False 显式关闭（thinking.type=disabled，DeepSeek 与
+# GLM 通用写法）。只对已知思考端点域注入 extra_body——OpenAI 等端点会
+# 拒收未知字段，别家模型默认行为保持不变。
+_THINKING_ENDPOINT_MARKS = ("deepseek", "zhipu", "bigmodel", "z.ai", "siliconflow")
+
+
+def _thinking_kwargs(route, thinking: bool | None) -> dict:
+    if thinking is not False or route is None:
+        return {}
+    base = str(getattr(route, "base_url", "") or "").lower()
+    if not any(m in base for m in _THINKING_ENDPOINT_MARKS):
+        return {}
+    return {"extra_body": {"thinking": {"type": "disabled"}}}
+
+
 # ---- 任务级 token 计量（成本闸门，§24.3）----
 # ContextVar 随 asyncio 任务上下文复制：gather 出去的子任务用量不会自动回流
 # 父上下文，由 subagent 插件显式把增量加回。预算只做闸门（拒绝新的调用轮），
@@ -219,12 +236,15 @@ async def chat(
     perception: bool = False,
     model: str | None = None,
     task: str | None = None,
+    thinking: bool | None = None,
 ) -> str:
     """非流式整条回复。mock=True 时返回占位回复，便于无 API key 调试。
 
     perception=True 时走感知层独立小模型（LLM_PERCEPTION_* 配置），
     用于高频轻量的语义感知，降低延迟/成本；未配置独立模型时行为与普通 chat 一致。
     model 显式指定时优先（D5 强模型路由）。
+    thinking=False 关闭思考模型（deepseek-flash/GLM 等）的思考段——小预算
+    结构化任务（JSON 输出）必传，否则思考吃光 max_tokens、正文为空。
 
     失败自动重试（指数退避），全部失败抛异常（调用方兜底）。
     """
@@ -253,6 +273,7 @@ async def chat(
                     messages=messages,
                     temperature=config.llm_temperature if temperature is None else temperature,
                     max_tokens=current.max_tokens if max_tokens is None else max_tokens,
+                    **_thinking_kwargs(current, thinking),
                 )
                 text = resp.choices[0].message.content or ""
                 _record_usage(current.task, current.model, getattr(resp, "usage", None), prompt_text, text)
@@ -278,14 +299,17 @@ async def chat_native(
     mock: bool = False,
     temperature: float | None = None,
     max_tokens: int | None = None,
-) -> tuple[str, list[dict]]:
-    """原生函数调用——返回 (回复文本, tool_calls 列表)。
+) -> tuple[str, list[dict], str]:
+    """原生函数调用——返回 (回复文本, tool_calls 列表, 思考内容)。
 
     tool_calls 元素: {"name": str, "arguments": dict}
     若空列表则表示 LLM 直接回复了文本（最终回复）。
+    reasoning_content：GLM 等思考模型在 assistant 消息上产出的思考段，
+    下一轮请求把它随 assistant 历史原样传回（GLM 强校验，缺失即 400）；
+    非思考模型/未开启时为空串。
     """
     if mock:
-        return await chat(messages, mock=mock), []
+        return await chat(messages, mock=mock), [], ""
     from .model_routes import resolve_route
 
     route = resolve_route("tool")
@@ -308,6 +332,7 @@ async def chat_native(
             resp = await client.chat.completions.create(**kwargs)
             msg = resp.choices[0].message
             text = msg.content or ""
+            reasoning = getattr(msg, "reasoning_content", None) or ""
             _record_usage("tool", route.model, getattr(resp, "usage", None),
                           "".join(str(m.get("content") or "") for m in messages), text)
             calls: list[dict] = []
@@ -316,7 +341,7 @@ async def chat_native(
                     "name": tc.function.name,
                     "arguments": _parse_tool_args(tc.function.name, tc.function.arguments),
                 })
-            return text, calls
+            return text, calls, reasoning
         except Exception as e:
             last_exc = e
             if not _is_retryable(e) or attempt >= _MAX_RETRIES:
@@ -333,7 +358,7 @@ async def chat_native(
         if any(k in msg for k in _TOOLS_UNSUPPORTED_MARKS):
             logger.warning("[LLM] 原生工具调用不受支持，降级回文本模式: {}", str(last_exc)[:100])
             text = await chat(messages, mock=mock)
-            return text, []
+            return text, [], ""
     raise last_exc  # type: ignore[union-attr]
 
 
@@ -345,10 +370,10 @@ async def chat_native_stream(
     mock: bool = False,
     temperature: float | None = None,
     max_tokens: int | None = None,
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], str]:
     """流式原生函数调用：正文片段逐个经 on_text 外推（工具选择轮的过渡语），
     流式 tool_calls 分片按 index 聚合。返回值语义与 chat_native 完全一致：
-    (回复文本, [{"name", "arguments"}])，空 calls 即模型直接给出最终回复。
+    (回复文本, [{"name", "arguments"}], 思考内容)，空 calls 即模型直接给出最终回复。
 
     重试只在尚未产出任何片段前进行（对齐 chat_stream：已外推的内容不可重放）。
     llm_stream_disable 开启时静默退回非流式 chat_native（不调 on_text）。
@@ -365,6 +390,7 @@ async def chat_native_stream(
     for attempt in range(_MAX_RETRIES + 1):
         produced = False
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         # 流式 tool_calls 分片按 index 聚合：id/name 取首块，arguments 串接
         #（id 无需保留——tool_loop 会分配稳定的 call_{loop}_{i}）
         tc_frags: dict[int, dict] = {}
@@ -386,6 +412,9 @@ async def chat_native_stream(
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
+                    piece = getattr(delta, "reasoning_content", None)
+                    if piece:
+                        reasoning_parts.append(piece)
                     piece = getattr(delta, "content", None)
                     if piece:
                         produced = True
@@ -410,7 +439,7 @@ async def chat_native_stream(
                 {"name": slot["name"], "arguments": _parse_tool_args(slot["name"], slot["arguments"])}
                 for _, slot in sorted(tc_frags.items())
             ]
-            return text, calls
+            return text, calls, "".join(reasoning_parts)
         except Exception as e:
             last_exc = e
             if produced or tc_frags or _is_auth_error(e) or not _is_retryable(e) or attempt >= _MAX_RETRIES:
@@ -530,6 +559,7 @@ async def extract_address(text: str) -> str | None:
         temperature=0.2,
         max_tokens=20,
         task="extract",
+        thinking=False,  # 预算仅 20 token，思考模型必吃光
     )
     name = resp.strip().strip("「」『』\"'“”《》 ")
     # 校验：过长/含换行/含标点的结果视为提取失败，避免把整句当称呼

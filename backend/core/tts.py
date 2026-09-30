@@ -2,14 +2,14 @@
 """语音朗读：edge-tts（微软 Edge 在线 TTS）合成 mp3，带缓存。
 
 - synth(text, voice) → data/tts_cache/<sha1>.mp3 路径（命中缓存直接返回）
-- 走系统代理（http_proxy/https_proxy 环境变量）；无代理则直连
+- 无代理直连：不消费 *_proxy 环境变量（全局策略见 core/netenv.py），
+  代理软件开关不再影响朗读可用性
 - 失败返回 None（调用方回退为不朗读，不阻断对话）
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 from pathlib import Path
 
 from .config import config
@@ -19,10 +19,6 @@ _TTS_DIR: Path = config.data_dir / "tts_cache"
 DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"  # 晓晓（女声，适合菟菚）
 MAX_TEXT_CHARS = 5_000
 _CACHE_MAX = 200  # 缓存文件上限（超出由维护任务清理最旧）
-
-
-def _proxy() -> str | None:
-    return os.getenv("https_proxy") or os.getenv("http_proxy")
 
 
 # M6 情绪声线：心情 → 语速/音高的克制映射（可控范围内，不夸张）。
@@ -75,9 +71,6 @@ async def synth_async(
         import edge_tts
 
         kwargs = {}
-        p = _proxy()
-        if p:
-            kwargs["proxy"] = p
         if (rate, pitch) != ("+0%", "+0Hz"):
             kwargs["rate"] = rate
             kwargs["pitch"] = pitch

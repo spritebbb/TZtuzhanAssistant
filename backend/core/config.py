@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .netenv import force_direct_network
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # backend/core/config.py → 项目根
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -53,9 +55,9 @@ class Config:
         # 默认 45。max_tokens 配得很大时需适当调大，否则会误杀正常长生成。
         self.llm_timeout: int = _env_int("LLM_TIMEOUT", 45)
 
-        # LLM 请求代理。默认空（openai SDK 读系统代理环境变量）。
-        # 本机若存在随会话漂移的临时代理（如 127.0.0.1:xxxxx），会导致外网请求
-        # 间歇性全挂；此时设 LLM_PROXY=off 强制直连（trust_env=False）即可绕过。
+        # LLM 请求代理（逃生门）。默认空 = 无代理直连（全局策略见 core/netenv.py，
+        # 进程启动即清代理环境变量，openai SDK 不再读系统代理）。
+        # 确需经代理出网时设为具体地址（http://host:port）；off/direct/none 同直连。
         self.llm_proxy: str = os.getenv("LLM_PROXY", "").strip()
 
         # 感知层独立小模型：语义感知（perception）是高频轻量调用（每条消息一次），
@@ -307,9 +309,15 @@ class Config:
         """
         load_dotenv(PROJECT_ROOT / ".env", override=True)
         self._read()
+        # .env 若被写进代理变量也拦掉，维持无代理直连策略
+        force_direct_network()
 
 
 config = Config()
+# 无代理直连（core/netenv.py）：必须在进程内任何 HTTP 客户端构造之前执行。
+# config 是全项目最早的共享 import，落在这里生效最早；STT worker（独立进程）
+# 在自己的 main() 里另行调用。
+force_direct_network()
 
 
 def update_env_file(updates: dict[str, str]) -> list[str]:

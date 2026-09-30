@@ -341,7 +341,7 @@ netstat -ano | findstr 8801
 关闭占用 8801 端口的程序后重试，或换端口启动后端。
 
 **Q5：LLM 请求报代理错误**
-`.env` 中设置 `LLM_PROXY=off` 强制直连（本机有失效代理时）。
+当前版本已全局无代理直连（启动即清代理环境变量与系统代理设置），本问题不应再出现。确需经代理出网时，`.env` 中设 `LLM_PROXY=http://主机:端口` 让 LLM 走指定代理。
 
 **Q6：从 v2.x 升级后好感度/记忆还在吗**
 在。首次启动会自动迁移 schema 到当前 v46：旧好感度换算为初始信任×亲密值，全部记忆、会话、快照保留。升级前请先备份 `data/` 目录；程序也会在 schema 升级前自动做一次快照备份到 `data/backups/schema-*`。
@@ -469,7 +469,7 @@ persona-菟菚.md               # 人格源文件
 | `LLM_BASE_URL` | ✅ | OpenAI 兼容端点（默认 `https://api.deepseek.com/v1`） |
 | `LLM_API_KEY` | ✅ | LLM 密钥 |
 | `LLM_MODEL` | ✅ | 模型名（默认 `deepseek-chat`，任意 OpenAI 兼容模型均可） |
-| `LLM_PROXY` | | 设 `off` 强制直连（本机有失效代理时） |
+| `LLM_PROXY` | | 默认无代理直连；设具体地址（`http://主机:端口`）时 LLM 走该代理 |
 | `LLM_PERCEPTION_*` | | 感知层独立小模型（情绪/辱骂分类，留空复用主 LLM） |
 | `LLM_TASK_ROUTES` | | 按任务键路由不同模型（八任务键，旧配置兼容） |
 | `PERSONA_FILE` | | 人格文件路径（默认 `persona-菟菚.md`） |
