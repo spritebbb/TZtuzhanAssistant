@@ -24,12 +24,14 @@ if loader.load_plugin(loader.PLUGINS_DIR / "subagent.py") is None:
 SKILLS = load_catalog()
 
 # 修复前 skill 命中但 tool_loop=False 的真实话术（子代理指令落空）
+# 2026-09-30 skills 砍到剩 agent-tour：样例句换成 agent-tour 的触发话术
+# （其正文点名 memory_add/run_python/agent_fanout 等大量工具）
 MUST_OPEN_CHANNEL = [
-    "帮我比较一下 React 和 Vue",
-    "分析一下这两个方案的优缺点",
-    "评估一下这三种做法哪个好",
-    "帮我分头查一下这几个项目的现状",
-    "并行做这几件事：查A、查B、查C",
+    "带我看你能做什么",
+    "给我一个新手教程吧",
+    "介绍你的能力",
+    "你能做什么呀",
+    "来个能力演示",
 ]
 
 # 纯聊天不应因技能而打开工具循环（保住打字机流式体验）
@@ -68,9 +70,9 @@ for skill, name, expect in BOUNDARY:
         fails.append(f"词边界错误: {name} 期望 {expect} 实得 {got}")
 
 # 临时轮 / 测试模式仍然关闭工具循环（不因技能旁路）
-matched_probe = match_skills("帮我比较一下 React 和 Vue", SKILLS)
+matched_probe = match_skills("带我看你能做什么", SKILLS)
 for kwargs in ({"ephemeral": True, "mock": False}, {"ephemeral": False, "mock": True}):
-    if _tool_loop_enabled("帮我比较一下 React 和 Vue", None, matched_probe, **kwargs):
+    if _tool_loop_enabled("带我看你能做什么", None, matched_probe, **kwargs):
         fails.append(f"ephemeral/mock 下不应打开工具循环: {kwargs}")
 
 assert not fails, "技能→工具通道回归失败:\n" + "\n".join(fails)

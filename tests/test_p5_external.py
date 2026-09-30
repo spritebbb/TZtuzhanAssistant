@@ -41,10 +41,28 @@ async def test_mcp_metadata() -> None:
 
 
 async def test_remote_api() -> None:
-    """/api/remote/task 路由存在。"""
+    """/api/remote/task 按需注册：未配 token 不挂载（404），路由模块本身存在。"""
     from backend.api import remote
+    from backend.core.config import config as _cfg
     assert remote.router is not None
-    print("[OK] /api/remote/task 路由已注册")
+    paths = {getattr(r, "path", "") for r in _app_routes()}
+    if _cfg.agent_remote_token:
+        assert "/api/remote/task" in paths, "配了 token 应挂载 /api/remote/task"
+        print("[OK] /api/remote/task 已挂载（token 已配置）")
+    else:
+        assert "/api/remote/task" not in paths, \
+            "未配 AGENT_REMOTE_TOKEN 时不应挂载 /api/remote/*（按需注册）"
+        print("[OK] /api/remote/task 未挂载（未配 token，按需注册）")
+
+
+def _app_routes() -> list:
+    """惰性构建 app 拿路由表（隔离数据目录避免碰真机锁定态）。"""
+    import os
+    import tempfile
+
+    os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tz_p5_routes_"))
+    from backend.app import app
+    return list(app.routes)
 
 
 async def main() -> None:
