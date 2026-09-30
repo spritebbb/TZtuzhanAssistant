@@ -545,6 +545,7 @@ async def extract_opinions(user_id: str, document_id: int) -> list[dict]:
             temperature=0.3,
             max_tokens=500,
             task="extract",
+            thinking=False,  # 小预算 JSON：思考段会吃光 max_tokens 致正文空
         )
         start, end = resp.find("{"), resp.rfind("}")
         data = json.loads(resp[start:end + 1]) if 0 <= start < end else {}

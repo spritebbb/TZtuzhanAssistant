@@ -67,6 +67,7 @@ async def arbitrate_and_forget(user_id: str, text: str, recent_context: str = ""
             ],
             temperature=0.1,
             max_tokens=200,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
     except Exception:
         logger.warning("[记忆纠偏] {} 的仲裁调用失败，本次不删", user_id)

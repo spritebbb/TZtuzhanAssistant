@@ -182,7 +182,8 @@ async def _greeting_text(
         },
     ]
     try:
-        text = await chat(messages, max_tokens=100, temperature=0.85)
+        text = await chat(messages, max_tokens=100, temperature=0.85, thinking=False
+        )  # 小预算下思考会吃光 max_tokens 致正文空
         _generation_source[user_id] = "model"
         return text.strip()[:200]
     except Exception as e:

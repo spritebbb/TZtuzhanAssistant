@@ -60,6 +60,8 @@ async def test_native_stream_aggregates_tool_calls() -> None:
         pieces.append(piece)
 
     chunks = [
+        _chunk(SimpleNamespace(content=None, reasoning_content="先想", tool_calls=None)),
+        _chunk(SimpleNamespace(content=None, reasoning_content="一步", tool_calls=None)),
         _chunk(SimpleNamespace(content="我查一下", tool_calls=None)),
         _chunk(SimpleNamespace(content=None, tool_calls=[
             SimpleNamespace(index=0, id="call_1",
@@ -78,7 +80,7 @@ async def test_native_stream_aggregates_tool_calls() -> None:
         stack.enter_context(patch("backend.core.llm._build_http_client", return_value=None))
         llm._client_cache.clear()
         try:
-            text, calls = await llm.chat_native_stream(
+            text, calls, reasoning = await llm.chat_native_stream(
                 [{"role": "user", "content": "查天气"}],
                 [{"type": "function", "function": {"name": "web_search"}}],
                 on_text=on_text,
@@ -88,7 +90,8 @@ async def test_native_stream_aggregates_tool_calls() -> None:
     assert text == "我查一下", text
     assert pieces == ["我查一下"], pieces
     assert calls == [{"name": "web_search", "arguments": {"q": "天气"}}], calls
-    print("[OK] chat_native_stream：正文外推 + 流式 tool_calls 分片聚合")
+    assert reasoning == "先想一步", reasoning
+    print("[OK] chat_native_stream：正文外推 + 流式 tool_calls 分片聚合 + reasoning 聚合")
 
 
 # ---- run_tool_loop：interim/interim_reset 事件序 ----

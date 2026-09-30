@@ -85,6 +85,7 @@ async def extract_topic(user_id: str, *, mock: bool = False) -> str | None:
                 ],
                 temperature=0.4,
                 max_tokens=80,
+                thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
             )
         topic = _strip_parens(topic).strip().strip("。")
         if not topic or len(topic) < 2:

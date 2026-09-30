@@ -57,6 +57,7 @@ async def expand_query(user_id: str, query: str, *, mock: bool = False) -> list[
             [{"role": "system", "content": "只输出 JSON 数组，不要任何解释。"}, {"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=200,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         cleaned = resp.strip().strip("`").strip()
         if cleaned.startswith("json"):

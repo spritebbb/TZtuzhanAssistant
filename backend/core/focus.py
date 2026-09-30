@@ -511,7 +511,8 @@ async def maybe_send_wrapup(user_id: str, activity_id: int) -> bool:
         ]
         text = ""
         try:
-            text = (await chat(msgs, max_tokens=80, temperature=0.8)).strip()[:160]
+            text = (await chat(msgs, max_tokens=80, temperature=0.8,
+                               thinking=False)).strip()[:160]  # 小预算：思考会吃光预算
         except Exception as e:
             logger.warning("[专注] 复盘文案生成失败，按重试预算处理: {}", e)
         if not text:

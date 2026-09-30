@@ -353,6 +353,7 @@ async def generate_tuzhan_draft(user_id: str, perspective_id: int) -> dict:
                 },
             ],
             max_tokens=400,
+            thinking=False,  # 小预算短输出：思考段会吃光 max_tokens 致正文空
         )
     except Exception as exc:
         logger.warning("[双视角] {} 的菟菚视角草稿生成失败：{}", user_id, exc)

@@ -120,6 +120,7 @@ async def seal(
                     {"role": "user", "content": _LETTER_PROMPT.replace("菟菚", persona_name).format(stats=stats_text)},
                 ],
                 max_tokens=600,
+                thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
             )
             reply = reply.strip().strip('"「」')
             if reply:

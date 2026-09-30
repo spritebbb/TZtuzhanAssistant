@@ -184,6 +184,7 @@ async def compact_context(user_id: str, *, mock: bool = False) -> tuple[str, lis
                 ],
                 temperature=0.3,
                 max_tokens=400,
+                thinking=False,  # 小预算 JSON：思考段会吃光 max_tokens 致正文空
             )
             data = _parse_compact_json(summary)
             # P2-11：解析失败（非空但不是有效 JSON 的杂text）一律视为失败——

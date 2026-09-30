@@ -125,7 +125,8 @@ async def maybe_orchestrate_surprise(user_id: str, *, roll: int | None = None) -
         ]
         from .llm import chat
 
-        return (await chat(msgs, max_tokens=120, temperature=0.9)).strip()[:200]
+        return (await chat(msgs, max_tokens=120, temperature=0.9, thinking=False)
+        ).strip()[:200]  # 小预算下思考会吃光 max_tokens 致正文空
 
     def on_delivered() -> None:
         kv_set(user_id, _LAST_SURPRISE_KEY, datetime.date.today().isoformat())

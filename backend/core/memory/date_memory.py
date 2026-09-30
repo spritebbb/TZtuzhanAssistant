@@ -82,6 +82,7 @@ async def extract_from_message(user_id: str, text: str, *, mock: bool = False) -
             ],
             temperature=0.2,
             max_tokens=200,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         dates = _parse_dates(resp)
     except Exception:
@@ -117,6 +118,7 @@ async def extract_from_transcript(user_id: str, transcript: str, *, mock: bool =
             ],
             temperature=0.2,
             max_tokens=300,
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
         dates = _parse_dates(resp)
     except Exception:

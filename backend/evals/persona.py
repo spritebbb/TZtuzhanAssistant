@@ -196,6 +196,7 @@ async def judge_with_llm(case: PersonaCase, reply: str) -> dict[str, Any]:
         temperature=0.0,
         max_tokens=220,
         task="judge",
+        thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
     )
     cleaned = raw.strip()
     if cleaned.startswith("```"):

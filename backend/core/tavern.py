@@ -301,7 +301,8 @@ async def tavern_turn(
         {"role": "user", "content": final_user},
     ]
     try:
-        raw = await chat(messages, mock=mock, max_tokens=600, temperature=0.9)
+        raw = await chat(messages, mock=mock, max_tokens=600, temperature=0.9,
+                         thinking=False)  # 小预算下思考会吃光 max_tokens 致正文空
     except Exception as exc:  # 服务商拒绝/网络失败：兜成业务错误，不让酒馆侧崩
         logger.warning("[tavern] 她这轮生成失败: {}", type(exc).__name__)
         raise TavernError("她这轮没接上话，稍后再点她一次") from exc
@@ -416,6 +417,7 @@ async def save_session(
             max_tokens=350,
             temperature=0.3,
             task="batch_other",
+            thinking=False,  # 小预算：思考段会吃光 max_tokens 致正文空
         )
     except Exception as exc:
         logger.warning("[tavern] 剧情摘要生成失败: {}", type(exc).__name__)

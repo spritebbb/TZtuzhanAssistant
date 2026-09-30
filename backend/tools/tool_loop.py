@@ -76,6 +76,19 @@ def _extract_last_user(work: list[dict]) -> str:
     return ""
 
 
+def _unpack_native(res: tuple) -> tuple[str, list, str]:
+    """兼容解包 chat_native/chat_native_stream 返回值。
+
+    新签名 (text, calls, reasoning)——reasoning 是思考模型在 assistant 消息上
+    产出的 reasoning_content，拼回历史必须原样带上（GLM 强校验，缺失即 400：
+    "The `reasoning_content` in the thinking mode must be passed back"）。
+    旧测试桩仍返回二元组，reasoning 视为空。
+    """
+    if len(res) == 3:
+        return res[0], res[1], res[2] or ""
+    return res[0], res[1], ""
+
+
 def _add_final_instruction(work: list[dict], final_instruction: list[dict] | None) -> None:
     """追加最终轮指令，同时保持纯对话请求的 user 消息位于末尾。"""
     if not final_instruction:
@@ -534,9 +547,10 @@ async def _run_native(
 
         try:
             if call_native_stream is not None:
-                text, calls = await call_native_stream(work, tools, _on_interim)
+                text, calls, reasoning = _unpack_native(
+                    await call_native_stream(work, tools, _on_interim))
             else:
-                text, calls = await call_native(work, tools)
+                text, calls, reasoning = _unpack_native(await call_native(work, tools))
         except Exception as e:
             logger.warning("[工具循环] call_native 异常: {}", e)
             # 真实错误直接透传，不用误导性文案掩盖（key 失效/网络问题用户需要知道）
@@ -565,8 +579,9 @@ async def _run_native(
                 c.get("name", ""), ToolRegistry.tool_names()
             ) or c.get("name", "")
 
-        # 注入 assistant 的 tool_calls（每个调用独立 id）
-        work.append({
+        # 注入 assistant 的 tool_calls（每个调用独立 id）；thinking 模型的
+        # reasoning_content 必须随消息原样传回（见 _unpack_native 注释）
+        assistant_msg: dict = {
             "role": "assistant",
             "content": text or None,
             "tool_calls": [
@@ -575,7 +590,10 @@ async def _run_native(
                               "arguments": json.dumps(c.get("arguments") or {}, ensure_ascii=False)}}
                 for c in calls
             ],
-        })
+        }
+        if reasoning:
+            assistant_msg["reasoning_content"] = reasoning
+        work.append(assistant_msg)
         # 每个工具结果一条独立 tool 消息（id 与 tool_calls 一一对应）。
         # 执行拆成两段：先**同步裁决**（可见性/去重/上限/熔断/预算，全程无 await，
         # 保住 check-then-act 原子性——gather 并发下这些 dict 状态不再天然串行），
@@ -709,7 +727,7 @@ async def _run_native(
         async for piece in call_final_stream(work):
             parts.append(piece)
         return "".join(parts) or "（模型未返回内容，请重试）"
-    text, calls = await call_native(work, None)
+    text, _calls, _reasoning = _unpack_native(await call_native(work, None))
     return text or "（模型未返回内容，请重试）"
 
 
