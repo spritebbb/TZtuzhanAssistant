@@ -22,7 +22,8 @@ async def api_desktop_foreground():
     """NP-14 桌面感知：前台应用类别（仅 DESKTOP_AWARENESS=1 时探测）。
 
     关闭时只返回 enabled=false，不调用探测——隐私默认：她默认「看不见」。
-    只含应用类别与空闲秒数，不含窗口标题/内容。
+    只含应用类别、空闲秒数与脱敏语境标签（#24：敏感域/未知语境为空串），
+    不含窗口标题原文/内容。
     """
     if not config.desktop_awareness:
         return {"enabled": False}
@@ -30,6 +31,7 @@ async def api_desktop_foreground():
     return {
         "enabled": True,
         "category": data.get("category", "other"),
+        "title_context": data.get("title_context", ""),
         "idle_seconds": data.get("idle_seconds", 0.0),
         "fullscreen": bool(data.get("fullscreen")),
     }

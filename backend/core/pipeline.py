@@ -517,8 +517,9 @@ _AWARENESS_LINES = {
 def _awareness_line() -> str:
     """NP-14 桌面感知 → 行为帧 awareness_line。
 
-    仅在 DESKTOP_AWARENESS=1 时探测（隐私默认关）；类别级披露——她只知道
-    「在写代码/在浏览」，不知道窗口标题与内容。任何失败返回空串。
+    仅在 DESKTOP_AWARENESS=1 时探测（隐私默认关）。#24 标题脱敏级：优先用
+    脱敏语境标签（"在看 B 站视频"，敏感域/未知语境为空），无标签时退回
+    category 五类措辞。她永远拿不到窗口标题原文。任何失败返回空串。
     """
     try:
         from .config import config as _cfg
@@ -527,7 +528,11 @@ def _awareness_line() -> str:
             return ""
         from .desktop_probe import probe_foreground
 
-        category = str(probe_foreground().get("category") or "")
+        data = probe_foreground()
+        label = str(data.get("title_context") or "")
+        if label:
+            return f"用户此刻{label}，说话可以接这个话头但别追问细节，打扰要克制"
+        category = str(data.get("category") or "")
         if not category or category == "fullscreen":
             return ""  # 全屏时她该闭嘴而非引用「看你在全屏」
         return _AWARENESS_LINES.get(category, "")

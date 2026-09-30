@@ -3,7 +3,9 @@
 
 契约（docs/Zcode技术指导.md §16 L10）：不抓屏、不读窗口内容、不装键鼠钩子；
 返回「前台是否全屏 + 所在显示器」；NP-14 桌面感知扩展（默认关闭，DESKTOP_AWARENESS=1
-才启用）：+ 前台进程名→类别 + 输入空闲秒数，仍不读窗口标题/内容。任何失效一律
+才启用）：+ 前台进程名→类别 + 输入空闲秒数。#24 标题脱敏级（2026-09-30 拍板，
+同样默认关）：窗口标题只经 `title_context` 提取脱敏语境标签（敏感域/未知语境
+一律空串），永不透传标题原文；仍不抓屏、不读窗口内容、不装键鼠钩子。任何失效一律
 降级（全屏=False、类别=other），不隐藏由 Electron 侧的 probeError 路径负责——
 helper 拿不准时上层保守隐藏，本 helper 失效时返回 False 让上层按「未全屏」继续
 显示，避免误伤正常使用。
@@ -81,6 +83,12 @@ def probe_foreground() -> dict:
         # 仍遵守三不红线：不抓屏、不读窗口内容、不装键鼠钩子（空闲用 GetLastInputInfo）。
         result["process_name"] = _foreground_process_name(hwnd)
         result["idle_seconds"] = _input_idle_seconds()
+        # #24 标题脱敏级：读标题只为提取脱敏语境标签（敏感域/未知语境都返回空，
+        # 绝不透传标题原文）——「读窗口标题」红线从「不读」升为「读了只出标签」，
+        # 用户拍板于 2026-09-30。
+        tbuf = ctypes.create_unicode_buffer(512)
+        title = tbuf.value if u32.GetWindowTextW(hwnd, tbuf, 512) else ""
+        result["title_context"] = title_context(title, str(result.get("process_name") or ""))
         result["category"] = categorize(
             str(result.get("process_name") or ""),
             fullscreen=bool(result.get("fullscreen")),
@@ -99,6 +107,61 @@ _CODE_HINTS = ("code", "cursor", "devenv", "idea", "pycharm", "clion", "goland",
                "powershell", "pwsh", "cmd", "conhost", "wezterm", "alacritty")
 _BROWSE_HINTS = ("chrome", "msedge", "edge", "firefox", "brave", "arc", "opera")
 _IDLE_AFTER_SECONDS = 300.0
+
+# ---- #24 标题脱敏级（2026-09-30 拍板「升到标题脱敏级」）----
+# 读窗口标题只为提取「语境标签」，绝不透传标题原文：
+# 1) 敏感域命中（网银/密码/私聊/医疗/邮箱…）→ 一律返回空串，她「看不见」；
+# 2) 已知语境关键词命中 → 返回 ≤20 字的脱敏标签（"在看 B 站视频"）；
+# 3) 无命中 → 返回空串（宁缺毋滥，退回 category 五类）。
+_TITLE_SENSITIVE = (
+    "银行", "网银", "支付", "支付宝", "微信支付", "转账", "余额", "征信", "贷款",
+    "公积金", "社保", "医保", "病历", "挂号", "体检", "密码", "password", "passwd",
+    "验证", "verify", "otp", "登录", "login", "signin", "注册", "logout", "账号",
+    "邮箱", "mailbox", "inbox", "bitwarden", "1password", "keepass", "lastpass",
+    "微信", "wechat", "qq", "tim", "telegram", "discord", "whatsapp", "飞书",
+    "钉钉", "snapchat", "signal", "聊天", "消息", "私信", "brief", "无痕",
+    "incognito", "inprivate", "简历", "resume", "offer", "工资", "薪资", "报税",
+)
+_TITLE_CONTEXTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("哔哩哔哩", "bilibili", "b站", "番剧"), "在看 B 站视频"),
+    (("youtube", "油管"), "在看 YouTube 视频"),
+    (("腾讯视频", "爱奇艺", "优酷", "芒果tv", "netflix", "迪士尼"), "在看视频"),
+    (("抖音", "tiktok"), "在刷短视频"),
+    (("github", "gitee", "gitlab", "stack overflow", "stackoverflow", "csdn"), "在看技术社区"),
+    (("steam", "epic games", "育碧", "riot"), "在逛游戏商店"),
+    (("淘宝", "京东", "拼多多", "天猫", "苏宁"), "在网购"),
+    (("知乎",), "在刷知乎"),
+    (("微博",), "在刷微博"),
+    (("小红书",), "在逛小红书"),
+    (("贴吧", "豆瓣"), "在逛社区"),
+    (("word", "wps", "文档", "论文", "毕业设计", "开题", "tex", "latex"), "在看文档"),
+    (("excel", "表格", "spreadsheet", "数据透视"), "在处理表格"),
+    (("pdf", "caj"), "在读 PDF"),
+    (("figma", "即时设计", "master go"), "在做设计"),
+    (("photoshop", "ps ", "修图", "lightroom"), "在修图"),
+    (("premiere", "剪映", "达芬奇", "resolve", "剪辑"), "在剪视频"),
+    (("地图", "高德", "百度地图"), "在看地图"),
+    (("天气",), "在看天气"),
+    (("新闻", "头条", "澎湃", "参考消息"), "在看新闻"),
+)
+
+
+def title_context(title: str, process_name: str = "") -> str:
+    """窗口标题 → 脱敏语境标签（纯函数，可离线测试）。
+
+    返回空串的三种情况：无标题 / 敏感域命中 / 无已知语境命中。
+    永不返回标题原文——这是本函数的契约底线。
+    """
+    t = (title or "").strip()
+    if not t:
+        return ""
+    probe = (t + " " + (process_name or "").lower()).lower()
+    if any(k in probe for k in _TITLE_SENSITIVE):
+        return ""
+    for keys, label in _TITLE_CONTEXTS:
+        if any(k in probe for k in keys):
+            return label
+    return ""
 
 
 def categorize(process_name: str, *, fullscreen: bool, idle_seconds: float) -> str:
@@ -167,4 +230,4 @@ def _input_idle_seconds() -> float:
         return 0.0
 
 
-__all__ = ["probe_foreground", "categorize"]
+__all__ = ["probe_foreground", "categorize", "title_context"]

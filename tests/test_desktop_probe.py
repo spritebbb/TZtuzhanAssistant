@@ -18,23 +18,55 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_probe_"))
 
-from backend.core.desktop_probe import probe_foreground  # noqa: E402
+from backend.core.desktop_probe import probe_foreground, title_context  # noqa: E402
 
 
 def test_probe_real_call() -> None:
     result = probe_foreground()
-    # NP-14 桌面感知契约扩展：+ process_name / idle_seconds / category
+    # NP-14 桌面感知契约扩展：+ process_name / idle_seconds / category；
+    # #24 标题脱敏级：+ title_context（脱敏标签或空串，永不透传标题原文）
     assert set(result) == {
         "fullscreen", "display_id", "window_class",
-        "process_name", "idle_seconds", "category",
+        "process_name", "idle_seconds", "category", "title_context",
     }
     assert result["category"] in {"idle", "code", "browse", "fullscreen", "other"}
     assert isinstance(result["idle_seconds"], (int, float))
     # 测试运行时前台是终端/IDE/无人值守桌面，正常不应全屏；就算真全屏也是合法 bool
     assert isinstance(result["fullscreen"], bool)
     assert "标题" not in result["window_class"], "只允许类名，不允许标题/内容"
+    assert isinstance(result["title_context"], str) and len(result["title_context"]) <= 20
     print(f"[OK] 真实探测：fullscreen={result['fullscreen']} display={result['display_id']!r} "
-          f"class={result['window_class']!r}")
+          f"class={result['window_class']!r} ctx={result['title_context']!r}")
+
+
+def test_title_context_sanitization() -> None:
+    """#24 标题脱敏级纯函数：敏感域拦截 / 语境标签 / 宁缺毋滥三条契约。"""
+    # 敏感域 → 空串（她「看不见」），无论语境词是否同时出现
+    for sensitive in (
+        "中国银行 - 网上银行", "支付宝 - 确认转账", "微信 - 张三：明天见",
+        "QQ - 群聊", "Gmail - 收件箱", "登录 - GitHub", "体检报告.pdf",
+        "Bitwarden - 密码库", "简历_终版.docx", "InPrivate - 浏览",
+    ):
+        assert title_context(sensitive) == "", f"敏感标题必须拦截: {sensitive!r}"
+    # 已知语境 → 脱敏标签（≤20 字，不含标题原文词汇）
+    cases = {
+        "【4K】猫和老鼠 哔哩哔哩 (゜-゜)つロ 干杯~-bilibili": "在看 B 站视频",
+        "Python 教程 - YouTube": "在看 YouTube 视频",
+        "GLM-4.9 发布 - 知乎": "在刷知乎",
+        "vitejs/vite: Next generation frontend tooling - GitHub": "在看技术社区",
+        "毕业设计开题报告.docx - Word": "在看文档",
+        "Steam 社区市场": "在逛游戏商店",
+    }
+    for title, expect in cases.items():
+        got = title_context(title)
+        assert got == expect, f"{title!r} 期望 {expect!r} 实得 {got!r}"
+    # 无已知语境 → 空串（宁缺毋滥，绝不回原文）
+    assert title_context("一个完全未知的奇怪窗口标题") == ""
+    assert title_context("") == ""
+    # 长度契约：标签永不超过 20 字
+    for keys, label in __import__("backend.core.desktop_probe", fromlist=["_TITLE_CONTEXTS"])._TITLE_CONTEXTS:
+        assert len(label) <= 20
+    print("[OK] 标题脱敏：敏感拦截/语境标签/宁缺毋滥三条契约全部通过")
 
 
 def test_judgement_tolerance() -> None:
@@ -81,9 +113,10 @@ def test_api_endpoint() -> None:
 
 def main() -> None:
     test_probe_real_call()
+    test_title_context_sanitization()
     test_judgement_tolerance()
     test_api_endpoint()
-    print("\n=== L10 全屏避让探测：3 组全部通过 ===")
+    print("\n=== L10 全屏避让探测 + 标题脱敏：4 组全部通过 ===")
 
 
 if __name__ == "__main__":
