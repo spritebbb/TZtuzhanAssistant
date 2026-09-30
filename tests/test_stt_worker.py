@@ -87,8 +87,25 @@ def test_happy_path() -> None:
     ops = [e["op"] for e in events]
     assert "started" in ops and "final" in ops, f"应有 started 与 final：{ops}"
     final = next(e for e in events if e["op"] == "final")
-    assert final["request_id"] == "r1" and "3200B" in final["text"]
-    print("[OK] 正常链路：start→audio→stop→final（假转写器）")
+    # pcm16 输入经 _wav_wrap 包 44 字节 RIFF 头再喂转写器（3200 + 44 = 3244）
+    assert final["request_id"] == "r1" and "3244B" in final["text"], final["text"]
+    print("[OK] 正常链路：start→audio→stop→final（pcm16 已包 WAV 头）")
+
+
+def test_wav_wrap_header() -> None:
+    """真机 2026-09-29 实测：裸 PCM 直喂 faster-whisper 全部 InvalidDataError。
+    WAV 头必须逐字段正确（RIFF/PCM/16k/单声道/16bit），否则 PyAV 依然拒解。"""
+    import struct
+
+    pcm = b"\x01\x02" * 100
+    wav = w._wav_wrap(pcm)
+    assert wav[:4] == b"RIFF" and wav[8:12] == b"WAVE" and wav[12:16] == b"fmt "
+    assert struct.unpack("<I", wav[4:8])[0] == 36 + len(pcm)
+    fmt = struct.unpack("<HHIIHH", wav[20:36])
+    assert fmt == (1, 1, 16000, 32000, 2, 16), fmt  # PCM/mono/16k/字节率/块对齐/位深
+    assert wav[36:40] == b"data" and struct.unpack("<I", wav[40:44])[0] == len(pcm)
+    assert wav[44:] == pcm
+    print("[OK] WAV 头：44 字节 RIFF 各字段正确，pcm 原样跟随")
 
 
 def test_second_limit_exceeded() -> None:
@@ -179,12 +196,13 @@ def main() -> None:
     test_codec_roundtrip()
     test_bad_frame_header_exits()
     test_happy_path()
+    test_wav_wrap_header()
     test_second_limit_exceeded()
     test_byte_cap_exceeded()
     test_cancel_then_new_request()
     test_model_missing_and_bad_model()
     test_protocol_edges()
-    print("\n=== L09 STT worker 骨架：8 组全部通过 ===")
+    print("\n=== L09 STT worker 骨架：9 组全部通过 ===")
 
 
 if __name__ == "__main__":

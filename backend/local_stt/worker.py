@@ -106,6 +106,32 @@ Transcriber = Callable[[bytes, str, str], str]
 """转写器： (音频字节, language, 模型目录路径) -> 文本。"""
 
 
+_WAV_HEADER_LEN = 44
+
+
+def _wav_wrap(pcm: bytes, *, sample_rate: int = 16000) -> bytes:
+    """裸 PCM16 单声道 → WAV 容器字节（44 字节标准 RIFF 头）。
+
+    转写器（faster-whisper/PyAV）只认容器格式；pcm16 直通会 InvalidDataError。
+    """
+    import struct
+
+    data_len = len(pcm)
+    return (
+        b"RIFF" + struct.pack("<I", 36 + data_len) + b"WAVE"
+        + b"fmt " + struct.pack("<IHHIIHH",
+                                16,           # fmt 块长度
+                                1,            # PCM
+                                1,            # 单声道
+                                sample_rate,
+                                sample_rate * 2,  # 字节率 = rate * ch * bits/8
+                                2,            # 块对齐
+                                16)           # 位深
+        + b"data" + struct.pack("<I", data_len)
+        + pcm
+    )
+
+
 def _real_transcriber(audio: bytes, language: str, model_path: str) -> str:
     if not Path(model_path).is_dir():
         raise WorkerError("model_missing", "本地模型未下载（设置里选择并下载后才可用）")
@@ -224,12 +250,16 @@ def run_loop(
             audio = bytes(buf)
             model_path = str(active_model_path)
             lang = active_language
+            fmt = active_format
             try:
                 reset()  # 转写前清缓冲：长转写期间不占 RAM 保存原音频
                 if not audio:
                     raise WorkerError("bad_request", "本段没有音频数据")
-                # 格式直通：faster-whisper 经 PyAV 自解码任意容器，无需预转码
-                text = transcriber(audio, lang, model_path)
+                # 转写器按容器字节解码（faster-whisper 经 PyAV 自解 wav/mp3/webm…）。
+                # pcm16（前端 stt.ts 的唯一采集格式）是裸 PCM：没有 RIFF 头 PyAV
+                # 直接报 InvalidDataError——真机 2026-09-29 实测语音输入全灭根因。
+                payload = _wav_wrap(audio) if fmt == "pcm16" else audio
+                text = transcriber(payload, lang, model_path)
                 send({"op": "final", "request_id": rid, "text": text})
             except WorkerError as exc:
                 fail(rid, exc)
