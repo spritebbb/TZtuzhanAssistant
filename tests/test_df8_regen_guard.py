@@ -91,10 +91,17 @@ def test_emotion_hit_dedupe() -> None:
 
     # 同一句原文当日重复入账（连点重发场景）→ 事件记忆不增长
     mood_after_first = db.get_mood(uid)[0]
+    from backend.core.state import load_state
+
+    tension_after_first = int(load_state(uid).tension or 0)
     apply_impulse(uid, emotion_delta=10, affection_delta=0,
                   emotional_hit="被夸了", emotional_weight=0.9, text="你今天真好看")
     assert len(recall_event_memory(uid)) == 1, "同一句原文当日不得重复记成情绪事件"
     assert db.get_mood(uid)[0] > mood_after_first, "mood delta 不在去重限内（她的即时反应仍在）"
+    # M4 契约：张力不参与当日去重——「同一句话反复说，每次都更伤」
+    # （此例为正向 hit 且 delta 和为正，不涨张力属正常；负向场景由
+    #  test_m4_relationship 的连续冒犯封顶用例覆盖。）
+    assert int(load_state(uid).tension or 0) == tension_after_first
 
     # 不同原文 → 正常入账第二条
     apply_impulse(uid, emotion_delta=5, affection_delta=0,
