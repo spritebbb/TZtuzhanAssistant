@@ -11,6 +11,9 @@ vi.mock('../../api/memory', () => ({
   updateFactPinned: vi.fn(async () => undefined),
   deleteFact: vi.fn(async () => undefined),
 }))
+vi.mock('../../api/chat', () => ({
+  sendReplyFeedback: vi.fn(async () => ({ id: 5, duplicate: false })),
+}))
 
 function botMessage(explanation: Message['explanation']): Message {
   return { role: 'bot', content: '我记得你喜欢猫', ts: 1757300000, explanation }
@@ -171,5 +174,47 @@ describe('MessageBubble 记忆生命周期操作（F07）', () => {
     expect(memory.deleteFact).toHaveBeenCalledWith(42, 'v9')
     expect(wrapper.text()).toContain('这条已经删掉了')
     expect(wrapper.text()).not.toContain('用户喜欢猫')
+  })
+})
+
+describe('MessageBubble 整轮反馈按钮（38项#32）', () => {
+  it('完成的 bot 消息显示「不好」按钮：点击调反馈接口一次并进入已反馈态', async () => {
+    const wrapper = mount(MessageBubble, {
+      props: {
+        message: { role: 'bot', content: '这样处理试试', ts: 1757300000 },
+        isStreamingLast: false,
+        ttsKey: 'fb-1',
+      },
+    })
+    const btn = wrapper.get('.fbbtn')
+    expect(btn.attributes('aria-label')).toContain('不好')
+    await btn.trigger('click')
+    await flushPromises()
+    const chat = await import('../../api/chat')
+    expect(chat.sendReplyFeedback).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.fbbtn').classes()).toContain('sent')
+    // 已反馈态再点不重复调用
+    await wrapper.get('.fbbtn').trigger('click')
+    await flushPromises()
+    expect(chat.sendReplyFeedback).toHaveBeenCalledTimes(1)
+  })
+
+  it('临时轮与流式中的消息不出反馈按钮', () => {
+    const ephemeral = mount(MessageBubble, {
+      props: {
+        message: { role: 'bot', content: '不留痕回复', ephemeral: true, ts: 1757300000 },
+        isStreamingLast: false,
+        ttsKey: 'fb-2',
+      },
+    })
+    expect(ephemeral.find('.fbbtn').exists()).toBe(false)
+    const streaming = mount(MessageBubble, {
+      props: {
+        message: { role: 'bot', content: '正在写', ts: 1757300000 },
+        isStreamingLast: true,
+        ttsKey: 'fb-3',
+      },
+    })
+    expect(streaming.find('.fbbtn').exists()).toBe(false)
   })
 })

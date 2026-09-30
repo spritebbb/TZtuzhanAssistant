@@ -126,6 +126,28 @@ async function copyText(text: string) {
   }
 }
 
+// ---- 38项#32 整轮反馈：「这轮回答不好」→ reply_quality 学习候选 ----
+// 后端自己定位最近一轮（整轮方案，前端不传消息 id）；临时轮不留痕，无可锚定轮次，不显示按钮
+const feedbackSent = ref(false)
+const feedbackBusy = ref(false)
+const feedbackFailed = ref(false)
+
+async function markBadReply() {
+  if (feedbackSent.value || feedbackBusy.value) return
+  feedbackBusy.value = true
+  feedbackFailed.value = false
+  try {
+    const { sendReplyFeedback } = await import('../api/chat')
+    await sendReplyFeedback()
+    feedbackSent.value = true
+  } catch (e) {
+    feedbackFailed.value = true
+    setTimeout(() => { feedbackFailed.value = false }, 1800)
+  } finally {
+    feedbackBusy.value = false
+  }
+}
+
 // ---- 增强灯箱：预览 + 下载 ----
 const lightboxSrc = ref('')
 const lightboxAlt = ref('')
@@ -171,6 +193,8 @@ const canSpeak = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
 const canExplain = () =>
   props.message.role === 'bot' && !!props.message.explanation && !props.isStreamingLast
+const canFeedback = () =>
+  props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast && !props.message.ephemeral
 
 const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.message.image) : '')
 const whyPanelId = computed(() => `why-${props.ttsKey.replace(/[^A-Za-z0-9_-]/g, '-')}`)
@@ -262,6 +286,18 @@ const whySummary = computed(() => {
           :aria-label="copied ? '已复制这条消息' : copyFailed ? '复制失败' : '复制这条消息'"
         >
           <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+        <button
+          v-if="canFeedback()"
+          class="fbbtn"
+          :class="{ sent: feedbackSent, fail: feedbackFailed }"
+          :disabled="feedbackSent || feedbackBusy"
+          @click="markBadReply"
+          :title="feedbackSent ? '已记录，可在记忆管理「反馈记录」里查看或删除' : feedbackFailed ? '反馈失败，点击重试' : '这轮回答不好'"
+          :aria-label="feedbackSent ? '已标记这轮回答不好' : '标记这轮回答不好'"
+        >
+          <svg v-if="!feedbackSent" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0-3 3l1.9-5.8"/><path d="M13.9 3H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2.5l3.4 5.8a2 2 0 0 0 3.7-1l-.9-4.8H19a2 2 0 0 0 2-2.3l-.7-5A2 2 0 0 0 18.3 3z"/></svg>
           <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
         </button>
       </div>
@@ -493,6 +529,21 @@ const whySummary = computed(() => {
 .copybtn:hover { color: var(--primary-text); background: var(--primary-soft); }
 .copybtn.ok { color: var(--primary-text); }
 .copybtn.fail { color: var(--danger, #e08a6d); }
+/* 38项#32 整轮反馈按钮：与 TTS/复制同族的小图标按钮 */
+.fbbtn {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.fbbtn:hover:not(.sent) { color: var(--danger, #e08a6d); background: var(--primary-soft); }
+.fbbtn.sent { color: var(--text-faint); cursor: default; }
+.fbbtn.fail { color: var(--danger, #e08a6d); }
 .whybtn {
   border: none;
   background: none;

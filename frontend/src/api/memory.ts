@@ -162,3 +162,39 @@ export async function dismissPendingThought(id: number): Promise<void> {
   const response = await apiFetch(`/api/memory/pending-thoughts/${id}/dismiss`, { method: 'POST' })
   if (!response.ok) throw new Error('放下失败')
 }
+
+// ---- 38项#32 反馈记录：reply_quality 学习候选的查看 / 确认 / 删除 ----
+
+export interface LearningCandidateValue {
+  turn?: string
+  reason?: string
+  [key: string]: unknown
+}
+
+export interface LearningCandidate {
+  id: number
+  type: string
+  value: LearningCandidateValue
+  confidence: number
+  status: 'candidate' | 'active' | 'revoked' | 'expired'
+  created_at: string
+  expires_at: string | null
+}
+
+export async function getLearningCandidates(includeRevoked = false): Promise<LearningCandidate[]> {
+  const query = includeRevoked ? '?include_revoked=true' : ''
+  const response = await apiFetch(`/api/memory/learning-candidates${query}`)
+  if (!response.ok) throw new Error('反馈记录读取失败')
+  const data = await response.json()
+  return Array.isArray(data.items) ? data.items : []
+}
+
+export async function confirmLearningCandidate(id: number): Promise<void> {
+  const response = await apiFetch(`/api/memory/learning-candidates/${id}/confirm`, { method: 'POST' })
+  if (!response.ok) throw new Error('确认失败，稍后再试')
+}
+
+export async function revokeLearningCandidate(id: number): Promise<void> {
+  const response = await apiFetch(`/api/memory/learning-candidates/${id}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error(response.status === 404 ? '这条反馈不存在' : '删除失败，稍后再试')
+}

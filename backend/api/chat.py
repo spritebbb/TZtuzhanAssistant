@@ -414,3 +414,30 @@ async def api_chat_cancel(request_id: str):
         return JSONResponse({"ok": False, "error": "请求不存在或已结束"}, status_code=404)
     task.cancel()
     return {"ok": True}
+
+
+@router.post("/chat/feedback")
+async def api_chat_feedback(request: Request):
+    """38项#32 整轮反馈：「这轮回答不好」→ reply_quality 学习候选。
+
+    整轮方案（零 id 链路改造）：不收消息 id，服务端定位最近一轮
+    （userdb messages 最近 assistant 行 + 其前 user 行）后走
+    learning_pipeline.propose；候选先入账，确认权在用户（候选管理 UI），
+    V1 确认后仅入档、不自动改行为参数。body 可选 {"reason": "≤80 字"}。
+    """
+    try:
+        body = await request.json()
+        body = body if isinstance(body, dict) else {}
+    except Exception:
+        body = {}
+    reason = str(body.get("reason") or "").strip()[:80] or None
+    uid = _user_id("")
+    from ..core.learning_pipeline import LearningError, propose_reply_quality
+
+    try:
+        result = await asyncio.to_thread(propose_reply_quality, uid, reason=reason)
+    except LearningError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    if not result.get("duplicate"):
+        logger.info("[反馈] {} 标记整轮回复不佳（候选 #{}）", uid, result.get("id"))
+    return {"ok": True, **result}

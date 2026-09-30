@@ -3,8 +3,9 @@
 
 契约（docs/Zcode技术指导.md §17.2 + 总纲批次 12）：
 
-- 候选类型仅三类：``expression_preference``（表达偏好）/ ``glossary``
-  （术语）/ ``behavior_feedback``（行为解释反馈）；
+- 候选类型：``expression_preference``（表达偏好）/ ``glossary``（术语）/
+  ``behavior_feedback``（行为解释反馈）/ ``reply_quality``（38项#32 整轮
+  回复质量反馈：候选制可见性优先，V1 确认后仅入档不改行为参数）；
 - ``learning_candidates`` 状态机：candidate → active / revoked / expired；
   30 天过期；**不以沉默视为同意**；不从临时轮学习；
 - 确定性校验（无 LLM）：去重（同 user+type+规范化 value）、敏感字段拒绝、
@@ -26,7 +27,7 @@ from datetime import datetime, timedelta
 from .log import logger
 
 CANDIDATE_TYPES: tuple[str, ...] = (
-    "expression_preference", "glossary", "behavior_feedback",
+    "expression_preference", "glossary", "behavior_feedback", "reply_quality",
 )
 STATUS = ("candidate", "active", "revoked", "expired")
 EXPIRE_DAYS = 30
@@ -67,6 +68,16 @@ def _validate_value(candidate_type: str, value: dict) -> dict:
         delta = float(value.get("delta", 0))
         if abs(delta) > 0.1:
             raise LearningError("行为反馈单步超上限（±0.1）")
+    if candidate_type == "reply_quality":
+        # 38项#32 整轮反馈：turn（轮次摘要）必有，reason 可选且 ≤80 字
+        turn = str(value.get("turn") or "").strip()
+        if not turn:
+            raise LearningError("回复质量反馈缺少轮次摘要")
+        value["turn"] = turn[:160]
+        reason = str(value.get("reason") or "").strip()
+        if len(reason) > 80:
+            raise LearningError("反馈理由超过 80 字上限")
+        value["reason"] = reason
     return value
 
 
@@ -185,6 +196,45 @@ def propose_low_risk_expression(user_id: str, text: str, *,
     return confirm(user_id, result["id"])
 
 
+def propose_reply_quality(user_id: str, *, reason: str | None = None) -> dict:
+    """38项#32 整轮反馈：「这轮回答不好」→ reply_quality 候选（零 id 链路改造）。
+
+    整轮锚定（用户已拍板）：不要求前端传消息 id，直接查 userdb messages
+    定位最近一轮——最近一条 assistant 消息 + 其前最近一条 user 消息（与
+    humor_memory.record_feedback_from_reply 同样的「最近一轮」语义，但落点
+    是候选表而非进程内字典）。轮次摘要进 value；source_message_id 用该
+    assistant 消息的真实 id（propose 内 _check_source 会校验属主）。
+    reason 可选，≤80 字（按钮场景宁截勿拒，超长在入口截断）。
+    """
+    from .userdb import db
+
+    with db._lock:
+        rows = db.conn.execute(
+            "SELECT id, role, content FROM messages WHERE user_id=? "
+            "AND role IN ('user','assistant') ORDER BY id DESC LIMIT 12",
+            (user_id,),
+        ).fetchall()
+    # rows 按时间倒序：第一条 assistant 即最近一轮的回复；其后第一条
+    # id 更小的 user 行即该轮提问（找不到就标缺席，反馈照样成立）。
+    assistant = next((r for r in rows if r["role"] == "assistant"), None)
+    if assistant is None:
+        raise LearningError("还没有可以反馈的回复")
+    question = next(
+        (r for r in rows if r["role"] == "user" and int(r["id"]) < int(assistant["id"])),
+        None,
+    )
+    turn = (
+        f"他：{str(question['content'])[:60] if question else '（没找到提问）'}"
+        f"｜她：{str(assistant['content'])[:60]}"
+    )
+    value: dict = {"turn": turn}
+    clean_reason = str(reason or "").strip()[:80]
+    if clean_reason:
+        value["reason"] = clean_reason
+    return propose(user_id, "reply_quality", value,
+                   source_message_id=int(assistant["id"]), confidence=1.0)
+
+
 def confirm(user_id: str, candidate_id: int) -> dict:
     """用户确认：候选激活并路由到权威落点（P2-02 / 词汇表 / P3-05）。"""
     from .userdb import db
@@ -235,6 +285,12 @@ def _route_confirmed(user_id: str, candidate_type: str, value: dict) -> str:
         with db._lock:
             db.add_term(user_id, term, category="glossary", meaning=meaning)
         return "user_terms"
+    if candidate_type == "reply_quality":
+        # 38项#32 V1 落点 = 仅置 active 入档（候选管理 UI 可见、可审计），
+        # 不自动改任何行为参数。设计考虑：全确认制第一步是「反馈可见」——
+        # 先积累真实反馈数据，等样本足够后再决定行为修订路径（如驱动的
+        # 表达偏好/演化参数），避免用单击信号直接拨动行为造成过拟合。
+        return "archived"
     # behavior_feedback：走 P3-05 演化（参数已在 propose 时校验过白名单）
     from .persona_evolution import evolve
 
