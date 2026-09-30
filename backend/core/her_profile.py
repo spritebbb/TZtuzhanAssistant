@@ -1,62 +1,67 @@
 # -*- coding: utf-8 -*-
 """M4 双向了解：菟菚可以被了解的一面。
 
-内容严格取自 persona-菟菚.md（性格 / 喜好与厌恶 / 行为准则），只做结构化展示，
-不在运行时改写。她是稳定的人：用户可以逐渐了解她的偏好、雷区和立场；
-这些是「她的」，不会冒充用户的事实。改名或增删条目必须同步人格卡。
+内容来自人格资源 ``backend/resources/personas/<人格id>/her_profile.json``
+（schema=1，与 slices.json 同目录、随人格走）：她可以有自己的侧写，
+其他人格也可以带自己的侧写文件。结构化展示、运行时不改写——
+她是稳定的人：用户可以逐渐了解她的偏好、雷区和立场；这些是「她的」，
+不会冒充用户的事实。增删条目改资源 JSON 即可（内容仍应与人格卡保持一致）。
 """
 from __future__ import annotations
 
-HER_PROFILE: dict[str, list[str]] = {
-    "traits": [
-        "坚强坚韧、有棱角——不迎合、有自己的态度，被冒犯会直接怼回去",
-        "腹黑毒舌，爱说地狱笑话；善意玩笑用腹黑化解，恶意挑衅才尖锐回敬",
-        "独立，有自己的节奏和空间，不轻易被拿捏",
-        "平时不黏不缠；淡淡的占有欲只对在意的人偶尔露一丝",
-    ],
-    "likes": [
-        "独处、自由、不被束缚",
-        "熬夜、咖啡、冷笑话、观察人类",
-        "安静、温水",
-        "偶尔喜欢柔软温暖的东西（但不会挂在嘴边）",
-    ],
-    "dislikes": [
-        "火、喧闹、过度打扰",
-        "傻白甜式的讨好",
-        "被当软柿子捏、油腻套路",
-    ],
-    "landmines": [
-        "侮辱性或失当的称呼——会硬气拒绝，立场坚定",
-        "恶意挑衅——不留情面地回敬，就算当下忍了也会记下这笔账",
-        "越界的强迫、操控、欺骗——按她的性格产生后果",
-    ],
-    "stances": [
-        "被问是不是 AI 会大方承认，然后腹黑地把话题接下去",
-        "检验而非顺从：一句话不代表事实，不合已确立事实的说法她不会顺着演",
-        "不会为迎合对方改变自己的生活节奏",
-    ],
-}
+import json
+from pathlib import Path
 
-_PROFILE_SECTIONS = (
-    ("traits", "她的底色"),
-    ("likes", "她喜欢"),
-    ("dislikes", "她厌恶"),
-    ("landmines", "她的雷区"),
-    ("stances", "她的立场"),
-)
+from .log import logger
+
+_ROOT = Path(__file__).resolve().parents[1] / "resources" / "personas"
+
+# 缓存（人格id → (mtime, sections)）；手改资源文件无需重启进程
+_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _load_sections(profile_id: str) -> list[dict] | None:
+    path = _ROOT / profile_id / "her_profile.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    hit = _cache.get(profile_id)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("format_version") != 1:
+            raise ValueError("her_profile 资源必须是 format_version=1 的 JSON 对象")
+        raw = data.get("sections")
+        if not isinstance(raw, list):
+            raise ValueError("sections 必须是数组")
+        sections: list[dict] = []
+        for sec in raw:
+            if (
+                not isinstance(sec, dict)
+                or not isinstance(sec.get("key"), str)
+                or not isinstance(sec.get("label"), str)
+                or not isinstance(sec.get("items"), list)
+                or not all(isinstance(i, str) for i in sec["items"])
+            ):
+                raise ValueError("section 结构不合法（key/label/items 字符串数组）")
+            sections.append({"key": sec["key"], "label": sec["label"],
+                             "items": list(sec["items"])})
+    except (ValueError, OSError, json.JSONDecodeError) as e:
+        # fail-soft：资源坏了管理页显示空侧写，不拖垮接口
+        logger.warning("[侧写] her_profile 资源加载失败（{}）：{}", profile_id, str(e)[:120])
+        return None
+    _cache[profile_id] = (mtime, sections)
+    return sections
 
 
 def her_profile() -> list[dict]:
-    """返回结构化的「她的侧面」，供管理页展示；顺序稳定，便于前端渲染。
+    """返回当前人格的结构化「她的侧面」，供管理页展示；顺序稳定。
 
-    内容是菟菚的静态侧写（与 persona-菟菚.md 手工同步），只对默认人格成立；
-    其他激活人格返回空列表，避免把菟菚的性格安到别人头上。
+    资源不存在（多数非默认人格）返回空列表——不把菟菚的性格安到别人头上。
     """
-    from .persona_profiles import DEFAULT_PERSONA_ID, active_id
+    from .persona_profiles import active_id
 
-    if active_id() != DEFAULT_PERSONA_ID:
-        return []
-    return [
-        {"key": key, "label": label, "items": list(HER_PROFILE[key])}
-        for key, label in _PROFILE_SECTIONS
-    ]
+    sections = _load_sections(active_id())
+    return sections if sections else []

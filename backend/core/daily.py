@@ -671,7 +671,7 @@ async def extract_facts(user_id: str, day: date | None = None) -> None:
 
     # 复盘识别特殊日子（每天兜底：从这段对话里补录用户明确说过的日子）
     try:
-        from .date_memory import extract_from_transcript
+        from .memory.date_memory import extract_from_transcript
 
         await extract_from_transcript(user_id, transcript)
     except Exception:

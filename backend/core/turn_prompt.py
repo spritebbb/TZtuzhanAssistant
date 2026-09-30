@@ -27,7 +27,7 @@ def inject_continuation(messages: list[dict], user_id: str, prev_ts: str | None)
     if not _pipeline._long_gap(prev_ts):
         return
     try:
-        from .topic_memory import build_continuation
+        from .memory.topic_memory import build_continuation
 
         continuation = build_continuation(user_id)
         if not continuation:
@@ -57,7 +57,7 @@ async def inject_today_dates(
     """4.0 + 4.1 特殊日子：先识别本轮是否在告知/约定日子，再注入今天的日子。"""
     if not ephemeral:
         try:
-            from .date_memory import extract_from_message
+            from .memory.date_memory import extract_from_message
 
             await extract_from_message(user_id, text, mock=mock)
         except Exception:  # noqa: BLE001
@@ -329,7 +329,7 @@ async def inject_memory_block(
 
     triples: list[tuple] = []
     try:
-        from .triple_memory import format_triples as _fmt_triples, query_triples
+        from .memory.triple_memory import format_triples as _fmt_triples, query_triples
 
         # query_triples 内部含 Chroma 同步检索（vec.search）：放线程池，
         # 避免慢查询阻塞事件循环放大并发延迟

@@ -76,7 +76,7 @@ def _pipeline_patches(
     stack.enter_context(
         patch("backend.core.pipeline._needs_tool_loop", return_value=tool_loop)
     )
-    stack.enter_context(patch("backend.core.date_memory.extract_from_message", new=_empty_date_extract))
+    stack.enter_context(patch("backend.core.memory.date_memory.extract_from_message", new=_empty_date_extract))
     stack.enter_context(patch("backend.core.knowledge.recall_knowledge", return_value=[]))
     if plugin_reply is not None:
         stack.enter_context(
