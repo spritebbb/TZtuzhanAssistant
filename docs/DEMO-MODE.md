@@ -12,7 +12,7 @@
 
 | 项 | 平时 | 演示模式 |
 |---|---|---|
-| `run_command` / `run_python` / 文件写入 / `agent_run` / `agent_fanout` / `codex_run` / `dsh_run` 等 | 弹确认，60s 不响应按拒绝 | **自动放行**（日志 + 审计留痕） |
+| `run_command` / `run_python` / 文件写入 / `agent_run` / `agent_fanout` 等 | 弹确认，60s 不响应按拒绝 | **自动放行**（日志 + 审计留痕） |
 | 无前端通道（MCP 直调、后台任务）的写/命令/外部类 | 默认拒绝 | 自动放行 |
 | 危险命令（`rm -rf`、`del /f`、`shutdown`、`reg delete`…） | 直接拒绝 | **仍然拒绝** |
 | 路径白名单（项目根 + `workspace/`） | 越界拒绝 | **仍然拒绝** |

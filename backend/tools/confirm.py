@@ -181,20 +181,6 @@ def _human_message(tool: str, args: dict) -> str:
         return f"要编辑文件：`{args.get('path', '')}`"
     if tool in ("todo_delete", "todo_complete", "todo_update"):
         return f"待办操作：{tool} #{args.get('task_id', '?')}"
-    if tool == "codex_run":
-        cwd = config.agent_codex_cwd or "项目根"
-        timeout = int(config.agent_codex_timeout)
-        return (
-            f"要派发独立任务给本机 Codex CLI（工作目录：{cwd}，时限 {timeout}s）。"
-            "⚠️ 放行 = 允许 Codex 在该目录内自主执行文件读写与命令，"
-            "不受本助手的安全黑名单约束"
-        )
-    if tool == "dsh_run":
-        timeout = int(getattr(config, "agent_dsh_timeout", 120))
-        return (
-            f"要派发任务给本机 DSH CLI（时限 {timeout}s）。"
-            "⚠️ 放行 = 允许 DSH 自主执行操作，不受本助手的安全黑名单约束"
-        )
     if tool in ("agent_run", "agent_fanout"):
         p = args.get("prompt", "") or str(args.get("tasks_json", ""))
         return f"要派发外部 AI 任务：`{p[:80]}`"

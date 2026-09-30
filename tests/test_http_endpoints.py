@@ -134,12 +134,12 @@ def test_chat_sse_frame_contract() -> None:
         assert push is not None, "确认推送器未注入 SSE 上下文（current_sse_push 断线）"
         # 工具确认请求：走真实推送链路（q → SSE confirm_request 帧）
         await push({"type": "confirm_request", "request_id": "req-x",
-                    "tool": "dsh_run", "args": {"task": "x"}, "danger": "high",
+                    "tool": "agent_run", "args": {"prompt": "x"}, "danger": "high",
                     "message": "要派发外部任务", "timeout": 60})
         # 工具循环进度帧（前端气泡显示「正在思考/调用 XX」），对应 process 的
         # progress_cb 参数；未提供时跳过以兼容旧桩
         if progress_cb is not None:
-            await progress_cb({"type": "tool", "tool": "dsh_run",
+            await progress_cb({"type": "tool", "tool": "agent_run",
                                "status": "running", "message": "正在执行任务"})
         await stream_cb("你")
         await stream_cb("\x00RESET\x00")   # 重复回复重写：前端清空气泡
@@ -168,7 +168,7 @@ def test_chat_sse_frame_contract() -> None:
             assert keys == ["confirm_request", "tool", "piece", "reset",
                             "image_url", "piece", "explanation", "done"], keys
             assert frames[0]["confirm_request"]["request_id"] == "req-x"
-            assert frames[1]["tool"]["tool"] == "dsh_run"
+            assert frames[1]["tool"]["tool"] == "agent_run"
             assert frames[2]["piece"] == "你"
             assert frames[3] == {"reset": True}
             assert frames[4]["image_url"] == "/api/images/x.png"

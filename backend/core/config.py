@@ -263,21 +263,8 @@ class Config:
             1000, _env_int("AGENT_TASK_TOKEN_BUDGET", 120000)
         )
         self.agent_subagent_max_depth: int = max(1, _env_int("AGENT_SUBAGENT_MAX_DEPTH", 1))
-        # 外部 Agent 桥：Codex CLI 路径（留空则自动探测）
-        self.agent_codex_path: str = os.getenv("AGENT_CODEX_PATH", "").strip()
-        # 外部 Agent 桥：Codex profile 名（~/.codex/<name>.config.toml）
-        self.agent_codex_profile: str = os.getenv("AGENT_CODEX_PROFILE", "deepseek").strip()
-        # 外部 Agent 桥：Codex 工作目录（默认项目根）
-        self.agent_codex_cwd: str = os.getenv("AGENT_CODEX_CWD", "").strip() or str(PROJECT_ROOT)
-        # 外部 Agent 桥：Codex 单次任务超时（秒）
-        self.agent_codex_timeout: int = _env_int("AGENT_CODEX_TIMEOUT", 180)
-        # 外部 Agent 桥：DSH CLI 路径（留空则自动探测 dsh 命令）
-        self.agent_dsh_cli: str = os.getenv("AGENT_DSH_CLI", "").strip()
-        # 外部 Agent 桥：DSH headless profile 名
-        self.agent_dsh_profile: str = os.getenv("AGENT_DSH_PROFILE", "headless").strip()
-        # 外部 Agent 桥：DSH 单次任务超时（秒，默认 120；与 Codex 的
-        # agent_codex_timeout 对齐，可配置化避免长任务被硬编码超时误杀）
-        self.agent_dsh_timeout: int = _env_int("AGENT_DSH_TIMEOUT", 120)
+        # 外部 Agent 桥（codex_run/dsh_run）已于 2026-09-30 拍板删除；
+        # agent_codex_*/agent_dsh_* 配置随之移除。
         # MCP 标准通道 / 远程任务鉴权 token（空 = 仅本机）
         self.agent_remote_token: str = os.getenv("AGENT_REMOTE_TOKEN", "").strip()
         # 远程任务鉴权（来源 IP 语义）：
