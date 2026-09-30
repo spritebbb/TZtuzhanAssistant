@@ -15,11 +15,22 @@ from datetime import datetime, timedelta
 from .log import logger
 from .userdb import db
 
-_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading", "open_question_result")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选；open_question_result=G03 待查有结果
+_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading", "open_question_result", "artifact_revisit")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选；open_question_result=G03 待查有结果；artifact_revisit=38项#29 共同产物回访
 _PAUSED_READING_DAYS = 3
 _CONFIRM_MEMORY_HOURS = 2
 _THOUGHT_TTL_DAYS = 7
 _FADING_WINDOW_DAYS = 3
+# 38项#29 产物回访：共同产物完成数天后，她主动回访一次（一生一次，幂等生产者）。
+# 锚 created_at（updated_at 会被编辑刷新，回访语义锚首次完成）；30 天外的太老不回访。
+# 三类素材与 surprise._MATERIAL_TYPES 同口径（各持一份常量，避免两模块互相耦合）。
+_REVISIT_AFTER_DAYS = 3
+_REVISIT_MAX_AGE_DAYS = 30
+_REVISIT_TYPES = ("co_story", "book_summary", "goal_review")
+_REVISIT_LINES = {
+    "co_story": "你们前几天一起写下的那个故事《{title}》，她自己后来又想起它，好奇他有没有再想过里面的情节",
+    "book_summary": "前几天一起读完的那本《{title}》，她好奇他后来还翻过没有",
+    "goal_review": "前几天一起回顾过的目标「{title}」，她想知道他这些天有没有再朝那边走走",
+}
 
 
 def _now() -> str:
@@ -64,6 +75,7 @@ def sync_pending_thoughts(user_id: str) -> int:
     - confirm_memory：一天内纠偏过记忆 → 她想找时机确认现在记对了没。
     - memory_fading：有短期记忆即将到期 → 她想趁还记得再聊一次（G01 可见遗忘，
       只取非敏感元数据，不含事实原文；到期后不靠墓碑复原）。
+    - artifact_revisit：共同产物完成 3~30 天 → 她自己想起，回访一次（一生一次）。
     """
     added = 0
     now = _now()
@@ -94,6 +106,15 @@ def sync_pending_thoughts(user_id: str) -> int:
             "WHERE a.user_id = ? AND a.kind = 'goal' AND a.status IN ('active', 'paused') "
             "AND g.support_mode = 'reminder' AND g.reminder_at IS NOT NULL AND g.reminder_at <= ?",
             (user_id, now),
+        ).fetchall()
+        revisitable = db.conn.execute(
+            f"SELECT id, artifact_type, title, created_at FROM artifacts "
+            "WHERE user_id = ? AND status = 'active' "
+            f"AND artifact_type IN ({','.join('?' * len(_REVISIT_TYPES))}) "
+            "AND created_at <= ? AND created_at > ? ORDER BY created_at DESC",
+            (user_id, *_REVISIT_TYPES,
+             (datetime.now() - timedelta(days=_REVISIT_AFTER_DAYS)).isoformat(timespec="seconds"),
+             (datetime.now() - timedelta(days=_REVISIT_MAX_AGE_DAYS)).isoformat(timespec="seconds")),
         ).fetchall()
     for row in paused:
         earliest = (
@@ -128,6 +149,17 @@ def sync_pending_thoughts(user_id: str) -> int:
             f"有一条关于你的事快到保留期限了（{item['retention']}），"
             "她想趁还记得的时候再聊一次",
             earliest_at=now, priority=6, commit=False,
+        ):
+            added += 1
+    for row in revisitable:
+        # 回访锚首次完成（created_at）：到 3 天即到点，文案像「自己想起来的」，
+        # 不是提醒事项。唯一键兜底一生只回访一次（expressed/dismissed 也不再挂）。
+        line = _REVISIT_LINES.get(str(row["artifact_type"]),
+                                  "前几天你们一起留下的《{title}》，她后来又想起它")
+        if _add(
+            user_id, "artifact_revisit", "artifact", int(row["id"]),
+            line.format(title=row["title"]),
+            earliest_at=now, priority=5, commit=False,
         ):
             added += 1
     if added:
@@ -212,7 +244,7 @@ def _bigrams(text: str) -> set[str]:
 
 
 def _source_alive(user_id: str, thought: dict) -> bool:
-    """来源必须仍存在（活动/事实/开放问题/回望链）；来源消失的候选直接失效。"""
+    """来源必须仍存在（活动/事实/开放问题/回望链/共同产物）；来源消失的候选直接失效。"""
     source_type = str(thought.get("source_type") or "")
     source_id = thought.get("source_id")
     if source_id is None:
@@ -224,6 +256,16 @@ def _source_alive(user_id: str, thought: dict) -> bool:
             row = db.conn.execute(
                 "SELECT 1 FROM event_chains WHERE user_id = ? AND id = ? "
                 "AND status IN ('waiting', 'due')",
+                (user_id, int(source_id)),
+            ).fetchone()
+        return row is not None
+    if source_type == "artifact":
+        # 38项#29 产物回访：产物删除或非 active（归档/失效）即作废，
+        # 不留「惦记一个已经没了的产物」的幽灵心事。
+        with db._lock:
+            row = db.conn.execute(
+                "SELECT 1 FROM artifacts WHERE user_id = ? AND id = ? "
+                "AND status = 'active'",
                 (user_id, int(source_id)),
             ).fetchone()
         return row is not None

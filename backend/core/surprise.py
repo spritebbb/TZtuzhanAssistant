@@ -39,7 +39,11 @@ def _surprised_recently(user_id: str) -> bool:
 
 
 def _pick_material(user_id: str) -> dict | None:
-    """挑一件近期的真实共同产物；优先没用过的，其次最近更新的。"""
+    """挑一件近期的真实共同产物；优先没用过的，其次最近更新的。
+
+    38项#29 互斥：已挂过 artifact_revisit 心事的产物不再当惊喜素材——
+    防止「先回访又惊喜」撞同一产物（回访走心事链，惊喜走本链）。
+    """
     from .config import config
 
     cutoff = (datetime.datetime.now() - datetime.timedelta(
@@ -53,6 +57,14 @@ def _pick_material(user_id: str) -> dict | None:
             "ORDER BY updated_at DESC, id DESC LIMIT 10",
             (user_id, cutoff, *_MATERIAL_TYPES),
         ).fetchall()
+        revisited = db.conn.execute(
+            "SELECT DISTINCT source_id FROM pending_thoughts "
+            "WHERE user_id = ? AND kind = 'artifact_revisit' "
+            "AND source_type = 'artifact'",
+            (user_id,),
+        ).fetchall()
+    revisited_ids = {int(row["source_id"]) for row in revisited}
+    rows = [row for row in rows if int(row["id"]) not in revisited_ids]
     if not rows:
         return None
     last_id = kv_get(user_id, _LAST_SURPRISE_ARTIFACT_KEY)
