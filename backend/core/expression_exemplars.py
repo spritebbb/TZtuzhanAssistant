@@ -21,7 +21,8 @@ from pathlib import Path
 from .log import logger
 
 _ROOT = Path(__file__).resolve().parents[1] / "resources" / "personas"
-_INJECT_MAX = 2
+# 每轮注入条数：2026-09-30 用户拍板扩容（token 放开），2→4；>4 会稀释示范注意力
+_INJECT_MAX = 4
 # 情绪分档线取自 behavior.py 既有刻度（四原则·验证后落码）：高 ≥70（behavior
 # 的熟悉+正向线 behavior.py:126），低 <25（疲惫线 behavior.py:109），中为其余
 _HIGH, _MID = 70, 25
