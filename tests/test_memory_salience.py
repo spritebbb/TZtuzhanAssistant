@@ -287,7 +287,7 @@ async def test_extraction_produces_policy() -> int:
     response = {"facts": [{"content": content, "source_message_ids": ids}], "style": ""}
     with patch("backend.core.daily.chat", new=AsyncMock(return_value=json.dumps(response))), \
          patch("backend.core.vector_store.index", return_value=True), \
-         patch("backend.core.date_memory.extract_from_transcript", new=AsyncMock()):
+         patch("backend.core.memory.date_memory.extract_from_transcript", new=AsyncMock()):
         await daily.extract_facts(uid)
     fact = db.conn.execute("SELECT id FROM facts WHERE user_id=?", (uid,)).fetchone()
     policy = ms.get_policy(uid, fact["id"])
@@ -296,7 +296,7 @@ async def test_extraction_produces_policy() -> int:
     response["facts"][0].update(existing_fact_id=fact["id"], source_message_ids=more)
     with patch("backend.core.daily.chat", new=AsyncMock(return_value=json.dumps(response))), \
          patch("backend.core.vector_store.index", return_value=True), \
-         patch("backend.core.date_memory.extract_from_transcript", new=AsyncMock()):
+         patch("backend.core.memory.date_memory.extract_from_transcript", new=AsyncMock()):
         await daily.extract_facts(uid)
     assert db.conn.execute("SELECT COUNT(*) FROM facts WHERE user_id=?", (uid,)).fetchone()[0] == 1
     assert len(json.loads(ms.get_policy(uid, fact["id"])["source_message_ids"])) == 16

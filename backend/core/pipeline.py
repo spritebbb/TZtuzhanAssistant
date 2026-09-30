@@ -314,7 +314,7 @@ def _long_gap(ts: str | None) -> bool:
 async def _extract_topic_lazy(user_id: str) -> None:
     """后台惰性提炼话题记忆（失败静默，不阻塞对话）。"""
     try:
-        from .topic_memory import extract_topic
+        from .memory.topic_memory import extract_topic
 
         await extract_topic(user_id)
     except Exception:
@@ -324,7 +324,7 @@ async def _extract_topic_lazy(user_id: str) -> None:
 async def _extract_triples_lazy(user_id: str) -> None:
     """后台惰性提取结构化事实五元组（失败静默）。"""
     try:
-        from .triple_memory import extract_triples, save_triples
+        from .memory.triple_memory import extract_triples, save_triples
         from .userdb import db as _db
         from .persona_profiles import persona_name_for_user_id
 

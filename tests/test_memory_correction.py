@@ -209,7 +209,7 @@ async def test_fact_extraction_provenance() -> None:
     with (
         patch("backend.core.daily.chat", new=fake_chat),
         patch("backend.core.vector_store.index", return_value=True) as vector_index,
-        patch("backend.core.date_memory.extract_from_transcript", new=fake_date_extract),
+        patch("backend.core.memory.date_memory.extract_from_transcript", new=fake_date_extract),
     ):
         await daily.extract_facts(UID)
 

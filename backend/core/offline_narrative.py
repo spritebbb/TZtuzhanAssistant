@@ -118,7 +118,7 @@ def collect_offline_context(
     triple_lines: list[str] = []
     if triple_query is None:
         try:
-            from .triple_memory import query_triples as triple_query
+            from .memory.triple_memory import query_triples as triple_query
         except Exception:
             triple_query = None
     if triple_query and recent_user_texts:
