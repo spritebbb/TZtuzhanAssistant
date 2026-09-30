@@ -44,6 +44,10 @@ FLAG_DEFAULTS = {
     # 写 facts 新 source_type=plain_moment（低 confidence + 短保留期），
     # 不进情绪档案。2026-09-30 用户拍板（LLM 提取，默认开）。
     "plain_moments_enabled": True,
+    # 38项#22 外部素材管线：用户授权的兴趣源定期拉外部内容进主动素材池，
+    # 经统一仲裁低频分享（necessity 门槛高于心事/约定）。2026-09-30 默认开
+    #（授权与 #23 事件感同性质：有授权域、成本闸保护）。
+    "interest_feeds_enabled": True,
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。

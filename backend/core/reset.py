@@ -76,6 +76,8 @@ _TABLES = (
     "manager_memories",
     "tavern_sessions",
     "situation_files",
+    # 38项#22 兴趣源：授权清单与素材都随重置清空（用户重新授权即可重建）
+    "interest_feeds", "interest_feed_items",
 )
 
 # 无 user_id 列的传输态/运行资产表（按整体清除；素材本体在加密工作区不受影响）

@@ -862,6 +862,49 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     通用闲聊式主动仍走 _eligible_users 兜底，
     与次级源共享同一份每日额度——额度用尽后自然全部静默。
     """
+    async def _maybe_interest_share(uid: str) -> str | None:
+        """38项#22 兴趣源分享：授权源拉到的新鲜素材 → 说一句（走统一仲裁）。
+
+        necessity 门槛用次级源里偏高的 0.42（外部分享是低频点缀，不与心事/
+        约定抢额度优先级）；出牌后 mark_feed_item_used；无素材零动作。
+        """
+        from .features import flag
+        from .interest_feed import PULL_INTERVAL_HOURS  # noqa: F401（契约引用）
+        from .userdb import db
+
+        if not flag("interest_feeds_enabled"):
+            return None
+        try:
+            items = db.unused_feed_items(uid, limit=1)
+        except Exception:
+            logger.exception("[兴趣源] 素材查询失败（跳过本轮）")
+            return None
+        if not items:
+            return None
+        item = items[0]
+        item_id, content = int(item["id"]), str(item["content"])
+
+        from .expression_policy import score_necessity
+
+        # 低必要性是设计：外部分享 relevance/relationship_value 都只给中低分，
+        # 让统一仲裁的 NECESSITY_THRESHOLD 自然把它排在心事/约定之后。
+        necessity = score_necessity(
+            relevance=0.5, novelty=0.8, relationship_value=0.2, interruption_cost=0.2,
+        )
+
+        async def produce() -> str:
+            return content
+
+        return await _arbited_proactive(
+            uid,
+            source="initiative:interest_share",
+            idle_minutes=240,
+            done_today=lambda: False,
+            produce=produce,
+            necessity=necessity,
+            on_delivered=lambda: db.mark_feed_item_used(uid, item_id),
+        )
+
     async def _maybe_surprise(uid: str) -> str | None:
         from .surprise import maybe_orchestrate_surprise
 
@@ -935,6 +978,7 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         _maybe_outing_note,
         _maybe_watch_change,
         _maybe_companion_request,
+        _maybe_interest_share,   # 38项#22：排惊喜前（新素材分享让位给惊喜的仪式感）
         _maybe_surprise,
     ):
         text = await proposer(user_id)

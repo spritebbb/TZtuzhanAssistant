@@ -23,6 +23,7 @@ _FLAG_LABELS = {
     "her_statements_enabled": "她的自述：记住她亲口说过的自己的事，前后矛盾时她自己决定怎么演（不重复提起）",
     "news_digest_enabled": "事件感：每天知道一件外部世界的事，打招呼时能自然提起",
     "plain_moments_enabled": "平淡时刻：平淡但值得记的日常也会低权重记住（会随时间淡忘，不进情绪记忆）",
+    "interest_feeds_enabled": "兴趣源：按你授权的话题定期看看外面有什么新东西，偶尔讲给你听",
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
     "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",

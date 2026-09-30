@@ -35,6 +35,8 @@ EXEMPT = {
     "activity_draft_receipts", "context_lifecycle", "thought_context_receipts",
     "experience_metrics", "greeting_variant_usage", "usage_log", "wrapup_outbox",
     "document_import_jobs", "situation_files",
+    # 38项#22 兴趣源：授权清单用户可重建、素材可重拉（含外部网络内容不宜进可分享备份）
+    "interest_feeds", "interest_feed_items",
     # 后台任务认领/租约记录（pending/running/lease，无 user_id 列）
     "job_runs",
     # kv_store 不走表通道（bundle["kv"] 按 kv_registry 白名单单列）
