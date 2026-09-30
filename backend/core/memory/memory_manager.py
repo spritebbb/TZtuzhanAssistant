@@ -1,8 +1,16 @@
 """记忆管理层：提供统一记忆管理 API（添加/检索/更新/遗忘），叠加在 Chroma 之上。
 
 双通道：
-- 主通道：Mem0（高级记忆管理，带回溯/冲突解决/重要性评分/自动遗忘）
-- 回退通道：自研「基于 Chroma + LLM 的记忆管理」（无额外依赖，同样带回溯/去重/更新/遗忘）
+- 主通道（默认）：自研「基于 Chroma + SQLite 权威表的记忆管理」（无额外
+  依赖，带回溯/去重/更新/遗忘，manager_memories 表是唯一权威副本）
+- 实验通道：Mem0（MEMORY_MEM0=1 显式开启）。2026-09-30 对比实验
+  （backend/evals/memory_channel_compare.py）结论：默认关闭。原因：
+  ① 召回质量全面落后（hit@1 0.45 vs 0.85，中文输入被 LLM 提炼为英文条目，
+  且出现过「下个月三号」→当天日期的幻觉改写）；② 宣称的冲突合并实测未
+  生效（矛盾新旧并存）；③ chroma_mem0 是唯一副本、无 SQLite 权威源——
+  每日备份（excluded_rebuildable 前提不成立）、存储迁移、关系包导出
+  均不覆盖，换 embedding 模型后维度失配即坏死；④ 每条消息一次 LLM 调用。
+  保留代码供对照实验与机制参考；启用前请知悉上述限制。
 
 对外只暴露 Mem0Manager 类，调用方不感知底层实现。
 """
@@ -80,6 +88,12 @@ class Mem0Manager:
     def _ensure_ready(self):
         """惰性初始化（含降级后的冷却期自动重建）。"""
         if self._mem0 is not None:
+            return True
+        # MEMORY_MEM0=0（默认关闭）：不尝试 Mem0 初始化（避免 reset 等
+        # 无条件调用方白白拉起 Mem0 依赖链），直接用自研通道。
+        if not config.memory_mem0:
+            if self._fallback is None:
+                self._fallback = _FallbackManager()
             return True
         if self._fallback is not None:
             # 已降级到 fallback：冷却期过后尝试重建 Mem0 通道，避免"一次瞬时

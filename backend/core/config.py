@@ -116,8 +116,13 @@ class Config:
         os.environ["HF_ENDPOINT"] = self.hf_endpoint
         # 记忆引擎总开关：关闭时完全退回 SQLite + TF-IDF 行为
         self.memory_v2: bool = os.getenv("MEMORY_V2", "1") != "0"
-        # Mem0 记忆管理器开关
-        self.memory_mem0: bool = os.getenv("MEMORY_MEM0", "1") != "0"
+        # Mem0 记忆管理器开关：默认关（实验分支）。2026-09-30 对比实验
+        # （backend/evals/memory_channel_compare.py）实测 Mem0 通道召回全面
+        # 落后自研（hit@1 0.45 vs 0.85；LLM 提炼将中文改写为英文并引入日期
+        # 幻觉；矛盾新旧并存），且其 chroma_mem0 库无 SQLite 权威源——备份、
+        # 存储迁移、关系包导出均不覆盖（详见 memory_manager 模块说明）。
+        # 设 MEMORY_MEM0=1 可重新启用作对照实验。
+        self.memory_mem0: bool = os.getenv("MEMORY_MEM0", "0") != "0"
 
         # 图像生成（SiliconFlow 文生图；不配置则生图功能关闭）
         self.image_base_url: str = os.getenv("IMAGE_BASE_URL", "https://api.siliconflow.cn/v1").strip()
