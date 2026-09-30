@@ -26,7 +26,8 @@ def suite_legacy_defaults_and_explicit_model(monkeypatch) -> None:
     assert resolve_route("chat_deep").model == (llm.config.llm_model_strong or llm.config.llm_model)
     assert resolve_route("chat_routine", "explicit-model").model == "explicit-model"
     assert resolve_route("extract").base_url == resolve_route("batch_other").base_url
-    assert set(TASKS) == {"chat_routine", "chat_deep", "tool", "batch_diary", "batch_other", "extract", "judge", "vision"}
+    assert set(TASKS) == {"chat_routine", "chat_deep", "chat_expressive", "tool", "batch_diary", "batch_other", "extract", "judge", "vision"}
+    assert resolve_route("chat_expressive").model == (llm.config.llm_model_strong or llm.config.llm_model)
 
 
 def suite_endpoint_switch_fallback_and_cycle_rejection(monkeypatch) -> None:

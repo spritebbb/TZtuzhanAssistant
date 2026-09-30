@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from .config import config
 
 TASKS = (
-    "chat_routine", "chat_deep", "tool", "batch_diary",
+    "chat_routine", "chat_deep", "chat_expressive", "tool", "batch_diary",
     "batch_other", "extract", "judge", "vision",
 )
 
@@ -26,7 +26,10 @@ class Route:
 def _legacy(task: str) -> Route:
     main = Route(task, config.llm_base_url, "LLM_API_KEY", config.llm_model,
                  config.llm_timeout, config.llm_max_tokens)
-    if task == "chat_deep":
+    if task in {"chat_deep", "chat_expressive"}:
+        # chat_expressive（表达质量专项）：低频高价值出口（告别信/重逢/心事
+        # 文案等"一年说不了几百句、句句是记忆点"的场景）默认走强模型；
+        # 可用 MODEL_ROUTE_CHAT_EXPRESSIVE_* 独立覆盖端点/模型/预算。
         return replace(main, model=config.llm_model_strong or config.llm_model)
     if task in {"batch_diary", "batch_other", "extract"} and (
         config.llm_perception_model or config.llm_perception_base_url
