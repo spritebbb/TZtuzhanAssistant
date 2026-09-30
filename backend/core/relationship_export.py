@@ -42,7 +42,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
                "learning_candidates", "manager_memories", "user_preferences", "profile_evolution_log"),
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
-             "persona_evolution_log", "tavern_sessions"),
+             "persona_evolution_log", "tavern_sessions", "her_statements"),
     "tasks": ("tasks", "promises", "open_questions", "watches"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",

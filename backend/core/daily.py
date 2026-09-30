@@ -223,6 +223,15 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     await extract_promises(user_id, day, transcript)
     await extract_terms(user_id, day, transcript)
     await extract_style_map(user_id, day, transcript)
+    # 岗位三·她的自述：从当天她的消息提取第一人称自述 + 矛盾检测（fail-soft）
+    try:
+        from .her_statements import extract_her_statements
+
+        n = await extract_her_statements(user_id, day, rows)
+        if n:
+            logger.info("[自述] {} 新增 {} 条她的自述", user_id, n)
+    except Exception:  # noqa: BLE001
+        logger.exception("[自述] 提取失败（不影响批次）")
     await write_daily_diary(user_id, day, transcript)
     try:
         from .reunion import close_after_daily
