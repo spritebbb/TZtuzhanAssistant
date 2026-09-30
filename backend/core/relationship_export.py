@@ -54,6 +54,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
                "domain_trust_events", "domain_trust_snapshot", "event_chains",
                "relationship_dimension_ledger", "humor_usage"),
     "knowledge": ("kb_documents", "kb_chunks", "document_segments", "knowledge_opinions", "knowledge_opinion_sources",
+                  "knowledge_opinion_decisions",
                   "shared_resources", "resource_grants"),
     "conversations": ("messages",),
 }
@@ -131,6 +132,8 @@ _REFERENCE_RULES = (
     _rule_static("kb_chunks", "doc_id", "kb_documents"),
     _rule_static("knowledge_opinions", "document_id", "kb_documents"),
     _rule_static("knowledge_opinion_sources", "opinion_id", "knowledge_opinions"),
+    _rule_static("knowledge_opinion_decisions", "new_opinion_id", "knowledge_opinions", frozenset()),
+    _rule_static("knowledge_opinion_decisions", "target_opinion_id", "knowledge_opinions", frozenset()),
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
     # 换机漏表批（DF-1）：activity_lists 主键即 activities.id（rowid alias），
