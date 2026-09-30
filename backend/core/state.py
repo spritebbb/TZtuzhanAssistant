@@ -539,14 +539,19 @@ def apply_impulse(
         # 记忆/张力）。重发「再说一遍」不该把同一件事反复记成新的冲击——此前
         # 连点「重新生成」可以无限刷 mood、把同一段原文反复灌进情绪档案。
         # mood delta 不在此限：每轮±15 是她对这句话当下的反应，语义上成立。
+        # 键为固定名 + 值内带日期自轮转（kv 行本身按 user 隔离，键名不拼
+        # user_id/日期——按天拼键会每天泄漏一个永不清理的新行）。
         import hashlib
+        import json as _json
 
         from .userdb import kv_get, kv_set
 
-        day = datetime.now().strftime("%Y%m%d")
-        seen_key = f"emo_hit_seen:{user_id}:{day}"
+        today = datetime.now().strftime("%Y%m%d")
         try:
-            fingerprints = set((kv_get(user_id, seen_key) or "").split(",")) - {""}
+            bucket = _json.loads(kv_get(user_id, "state:emo_hit_seen") or "{}")
+            if str(bucket.get("date")) != today:
+                bucket = {}
+            fingerprints = {str(x) for x in bucket.get("fps", [])}
         except Exception:
             fingerprints = set()
         fp = hashlib.md5(
@@ -557,7 +562,9 @@ def apply_impulse(
             return load_state(user_id)
         fingerprints.add(fp)
         try:
-            kv_set(user_id, seen_key, ",".join(sorted(fingerprints))[-2000:])
+            kv_set(user_id, "state:emo_hit_seen", _json.dumps(
+                {"date": today, "fps": sorted(fingerprints)[-80:]},
+                ensure_ascii=False))
         except Exception:
             pass  # 去重记账失败不阻断情绪演化本体
 
