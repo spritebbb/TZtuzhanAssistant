@@ -558,7 +558,11 @@ def apply_impulse(
             f"{emotional_hit}\x00{text or ''}".encode("utf-8")
         ).hexdigest()[:12]
         if fp in fingerprints:
-            logger.debug("[state] 情绪事件当日已入账，跳过重复：{}", emotional_hit)
+            # 当日已入账：跳过记忆类写入（情绪记忆/档案/事件记忆），但张力
+            # 照常累积——「同一句话反复说，每次都更伤」是 M4 既有契约（连续
+            # 冒犯张力封顶 100），且张力高是双输，无刷分价值。
+            logger.debug("[state] 情绪事件当日已入账，仅跳过记忆写入：{}", emotional_hit)
+            _apply_tension(user_id, emotion_delta, affection_delta, emotional_hit, emotional_weight)
             return load_state(user_id)
         fingerprints.add(fp)
         try:
@@ -603,23 +607,38 @@ def apply_impulse(
         except Exception:
             logger.exception("[state] 事件级记忆写入失败")
 
-        # 冲突形成独立的关系张力。它不会跟随 mood 的自然漂移自动清零，必须由
-        # 后续道歉、承担责任、倾听或安抚逐步修复。
-        negative_words = ("冒犯", "冷落", "伤害", "失望", "轻视", "侮辱", "过早表白")
-        if (emotion_delta + affection_delta) < 0 or any(w in emotional_hit for w in negative_words):
-            tension = _load_tension(user_id)
-            old_level = int(tension.get("level", 0) or 0)
-            added = max(12, round(max(0.1, float(emotional_weight)) * 55))
-            tension.update({
-                "level": min(100, old_level + added),
-                "reason": emotional_hit,
-                "started_at": tension.get("started_at") or datetime.now().isoformat(timespec="seconds"),
-                "updated_at": datetime.now().isoformat(timespec="seconds"),
-                "last_repair": "",
-            })
-            _save_json_state(user_id, _TENSION_KEY, tension)
+        # 冲突形成独立的关系张力（当日重复入账也累积——见 _apply_tension 注释）
+        _apply_tension(user_id, emotion_delta, affection_delta, emotional_hit, emotional_weight)
 
     return load_state(user_id)
+
+
+def _apply_tension(
+    user_id: str,
+    emotion_delta: int,
+    affection_delta: int,
+    emotional_hit: str,
+    emotional_weight: float,
+) -> None:
+    """冲突形成独立的关系张力。它不会跟随 mood 的自然漂移自动清零，必须由
+    后续道歉、承担责任、倾听或安抚逐步修复。
+
+    不参与 DF-8 当日去重：「同一句话反复说，每次都更伤」——张力封顶 100
+    且高张力是双输状态，没有刷分价值；M4 回归（连续冒犯张力封顶）依赖此契约。
+    """
+    negative_words = ("冒犯", "冷落", "伤害", "失望", "轻视", "侮辱", "过早表白")
+    if (emotion_delta + affection_delta) < 0 or any(w in emotional_hit for w in negative_words):
+        tension = _load_tension(user_id)
+        old_level = int(tension.get("level", 0) or 0)
+        added = max(12, round(max(0.1, float(emotional_weight)) * 55))
+        tension.update({
+            "level": min(100, old_level + added),
+            "reason": emotional_hit,
+            "started_at": tension.get("started_at") or datetime.now().isoformat(timespec="seconds"),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "last_repair": "",
+        })
+        _save_json_state(user_id, _TENSION_KEY, tension)
 
 
 def pending_emotion_hits(user_id: str) -> list[dict]:
