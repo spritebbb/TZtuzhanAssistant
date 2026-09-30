@@ -159,7 +159,7 @@ def test_mood_emotion_dispatch() -> None:
         assert neutral_ref == profile["ref_path"], "缺档回退主 ref"
     happy_ref, happy_prompt = local_tts._emotion_ref(profile, "happy")
     if happy_ref != profile["ref_path"]:
-        assert happy_ref.endswith("zh-happy.wav") and "预言" in happy_prompt
+        assert happy_ref.endswith("zh-happy.wav") and "读书" in happy_prompt
     missing_ref, missing_prompt = local_tts._emotion_ref(profile, "sad")
     if not (Path("GPT-SoVITS") / "reference_audios/castorice/zh-sad.wav").is_file():
         assert missing_ref == profile["ref_path"], "缺档回退主 ref"
