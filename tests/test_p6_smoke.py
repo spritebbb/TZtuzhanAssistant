@@ -54,10 +54,18 @@ def main() -> None:
         assert r2.json()["ok"]
         print("[OK] /api/confirm 路由 + pending 计数")
 
-        # 7) 远程任务路由（空 task 应 400）
+        # 7) 远程任务路由按需注册：未配 AGENT_REMOTE_TOKEN → 404（不挂载）；
+        #    配了 token → 空 task 应 400（参数校验）
+        from backend.core.config import config as _cfg
         r = client.post("/api/remote/task", data={})
-        assert r.status_code == 400
-        print("[OK] /api/remote/task 路由")
+        if _cfg.agent_remote_token:
+            assert r.status_code == 400
+            print("[OK] /api/remote/task 路由（token 已配置）")
+        else:
+            # 未挂载时 POST 落到前端静态 catch-all → 405；两者都算「端点不存在」
+            assert r.status_code in (404, 405), \
+                f"未配 token 时 /api/remote/* 应按需不注册(404/405)，实得 {r.status_code}"
+            print("[OK] /api/remote/task 未挂载（按需注册，未配 token）")
 
     print("\n=== P6 端到端 smoke: 7 项全部通过 ===")
 

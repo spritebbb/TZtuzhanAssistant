@@ -306,7 +306,13 @@ def create_app() -> FastAPI:
     app.include_router(meta.router)
     app.include_router(personas.router)
     app.include_router(audit.router)
-    app.include_router(remote.router)
+    # MCP 对外端点按需注册（2026-09-30 拍板）：未配置 AGENT_REMOTE_TOKEN 时
+    # 不挂载 /api/remote/*（404 不可探测），配了 token 才对外提供远程任务入口
+    # （回环本机调用本就免 token，不受此影响）。
+    from .core.config import config as _cfg
+
+    if _cfg.agent_remote_token:
+        app.include_router(remote.router)
     app.include_router(config_api.router)
     app.include_router(greeting.router)
     app.include_router(initiative.router)
