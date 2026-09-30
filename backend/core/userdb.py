@@ -1195,6 +1195,13 @@ class UserDB:
                 return
             from ..storage import runtime
 
+            # P3-04 E 迁移门收口：闸门期（enable/备份的一致快照窗口）不许开
+            # 新连接。HTTP 侧已由中间件 503 挡住，但进程内后台任务（记忆迁移
+            # 批处理等）会经 db.conn 惰性重连写库，把闸门后才该有的数据带进
+            # 加密副本，manifest 等价校验随即失败。后台任务均 fail-soft，
+            # 抛错被各自 except 吞掉，稍后自然重试。
+            if runtime.migration_gate_engaged():
+                raise RuntimeError("迁移闸门期：数据库连接暂不可用（稍后重试）")
             key = runtime.database_key_or_none()
             config.data_dir.mkdir(parents=True, exist_ok=True)
             path = config.data_dir / "bot.db"
