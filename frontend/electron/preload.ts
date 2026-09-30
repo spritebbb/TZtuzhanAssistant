@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('initiative-message', listener)
     return () => ipcRenderer.removeListener('initiative-message', listener)
   },
+  // 38项#25 截图求助热键：主进程抓屏的 PNG 字节推过来（渲染侧转 File 走识图链路）
+  onHotkeyScreenshot: (cb: (shot: { buffer: ArrayBuffer; name: string }) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, shot: { buffer: ArrayBuffer; name: string }) => cb(shot)
+    ipcRenderer.on('hotkey-screenshot', listener)
+    return () => ipcRenderer.removeListener('hotkey-screenshot', listener)
+  },
 })
 
 // L09 本地语音输入：帧经主进程转发给本地 STT worker（无 shell、无任意模型路径）

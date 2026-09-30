@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell, desktopCapturer } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
 import { dirname, join, resolve } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -420,6 +420,7 @@ function saveUiPrefs(prefs: UiPrefs): void {
 }
 
 let currentHotkey = DEFAULT_HOTKEY
+const SCREENSHOT_HOTKEY = 'CommandOrControl+Alt+S'  // 38项#25 截图求助热键（固定键，避开常见截图工具的 Ctrl+Shift+S）
 
 function applyAlwaysOnTop(on: boolean): void {
   mainWindow?.setAlwaysOnTop(on)
@@ -596,6 +597,27 @@ if (!app.requestSingleInstanceLock()) {
 
     // NP-11：迷你速聊窗（懒创建；热键即时注册）
     applyMiniHotkey()
+
+    // 38项#25 截图求助热键：抓主屏 → PNG 经 IPC 给渲染进程走既有识图链路。
+    // 固定键不进偏好（低频功能不值得占设置项）；注册失败静默（键被占用不阻启动）。
+    try {
+      globalShortcut.register(SCREENSHOT_HOTKEY, async () => {
+        try {
+          const primary = require('electron').screen.getPrimaryDisplay()
+          const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { width: primary.size.width * primary.scaleFactor, height: primary.size.height * primary.scaleFactor },
+          })
+          const shot = sources[0]?.thumbnail
+          if (!shot || shot.isEmpty()) return
+          const png = shot.toPNG()
+          mainWindow?.webContents.send('hotkey-screenshot', {
+            buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
+            name: `hotkey_${Date.now()}.png`,
+          })
+        } catch { /* 抓屏失败静默：热键求助是增益功能，不弹错误打扰 */ }
+      })
+    } catch { /* 键被其他程序占用 */ }
 
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())
