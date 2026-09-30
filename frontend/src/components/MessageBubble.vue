@@ -193,8 +193,10 @@ const canSpeak = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
 const canExplain = () =>
   props.message.role === 'bot' && !!props.message.explanation && !props.isStreamingLast
+// 38项#32 整轮反馈只在数据消息（拆行组的组尾，非 continuation 续行）上露出：
+// 拆出的每行都带按钮会让「整轮评价」变成逐行评价，语义错位
 const canFeedback = () =>
-  props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast && !props.message.ephemeral
+  props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast && !props.message.ephemeral && !props.message.continuation
 
 const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.message.image) : '')
 const whyPanelId = computed(() => `why-${props.ttsKey.replace(/[^A-Za-z0-9_-]/g, '-')}`)
