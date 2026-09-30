@@ -27,12 +27,13 @@ def main() -> None:
         assert n >= 34, f"工具数应≥34: {n}"
         print(f"[OK] /api/meta: {n} 个工具元数据")
 
-        # 3) MCP /mcp/tools 含安全元数据
+        # 3) MCP /mcp/tools 含安全元数据（external 桥已删，代表换 agent_run）
         r = client.get("/mcp/tools")
         d = r.json()
         tools = d["result"]["tools"]
-        codex = next((t for t in tools if t["name"] == "codex_run"), None)
-        assert codex and codex["needsConfirm"] is True and codex["dangerLevel"] == "high"
+        agent = next((t for t in tools if t["name"] == "agent_run"), None)
+        assert agent and agent["needsConfirm"] is True
+        assert not any(t["name"] in ("codex_run", "dsh_run") for t in tools)
         print(f"[OK] /mcp/tools: {len(tools)} 个工具，含完整安全元数据")
 
         # 4) MCP 调用只读工具（system_info）

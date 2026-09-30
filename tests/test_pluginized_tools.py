@@ -25,7 +25,6 @@ EXPECTED = {
     "code_exec": {"run_python", "run_command"},
     "system": {"system_info", "list_process", "kill_process", "list_window", "activate_window",
                "open_app", "screenshot", "clipboard_get", "clipboard_set", "browser_open"},
-    "external": {"codex_run", "dsh_run"},
     "currency": {"currency_convert"},
 }
 
