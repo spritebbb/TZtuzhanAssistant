@@ -599,9 +599,11 @@ if (!app.requestSingleInstanceLock()) {
     applyMiniHotkey()
 
     // 38项#25 截图求助热键：抓主屏 → PNG 经 IPC 给渲染进程走既有识图链路。
-    // 固定键不进偏好（低频功能不值得占设置项）；注册失败静默（键被占用不阻启动）。
+    // 固定键不进偏好（低频功能不值得占设置项）；注册与触发全程打日志——
+    // 键被占用/抓屏失败必须可见（此前静默导致"无反应"无法定位）。
     try {
-      globalShortcut.register(SCREENSHOT_HOTKEY, async () => {
+      const okShot = globalShortcut.register(SCREENSHOT_HOTKEY, async () => {
+        console.log(`[截图热键] 触发：${SCREENSHOT_HOTKEY}`)
         try {
           const primary = require('electron').screen.getPrimaryDisplay()
           const sources = await desktopCapturer.getSources({
@@ -609,15 +611,21 @@ if (!app.requestSingleInstanceLock()) {
             thumbnailSize: { width: primary.size.width * primary.scaleFactor, height: primary.size.height * primary.scaleFactor },
           })
           const shot = sources[0]?.thumbnail
-          if (!shot || shot.isEmpty()) return
+          if (!shot || shot.isEmpty()) {
+            console.warn('[截图热键] 抓屏结果为空（多屏/权限异常？）')
+            return
+          }
           const png = shot.toPNG()
           mainWindow?.webContents.send('hotkey-screenshot', {
             buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
             name: `hotkey_${Date.now()}.png`,
           })
-        } catch { /* 抓屏失败静默：热键求助是增益功能，不弹错误打扰 */ }
+          console.log(`[截图热键] 已推送渲染进程 ${png.byteLength}B`)
+        } catch (e) { console.error('[截图热键] 抓屏失败:', e) }
       })
-    } catch { /* 键被其他程序占用 */ }
+      if (okShot) console.log(`[截图热键] 注册成功：${SCREENSHOT_HOTKEY}`)
+      else console.error(`[截图热键] 注册失败（键被占用？）：${SCREENSHOT_HOTKEY}`)
+    } catch (e) { console.error('[截图热键] 注册异常:', e) }
 
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow(await checkBackend())

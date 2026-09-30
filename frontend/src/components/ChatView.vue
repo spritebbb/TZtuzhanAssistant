@@ -702,11 +702,18 @@ onMounted(async () => {
   window.electronAPI?.setActiveSession(props.sessionId)
   // 订阅主进程转发的主动消息（追加气泡，与 SSE 去重）
   unsubscribeInitiativeIpc = window.electronAPI?.onInitiativeMessage((message) => handleProactiveMessage(message))
-  // 38项#25 截图求助热键：主进程抓屏推送 PNG → 转 File 走既有识图发送链路
-  // （发送前她需要看到内容，故不自动聚焦窗口——用户自己切的回来时截图已在）
+  // 38项#25 截图求助热键：主进程抓屏推送 PNG → 转 File 走既有识图发送链路。
+  // 即时处理时清 App 级暂存（两监听同触发的去重）；不在聊天页时由 App 暂存，
+  // 挂载时在此消费——按了热键切回来截图不丢。
   unsubscribeShotIpc = window.electronAPI?.onHotkeyScreenshot((shot) => {
+    ;(window as any).__pendingShot = null
     void handleImageFile(new File([shot.buffer], shot.name, { type: 'image/png' }))
   })
+  const pendingShot = (window as any).__pendingShot
+  if (pendingShot) {
+    ;(window as any).__pendingShot = null
+    void handleImageFile(new File([pendingShot.buffer], pendingShot.name, { type: 'image/png' }))
+  }
   // D11 离线补算：重开后把她离线期间的日子逐条说给你（可跳过）；不阻塞输入
   void replayOfflineRecap()
   document.addEventListener('keydown', onKeydown)
