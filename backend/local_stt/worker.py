@@ -280,6 +280,10 @@ def _default_models_dir() -> Path:
 
 
 def main() -> int:
+    # 模型按需下载走 HF（requests 系）；与后端同策略：无代理直连（core/netenv.py）
+    from ..core.netenv import force_direct_network
+
+    force_direct_network()
     sys.stdin.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stdout.reconfigure(encoding="utf-8")                    # type: ignore[union-attr]
     return run_loop(sys.stdin.buffer, sys.stdout.buffer)
