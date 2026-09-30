@@ -253,16 +253,8 @@ async def api_chat(
                     ),
                     timeout=_PROCESS_TOTAL_TIMEOUT,
                 )
-            # P3-05B 统计：本轮延迟档位（只记档位标签，不记内容；临时轮不写）
-            if not ephemeral and not mock:
-                try:
-                    from ..core.experience_metrics import record as _metric
-
-                    _elapsed = time.monotonic() - _t0
-                    _band = "<1s" if _elapsed < 1 else ("1-5s" if _elapsed < 5 else ">5s")
-                    _metric(uid, "latency", _band)
-                except Exception:
-                    pass
+            # 延迟档位由 telemetry 统一记录（chat_completed.duration_bucket），
+            # 此处不再经 experience_metrics 双记（2026-09-30 观测账本合并）。
             if not epoch_is_current(request_epoch):
                 await q.put(("__error__", "请求因重置而取消"))
                 return

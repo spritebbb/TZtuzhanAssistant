@@ -401,7 +401,7 @@ CREATE INDEX IF NOT EXISTS idx_watches_user ON watches(user_id, status);
 CREATE TABLE IF NOT EXISTS experience_metrics (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT NOT NULL,
-    kind       TEXT NOT NULL,   -- latency / rule_failure / repetition / source_pick / user_feedback
+    kind       TEXT NOT NULL,   -- rule_failure / repetition / source_pick（延迟与事件流归 telemetry）
     value      TEXT NOT NULL,   -- 档位或对象名（≤120 字，不含聊天正文）
     count      INTEGER NOT NULL DEFAULT 1,
     day        TEXT NOT NULL,

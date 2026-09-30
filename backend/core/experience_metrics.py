@@ -3,9 +3,10 @@
 
 契约（docs/Zcode技术指导.md P3-05 + 总纲批次 12）：
 
-- 只记录五类必要统计：延迟（调用耗时档）、失败规则（哪类规则失败）、重复率
-  （重复内容占比）、来源选择（各语境来源命中计数）、用户明确反馈
-  （用户主动确认/否决的信号）——不复制聊天/日记正文当遥测；
+- 2026-09-30 观测账本合并后职责边界：**延迟与全链路事件流归 telemetry**
+  （chat_completed.duration_bucket 等档位）；本表只记 telemetry 没有的
+  三类质量细粒度计数——失败规则（rule_failure）、重复率命中（repetition）、
+  语境来源选择（source_pick）——不复制聊天/日记正文当遥测；
 - 临时轮（ephemeral）不写统计；用户可在设置里关闭（`experience_metrics_enabled`
   flag）与清理（按 user 清空）；
 - 一次统计变化不自动改人格；问题候选交审，系统不以留存/依赖为目标自调参；
@@ -18,11 +19,9 @@ from datetime import datetime
 from .log import logger
 
 KINDS: tuple[str, ...] = (
-    "latency",        # value=毫秒档位标签（如 "<1s" "1-5s" ">5s"）
     "rule_failure",   # value=规则名
     "repetition",     # value=命中去重窗口
     "source_pick",    # value=来源 entry id
-    "user_feedback",  # value=confirm/reject + 对象类型
 )
 _MAX_RECENT = 200  # 每用户内存保留的最近计数窗（防止无限增长）
 
