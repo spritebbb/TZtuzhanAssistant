@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 48  # v48: 岗位二画像演变留痕（user_profile.status + profile_evolution_log）
+_SCHEMA_VERSION = 49  # v49: 岗位三她的自述（her_statements：conflict 双条并存交人格演绎）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -159,6 +159,19 @@ CREATE TABLE IF NOT EXISTS profile_evolution_log (
     reason TEXT NOT NULL,
     decided_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS profile_evolution_user ON profile_evolution_log(user_id, id);
+CREATE TABLE IF NOT EXISTS her_statements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    topic TEXT NOT NULL,            -- 岗位三：作息/饮食/研究所/过去/喜好/厌恶/立场/人际/其他
+    content TEXT NOT NULL,          -- 自述原文摘录（不改写；LLM 只做提取不做改笔）
+    message_id INTEGER,             -- 来源消息（溯源）
+    status TEXT NOT NULL DEFAULT 'active',  -- active / resolved（矛盾已交付人格层演绎）
+    conflict_group INTEGER,         -- 矛盾组号（同组=互相矛盾的陈述；NULL=无矛盾）
+    namespace TEXT NOT NULL DEFAULT 'character_fiction',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_her_statements_user ON her_statements(user_id, status);
 CREATE TABLE IF NOT EXISTS user_terms (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT NOT NULL,
@@ -1539,7 +1552,7 @@ class UserDB:
             "messages", "long_memory", "facts", "affection_log", "important_dates",
             "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
             "promises", "usage_log", "kb_documents", "kb_chunks", "activities", "activity_notes",
-            "activity_goals", "goal_progress",
+            "activity_goals", "goal_progress", "profile_evolution_log", "her_statements",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -2234,6 +2247,65 @@ class UserDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ---- 岗位三：她的自述（her_statements）----
+
+    @_locked
+    def add_her_statement(self, user_id: str, topic: str, content: str,
+                          message_id: int | None = None, *,
+                          conflict_group: int | None = None) -> int | None:
+        """存一条她的自述（原文摘录）；同主题完全同文去重。返回新 id。"""
+        content = content.strip()
+        if not content:
+            return None
+        dup = self.conn.execute(
+            "SELECT id FROM her_statements WHERE user_id=? AND topic=? AND content=?",
+            (user_id, topic, content),
+        ).fetchone()
+        if dup is not None:
+            return None
+        cur = self.conn.execute(
+            "INSERT INTO her_statements (user_id, topic, content, message_id, conflict_group, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (user_id, topic, content, message_id, conflict_group,
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    @_locked
+    def list_her_statements(self, user_id: str, *, active_only: bool = True) -> list[dict]:
+        cond = " AND status='active'" if active_only else ""
+        rows = self.conn.execute(
+            f"SELECT id, topic, content, message_id, status, conflict_group, created_at "
+            f"FROM her_statements WHERE user_id=?{cond} ORDER BY id",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @_locked
+    def next_conflict_group(self, user_id: str) -> int:
+        row = self.conn.execute(
+            "SELECT MAX(conflict_group) AS m FROM her_statements WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return int(row["m"] or 0) + 1
+
+    @_locked
+    def set_conflict_group(self, user_id: str, statement_id: int, group: int) -> None:
+        self.conn.execute(
+            "UPDATE her_statements SET conflict_group=? WHERE user_id=? AND id=?",
+            (group, user_id, statement_id),
+        )
+        self.conn.commit()
+
+    @_locked
+    def resolve_conflict_group(self, user_id: str, group: int) -> None:
+        """矛盾提示已交付人格层：整组标 resolved（一次交付，绝不反复盘问）。"""
+        self.conn.execute(
+            "UPDATE her_statements SET status='resolved' WHERE user_id=? AND conflict_group=?",
+            (user_id, group),
+        )
+        self.conn.commit()
+
     @_locked
     def del_profile(self, user_id: str, profile_id: int) -> bool:
         cur = self.conn.execute(
@@ -2458,6 +2530,7 @@ class UserDB:
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
                 "persona_evolution_log", "experience_metrics",
+                "profile_evolution_log", "her_statements",
                 "learning_candidates", "watches",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",

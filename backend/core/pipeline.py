@@ -50,6 +50,7 @@ from .turn_prompt import (
     inject_understanding,
     inject_wake_prompt,
     inject_expression_exemplars,
+    inject_her_statement_conflicts,
 )
 from .userdb import db
 
@@ -1144,6 +1145,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     inject_preference_constraints(messages, user_id)
     inject_presence(messages, user_id)
     inject_expression_exemplars(messages, user_id, stage)
+    inject_her_statement_conflicts(messages, user_id, text)
     inject_wake_prompt(messages, sleep_gate_state)
     inject_search_context(messages, search_report)
     ctx = inject_conversation_context(messages, ctx, text, merged_msg=merged_msg)

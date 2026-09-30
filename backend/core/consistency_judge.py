@@ -163,3 +163,70 @@ async def judge_profile_evolution(existing: list[dict], candidates: list[str]) -
     except Exception as e:  # noqa: BLE001
         logger.warning("[判定器] 画像演变判定失败（fail-open=全普通新增）：{}", str(e)[:120])
         return []
+
+
+_HER_STATEMENT_JUDGE_PROMPT = """她是同一个虚构人格。下面是「她已有的关于自己的陈述」（按主题分组标签标注）和
+本批「新陈述」。找出**矛盾**：新陈述与某条同主题的现有陈述说的事实不能同时成立
+（如「怕吵」vs「研究所很安静我喜欢在那补觉」）。
+
+判定纪律：
+- 只在真矛盾（同主题、事实不相容）时报；互补信息、不同角度、程度差异不算；
+- 换说法表达同一事实不算矛盾；
+- 拿不准不报（漏检安全，误报会制造不存在的人格裂缝）。
+
+她已有的陈述：
+{existing}
+
+新陈述：
+{candidates}
+
+只输出 JSON：{{"conflicts": [{{"idx": 新陈述序号从0, "with_id": 现有陈述id整数, "reason": "不超过40字"}}]}}"""
+
+
+async def judge_her_statements(existing: list[dict], candidates: list[str]) -> list[dict]:
+    """岗位三：新自述 vs 现有同主题自述的矛盾判定（一次批量）。
+
+    existing: [{"id", "topic", "content", ...}]（调用方按主题预过滤）。
+    返回 [{"idx", "with_id", "reason"}]；失败/无矛盾返回 []（fail-open）。
+    """
+    if not existing or not candidates:
+        return []
+    existing_text = "\n".join(
+        f"- [id={int(e['id'])}][主题:{e['topic']}] {str(e['content'])[:60]}" for e in existing
+    )
+    cand_text = "\n".join(f"- [idx={i}] {c[:60]}" for i, c in enumerate(candidates))
+    try:
+        from .llm import chat
+
+        resp = await chat(
+            [
+                {"role": "system", "content": _HER_STATEMENT_JUDGE_PROMPT},
+                {"role": "user",
+                 "content": f"她已有的陈述：\n{existing_text}\n\n新陈述：\n{cand_text}"},
+            ],
+            temperature=0.2,
+            max_tokens=250,
+            task="judge",
+            thinking=False,  # 小预算 JSON：思考段会吃光 max_tokens 致正文空
+        )
+        start, end = resp.find("{"), resp.rfind("}")
+        data = json.loads(resp[start:end + 1]) if 0 <= start < end else {}
+        plans = data.get("conflicts") if isinstance(data, dict) else None
+        if not isinstance(plans, list):
+            return []
+        valid_ids = {int(e["id"]) for e in existing}
+        out: list[dict] = []
+        for p in plans:
+            if not isinstance(p, dict):
+                continue
+            try:
+                idx, with_id = int(p.get("idx")), int(p.get("with_id"))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx < len(candidates) and with_id in valid_ids:
+                out.append({"idx": idx, "with_id": with_id,
+                            "reason": re.sub(r"\s+", " ", str(p.get("reason") or ""))[:100]})
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[判定器] 自述矛盾判定失败（fail-open=无矛盾入库）：{}", str(e)[:120])
+        return []

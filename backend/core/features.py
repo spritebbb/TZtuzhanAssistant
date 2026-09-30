@@ -34,6 +34,9 @@ FLAG_DEFAULTS = {
     # 表达质量专项：few-shot 对照例句（resources/personas/<id>/exemplars.json）。
     # 范文由人格作者维护，资源为空时零注入；写好后按 mtime 热加载。
     "expression_exemplars_enabled": True,
+    # 岗位三：她的自述记忆——daily 提取她的第一人称自述，矛盾双条并存，
+    # 话题相关时提示一次交人格演绎（不自动取代、不反复盘问）。
+    "her_statements_enabled": True,
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。

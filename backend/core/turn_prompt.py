@@ -539,6 +539,22 @@ def inject_expression_exemplars(messages: list[dict], user_id: str, stage: str) 
         logger.exception("[pipeline] 表达范文注入失败（不影响回复）")
 
 
+def inject_her_statement_conflicts(messages: list[dict], user_id: str, text: str) -> None:
+    """岗位三：她的自述矛盾提示（仅话题相关时一次交付；无矛盾零注入）。"""
+    try:
+        from .features import flag
+
+        if not flag("her_statements_enabled"):
+            return
+        from .her_statements import pending_conflict_hint
+
+        hint = pending_conflict_hint(user_id, text)
+        if hint:
+            messages.append({"role": "system", "content": hint})
+    except Exception:  # noqa: BLE001
+        logger.exception("[pipeline] 自述矛盾提示注入失败（不影响回复）")
+
+
 def inject_stage_transition(
     messages: list[dict], user_id: str, stage: str, *, ephemeral: bool
 ) -> None:
