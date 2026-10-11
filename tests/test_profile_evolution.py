@@ -96,10 +96,22 @@ def test_manual_immunity() -> int:
     return 0
 
 
+def test_reset_covers_profile_evolution() -> int:
+    """P1-4：画像演变留痕必须进入 reset 权威清单，否则重置后旧轨迹残留并被
+    profile_diff(since) 继续读取。"""
+    from backend.core import reset as reset_mod
+
+    assert "profile_evolution_log" in reset_mod._TABLES, \
+        "reset 权威清单必须覆盖 profile_evolution_log"
+    print("[OK] reset 清单覆盖：profile_evolution_log")
+    return 0
+
+
 def main() -> int:
     test_replace_main_path()
     test_no_evolution_and_failopen()
     test_manual_immunity()
+    test_reset_covers_profile_evolution()
     print("\n=== 岗位二·画像演变留痕：全部通过 ===")
     return 0
 

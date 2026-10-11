@@ -62,6 +62,8 @@ _TABLES = (
     "user_preferences", "event_chains",
     "reunion_arcs",
     "knowledge_opinion_sources", "knowledge_opinions",
+    # 岗位一（P1-2）：观点决策日志（append-only 审计）同样带 user_id，必须随重置清空。
+    "knowledge_opinion_decisions",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions", "greeting_variant_usage", "open_questions",
     "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
@@ -71,6 +73,9 @@ _TABLES = (
     "aesthetic_preferences", "artifact_placements",
     "shared_resources", "resource_grants",
     "persona_evolution_log", "experience_metrics",
+    # 岗位二/三（P1-2）：画像演变留痕与她的自述记忆也带 user_id——此前不在清单里，
+    # 重置后「她还记着自己的自述、演变轨迹」并继续被 prompt 注入，等于没忘干净。
+    "profile_evolution_log", "her_statements",
     "learning_candidates", "watches",
     "kb_documents", "kb_chunks", "unlocks",
     "manager_memories",

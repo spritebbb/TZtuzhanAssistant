@@ -1,6 +1,6 @@
 # 菟菚桌面助手（TZtuzhanAssistant）架构
 
-> 更新日期：2026-09-18（schema v42）。本文档描述**当前实际结构**。
+> 更新日期：2026-10-11（schema v51）。本文档描述**当前实际结构**。
 > 历史上这里曾是一份「重构计划」，写着「core 精简后 20 个模块」「移除日程/口头禅/
 > 表情收藏等 6 个模块」——那些模块后来全部按需复活，文档却一直没跟着改，
 > 于是架构文档描述的是一个不存在的系统。重写时以代码为准，并加上「如何自查」一节。
@@ -14,8 +14,8 @@ frontend/ (Electron + Vue 3 + TS / 也可纯浏览器)
     ▼
 backend/ (Python FastAPI + SQLite + Chroma)
     │
-    ├── api/          路由层：只做参数校验 + 转发（48 个模块 / 224 条路由）
-    ├── core/         对话核心（122 个模块）
+    ├── api/          路由层：只做参数校验 + 转发（52 个模块 / 240 条路由）
+    ├── core/         对话核心（121 个模块）
     ├── tools/        工具层：MCP 客户端/服务端 + 工具循环 + 加固
     ├── plugins/      插件加载器（热加载）
     ├── session/      会话存储
@@ -49,7 +49,7 @@ core/llm.py (流式 / 非流式 / 原生 Function Calling)
         └─► core/output_hygiene.py + stream_hygiene.py   输出卫生（防内部协议外泄）
         │
         ▼
-core/userdb.py (SQLite, schema v42)  ← 权威数据
+core/userdb.py (SQLite, schema v51)  ← 权威数据
 core/memory/ (Chroma 向量 + TF-IDF + Mem0)  ← 派生缓存，可重建
 ```
 
@@ -73,13 +73,13 @@ core/memory/ (Chroma 向量 + TF-IDF + Mem0)  ← 派生缓存，可重建
 | `tools/` | `core/`（只读）、`plugins/` | 绕过确认钩子执行高危动作 |
 | `plugins/` | `backend.tools.base` | 直接写 `data/` |
 
-**已知债务**：`core/` 122 个模块之间有大量函数内 import（全后端 879 处），
+**已知债务**：`core/` 121 个模块之间有大量函数内 import（全后端 879 处），
 是系统性回避循环依赖的结果。这不是风格选择，而是依赖图失控的症状；
 新增模块时应优先把共享逻辑下沉到独立模块，而不是继续加函数内 import。
 
 ## 4. 数据与状态
 
-- **权威**：`data/bot.db`（SQLite，schema v42）。所有关系、记忆、活动、事件都在这。
+- **权威**：`data/bot.db`（SQLite，schema v51）。所有关系、记忆、活动、事件都在这。
 - **派生**：`data/chroma/`（向量索引）。可随时重建，**不是**真相来源。
 - **加密**：P3-04 支持整库加密（SQLCipher + HKDF 分域派生 + AES-GCM 文件容器）。
   迁移是显式状态机（`storage/migration.py`），明文目录的删除必须由用户确认，
@@ -88,9 +88,9 @@ core/memory/ (Chroma 向量 + TF-IDF + Mem0)  ← 派生缓存，可重建
 
 ## 5. 测试与验证
 
-- 后端：`tests/` 下 148 个可独立运行的脚本，由 `tests/test_suite_runner.py` 接入
-  pytest（`pytest tests/` → 172 个用例）。每个脚本独占 `TZTUZHAN_DATA_DIR`。
-- 前端：`frontend/src/**/__tests__`（25 个文件 / 115 个用例，vitest）+ 15 个
+- 后端：`tests/` 下 199 个可独立运行的脚本，由 `tests/test_suite_runner.py` 接入
+  pytest（`pytest tests/` → 每脚本一个用例）。每个脚本独占 `TZTUZHAN_DATA_DIR`。
+- 前端：`frontend/src/**/__tests__`（43 个文件 / 219 个用例，vitest）+ 15 个
   Playwright 关键路径用例。
 - CI：`.github/workflows/regression.yml` 在后端/测试/前端变更时自动跑，
   让「全绿」由机器产出，而不是靠记忆。

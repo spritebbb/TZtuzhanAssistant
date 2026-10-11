@@ -169,6 +169,16 @@ def test_superseded_not_recalled() -> int:
     return 0
 
 
+def test_reset_covers_opinion_decisions() -> int:
+    """P1-4：观点决策日志必须进入 reset 权威清单，否则重置后判定理由残留。"""
+    from backend.core import reset as reset_mod
+
+    assert "knowledge_opinion_decisions" in reset_mod._TABLES, \
+        "reset 权威清单必须覆盖 knowledge_opinion_decisions"
+    print("[OK] reset 清单覆盖：knowledge_opinion_decisions")
+    return 0
+
+
 def main() -> int:
     test_supersede_chain()
     test_corroborate()
@@ -176,6 +186,7 @@ def main() -> int:
     test_failopen_and_invalid_target()
     test_judge_failopen_unit()
     test_superseded_not_recalled()
+    test_reset_covers_opinion_decisions()
     print("\n=== 岗位一·知识观点一致性：全部通过 ===")
     return 0
 

@@ -207,8 +207,8 @@ voice: zh-CN-XiaoyiNeural
 
 | 形态 | 适合人群 | 需要安装 | 下载 |
 |---|---|---|---|
-| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v3.1.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-v3.1.0.zip) |
-| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v3.1.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.1.0/TZtuzhanAssistant-Deploy-Full-v3.1.0-Large.zip) |
+| **① 一键部署包 · 轻量版**（推荐） | 只想快速用起来 | 仅 Python 3.11~3.13 | [下载 v3.6.0 ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.6.0/TZtuzhanAssistant-Deploy-v3.6.0.zip) |
+| **① 一键部署包 · 大杯版（Large）** | 语义记忆效果优先 | 同上，首次启动多下载 1.2GB 模型 | [下载 v3.6.0 Large ZIP](https://github.com/spritebbb/TZtuzhanAssistant/releases/download/v3.6.0/TZtuzhanAssistant-Deploy-Full-v3.6.0-Large.zip) |
 | **② 桌面安装包** | 想要 Electron 桌面窗口 | Python 3.11~3.13 + 手动启动后端 | [Setup exe](https://github.com/spritebbb/TZtuzhanAssistant/releases/latest) |
 | **③ 源码部署** | 开发者 / 想改代码 | Python + Node.js | `git clone` |
 
@@ -231,7 +231,7 @@ voice: zh-CN-XiaoyiNeural
 
 ### 步骤
 
-1. **下载**：到 [v3.1.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.1.0) 下载部署包：
+1. **下载**：到 [v3.6.0 Releases 页面](https://github.com/spritebbb/TZtuzhanAssistant/releases/tag/v3.6.0) 下载部署包：
    - `TZtuzhanAssistant-Deploy-vX.X.X.zip` — 轻量版（embedding 用 bge-small-zh-v1.5，约 100MB）
    - `TZtuzhanAssistant-Deploy-Full-vX.X.X-Large.zip` — 大杯版 / Large（embedding 用 bge-m3，约 1.2GB，语义检索效果最好）
 2. **解压**到任意目录（建议英文路径，如 `D:\Tuzhan`）。

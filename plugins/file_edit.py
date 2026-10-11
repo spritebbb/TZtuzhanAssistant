@@ -97,5 +97,8 @@ def register(ctx=None) -> None:
             "required": ["path", "old_string", "new_string"],
         },
         category="write",
+        # P1-3：与 write_file 同理——编辑可改写 plugins/*.py 或审计日志，等价任意代码
+        # 执行/痕迹清除，提升为 high 以禁用「限时免确认」豁免。
+        danger_level="high",
         needs_confirm=True,
     )

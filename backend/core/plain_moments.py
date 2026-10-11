@@ -69,6 +69,13 @@ async def extract_plain_moments(user_id: str, day: date, transcript_rows: list[d
     except Exception:
         logger.warning("[平淡时刻] {} 提取失败（跳过当日）", user_id)
         return 0
+    # P3-4：chat() 契约上恒返回 str，但异常替身/未来改动可能给出 None——此前
+    # resp.find 在 try 之外，AttributeError 会穿透出函数，与 docstring 的
+    # 「失败静默（不影响批次）」不符，且可能打断整批 daily 任务。补类型防护。
+    if not isinstance(resp, str):
+        logger.warning("[平淡时刻] {} 提取返回非文本（{}），跳过当日",
+                       user_id, type(resp).__name__)
+        return 0
     start, end = resp.find("{"), resp.rfind("}")
 
     try:

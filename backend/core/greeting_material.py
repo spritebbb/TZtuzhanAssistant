@@ -209,7 +209,8 @@ def _event_line(event_type: str, payload: dict, obj: str) -> str:
     return template.format(title=str(title)[:40])
 
 
-def _collect_activities(user_id: str, since: str, limit: int) -> list[SourceRef]:
+def _collect_activities(user_id: str, since: str, limit: int,
+                        now: datetime | None = None) -> list[SourceRef]:
     """进行中/近期暂停的活动优先——她惦记着对方正在做的事。"""
     from .userdb import db
 
@@ -233,11 +234,18 @@ def _collect_activities(user_id: str, since: str, limit: int) -> list[SourceRef]
     return out
 
 
-def _collect_events(user_id: str, since: str, limit: int) -> list[SourceRef]:
-    """近 30 天完成类关系事件；隐私非 normal 与已过期的天然被查询排除。"""
+def _collect_events(user_id: str, since: str, limit: int,
+                    now: datetime | None = None) -> list[SourceRef]:
+    """近 30 天完成类关系事件；隐私非 normal 与已过期的天然被查询排除。
+
+    P2-5：把调用方的时钟（collect_greeting_material 的 now）透传给 active_events，
+    否则「过去时刻 / 补算」调用方在这里拿到的仍是真实时钟窗口——同一批素材里
+    事件来源与其他来源的时间基准不一致。
+    """
     from .relationship_events import active_events
 
-    events = active_events(user_id, limit=max(1, int(limit)) * 3, within_days=MATERIAL_WINDOW_DAYS)
+    events = active_events(user_id, limit=max(1, int(limit)) * 3,
+                           within_days=MATERIAL_WINDOW_DAYS, now=now)
     out: list[SourceRef] = []
     for event in events:
         if str(event.get("privacy") or "normal") != "normal":
@@ -255,7 +263,8 @@ def _collect_events(user_id: str, since: str, limit: int) -> list[SourceRef]:
     return out
 
 
-def _collect_life(user_id: str, since: str, limit: int) -> list[SourceRef]:
+def _collect_life(user_id: str, since: str, limit: int,
+                  now: datetime | None = None) -> list[SourceRef]:
     """她自己的角色生活事件（虚构，明确标注，不当用户事实）。"""
     from .schedule import latest_life_event
 
@@ -273,7 +282,8 @@ def _collect_life(user_id: str, since: str, limit: int) -> list[SourceRef]:
     return out
 
 
-def _collect_news(user_id: str, since: str, limit: int) -> list[SourceRef]:
+def _collect_news(user_id: str, since: str, limit: int,
+                  now: datetime | None = None) -> list[SourceRef]:
     """当日外部世界摘要（38项#23 事件感）：有则一条，末位补充（关系素材优先）。
 
     与前三个收集器不同，news 不看 30 天窗口（``since`` 不用）——外部新闻
@@ -284,7 +294,7 @@ def _collect_news(user_id: str, since: str, limit: int) -> list[SourceRef]:
     out: list[SourceRef] = []
     if max(0, int(limit)) < 1:
         return out
-    moment = datetime.now()
+    moment = now or datetime.now()
     summary = news_line(user_id, moment.date().isoformat())
     if not summary:
         return out
@@ -314,7 +324,7 @@ def collect_greeting_material(user_id: str, now: datetime | None = None, *,
         if len(material) >= limit:
             break
         try:
-            for item in collector(user_id, since, limit - len(material)):
+            for item in collector(user_id, since, limit - len(material), moment):
                 if item.line in seen_lines:
                     continue
                 seen_lines.add(item.line)

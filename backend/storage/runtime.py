@@ -23,6 +23,9 @@ from .migration import read_journal
 
 _ENCRYPTED_STATES = {"cleanup_pending", "encrypted"}
 
+# SQLite 明文文件头；SQLCipher 加密库没有它（头部是随机盐）
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"key": None, "encrypted": None}
 
@@ -34,6 +37,21 @@ class DatabaseLockedError(RuntimeError):
 def _journal_state() -> str | None:
     journal = read_journal(Path(config_data_dir()))
     return str(journal.get("state")) if journal else None
+
+
+def _db_header_encrypted(data_dir: Path) -> bool:
+    """P3-2：库文件自描述兜底——SQLCipher 加密库没有 SQLite 明文魔数。
+
+    journal 被删/丢失/搬迁时，只靠 journal 会把加密库误判成明文，进而拿明文
+    方式去开它（「file is not a database」，错误不指向真实原因）。文件头是库
+    自身的、不依赖任何外部文件的判据。
+    """
+    try:
+        with (data_dir / "bot.db").open("rb") as fh:
+            head = fh.read(len(_SQLITE_MAGIC))
+    except OSError:
+        return False
+    return len(head) == len(_SQLITE_MAGIC) and head != _SQLITE_MAGIC
 
 
 def config_data_dir() -> Path:
@@ -50,12 +68,22 @@ def encrypted_mode() -> bool:
         stat = journal_path.stat()
         fingerprint = f"{journal_path}:{stat.st_mtime_ns}:{stat.st_size}"
     except OSError:
-        fingerprint = f"{journal_path}:missing"
+        # journal 缺失：把库文件也纳入指纹，让 P3-2 的自描述兜底随库变化刷新
+        try:
+            db_stat = (data_dir / "bot.db").stat()
+            fingerprint = f"{journal_path}:missing:{db_stat.st_mtime_ns}:{db_stat.st_size}"
+        except OSError:
+            fingerprint = f"{journal_path}:missing"
     with _cache_lock:
         if _cache["key"] != fingerprint:
             state = _journal_state()
+            if state is None:
+                # journal 不存在（被删/搬迁）：以库文件自描述为准（P3-2）
+                encrypted = _db_header_encrypted(data_dir)
+            else:
+                encrypted = state in _ENCRYPTED_STATES
             _cache["key"] = fingerprint
-            _cache["encrypted"] = state in _ENCRYPTED_STATES
+            _cache["encrypted"] = encrypted
     return bool(_cache["encrypted"])
 
 

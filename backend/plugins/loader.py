@@ -287,6 +287,27 @@ def _teardown(name: str, state: PluginState) -> None:
     _cleanup_context(name)
 
 
+def _flatten_override_chain(unloading: str, state: PluginState) -> None:
+    """P3-1：卸载插件时把它在「覆盖链」中下沉。
+
+    若别的插件记录的 ``overridden[T]`` 正是本插件的工具对象，说明该工具被本插件
+    覆盖过；本插件一走，那条快照就指向一个即将消失的对象——后继插件卸载时它的
+    owner 已 pop，恢复判定失败，**内置原版永久丢失**（A→B 加载、A→B 卸载的顺序
+    必现）。这里把后继插件的快照改记为本插件当初覆盖掉的对象（继续向下），使链上
+    每一环都指向仍然有效的对象。
+    """
+    for tname, own_tool in state.owned.items():
+        replacement = state.overridden.get(tname)  # 本插件当初覆盖的对象（builtin 或更下层）
+        for other_name, other in _PLUGIN_STATE.items():
+            if other_name == unloading:
+                continue
+            if other.overridden.get(tname) is own_tool:
+                if replacement is not None:
+                    other.overridden[tname] = replacement
+                else:
+                    other.overridden.pop(tname, None)
+
+
 def unload_plugin(name: str) -> bool:
     """卸载一个插件（移除其注册的工具并恢复被覆盖的内置工具），返回是否有工具被移除。"""
     state = _PLUGIN_STATE.get(name)
@@ -294,6 +315,7 @@ def unload_plugin(name: str) -> bool:
         return False
     removed = len(state.tools)
     if state.loaded:
+        _flatten_override_chain(name, state)
         _teardown(name, state)
     sys.modules.pop(_module_name(name), None)
     _PLUGIN_STATE.pop(name, None)

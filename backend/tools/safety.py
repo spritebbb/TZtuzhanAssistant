@@ -78,6 +78,7 @@ _BLOCK_PATTERNS = [
     re.compile(r"del\s+/s\s*/q", re.I),             # del /s /q
     re.compile(r"shutdown\b", re.I),                # 关机
     re.compile(r"reg\s+delete", re.I),              # 注册表删除
+    re.compile(r"reg\s+add\b", re.I),               # 注册表写入（P2-2：可做持久化）
     re.compile(r"diskpart\b", re.I),                # 磁盘分区
     re.compile(r"net\s+user\b", re.I),              # 用户管理
     re.compile(r"takeown\b", re.I),                 # 获取所有权
@@ -99,7 +100,16 @@ _BLOCK_PATTERNS = [
 _BLOCK_KEYWORD_PHRASES = ("sudo rm", "net stop", "sc delete", "attrib -r -s -h /s /d")
 
 # 单个命令词：词界匹配（前后不能是字母/数字，避免子串误杀）
-_BLOCK_KEYWORD_WORDS = ("wmic", "fsutil", "bcdedit", "gpedit", "vssadmin")
+# P2-2：补 LOLBin——系统自带、可下载/执行/删文件的合法程序，黑名单此前不覆盖：
+#   forfiles（forfiles /p C:\ /s /c "cmd /c del @path" 递归删除，纯黑名单绕过）
+#   certutil -urlcache -split -f <url> <file>（下载） / bitsadmin /transfer（下载）
+#   mshta <url|hta>（执行远端/本地 HTA）
+#   reg add（注册表写入，可做持久化）
+# 均为词界匹配；仓库内无任何正常命令使用这些词（grep 已核），误伤风险低。
+_BLOCK_KEYWORD_WORDS = (
+    "wmic", "fsutil", "bcdedit", "gpedit", "vssadmin",
+    "forfiles", "certutil", "bitsadmin", "mshta",
+)
 _BLOCK_WORD_PATTERN = re.compile(
     r"(?<![a-z0-9])(" + "|".join(_BLOCK_KEYWORD_WORDS) + r")(?![a-z0-9])",
     re.I,

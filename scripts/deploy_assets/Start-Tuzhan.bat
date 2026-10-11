@@ -37,7 +37,16 @@ if not exist "%VENV%\Scripts\python.exe" (
     set "PY=%VENV%\Scripts\python.exe"
 )
 
-rem ---- 3) install dependencies once ----
+rem ---- 3) install / refresh dependencies ----
+rem  The old gate was only "is fastapi importable". The documented upgrade path is to
+rem  overwrite the old folder, and the deploy package ships no .venv of its own, so a
+rem  surviving .venv skipped the whole install: dependencies added since then never
+rem  landed. cryptography is imported at module scope by backend/api/encryption.py, so
+rem  the backend process died with ImportError -- the minimized window flashed past and
+rem  the page never opened. Fix: when dependencies are already present, still run an
+rem  idempotent pip install -r. Once everything is satisfied that is a fast local no-op
+rem  and only what actually changed gets installed. No hashing, no text parsing, same
+rem  behaviour on any machine; the cost is a few extra seconds on a normal start.
 if not exist "%VENV%\Lib\site-packages\fastapi" (
     echo  [3/6] Installing Python dependencies, this may take a while...
     "%PY%" -m pip install --upgrade pip
@@ -45,7 +54,9 @@ if not exist "%VENV%\Lib\site-packages\fastapi" (
     "%PY%" -m pip install -r "%ROOT%\requirements.txt"
     if errorlevel 1 goto :pipfail
 ) else (
-    echo  [3/6] Dependencies already installed, skip.
+    echo  [3/6] Verifying Python dependencies ^(fast no-op when already satisfied^)...
+    "%PY%" -m pip install -q --disable-pip-version-check -r "%ROOT%\requirements.txt"
+    if errorlevel 1 goto :pipfail
 )
 set "PY=%VENV%\Scripts\python.exe"
 

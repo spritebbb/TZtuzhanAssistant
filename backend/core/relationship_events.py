@@ -162,21 +162,29 @@ def active_events(
     event_type: str | None = None,
     limit: int = 5,
     within_days: int | None = None,
+    now: datetime | None = None,
 ) -> list[dict]:
-    """查询有效事件：active 且未过期；within_days 限定发生时间窗口。"""
+    """查询有效事件：active 且未过期；within_days 限定发生时间窗口。
+
+    now：显式时钟基准（默认取当前时间）。P2-5：此前窗口用 datetime.now()、
+    过期比较用 _now()，调用方传入过去时刻也无从生效——任何「离线补算 / 注入
+    指定时刻」的调用方（测试、补算路径）会拿到跨来源不一致的窗口。现在两处
+    基准都接受显式 now；不传则行为与旧版一致（真实时钟）。
+    """
     limit = max(1, min(20, int(limit)))
+    clock = now or datetime.now()
     sql = (
         "SELECT id, event_type, source_type, source_id, subject, object, payload_json, "
         "confidence, privacy, occurred_at, expires_at FROM relationship_events "
         "WHERE user_id = ? AND status = 'active' "
         "AND (expires_at IS NULL OR expires_at > ?)"
     )
-    params: list[object] = [user_id, _now()]
+    params: list[object] = [user_id, clock.isoformat(timespec="seconds")]
     if event_type is not None:
         sql += " AND event_type = ?"
         params.append(event_type)
     if within_days is not None:
-        cutoff = (datetime.now() - timedelta(days=int(within_days))).isoformat(timespec="seconds")
+        cutoff = (clock - timedelta(days=int(within_days))).isoformat(timespec="seconds")
         sql += " AND occurred_at >= ?"
         params.append(cutoff)
     sql += " ORDER BY occurred_at DESC, id DESC LIMIT ?"

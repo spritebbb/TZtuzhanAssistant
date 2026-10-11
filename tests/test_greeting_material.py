@@ -225,7 +225,7 @@ def test_initiative_integration() -> int:
             (uid, NOW.isoformat(), NOW.isoformat()),
         )
         db.conn.commit()
-    msgs = initiative._build_proactive_prompt(uid)
+    msgs = initiative._build_proactive_prompt(uid, now=NOW)
     assert msgs, "应能组装主动提示"
     payload = msgs[-1]["content"]
     assert "深夜食堂" in payload, "主动消息应复用问候素材"
@@ -233,7 +233,7 @@ def test_initiative_integration() -> int:
     assert variant_id, "应记录选中的变体 id 供冷却登记"
     with patch("backend.core.initiative.chat", new=AsyncMock(return_value="刚翻到一条有意思的")), \
          patch("backend.core.llm.chat", new=AsyncMock(return_value="刚翻到一条有意思的")):
-        text = asyncio.run(initiative.generate_proactive_message(uid))
+        text = asyncio.run(initiative.generate_proactive_message(uid, now=NOW))
     assert text
     assert db.conn.execute(
         "SELECT COUNT(*) n FROM greeting_variant_usage WHERE user_id=? AND variant_id=?",

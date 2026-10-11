@@ -17,6 +17,27 @@ _PERSONA_FULL = Path(__file__).resolve().parents[2] / "assets" / "hotaru_v1_noha
 _PERSONA_STATES = Path(__file__).resolve().parents[2] / "assets" / "persona_states"
 _PERSONA_STATE_NAMES = {"low", "plain", "lazy", "happy", "excited"}
 
+# 全局立绘回退链：按优先级取第一个存在的文件。前两项是「私人图片资产」（被
+# .gitignore 排除，只在开发机主检出存在），后两项随仓库分发。P3-5：此前只回退
+# _PERSONA_FULL，新克隆 / worktree / CI 上该文件不存在 → /persona/full 与
+# /persona/cutout 必 404（发布包用 robocopy 拷磁盘 assets/ 反而带得上，于是
+# 「从源码构建」与「发布物」不等价）。补仓库内资产兜底，任何检出都有图。
+_GLOBAL_PORTRAIT_FALLBACKS = (
+    _PERSONA_FULL,
+    _PERSONA_CUTOUT,
+    _PERSONA_STATES / "plain.png",
+    _PERSONA_IMG,
+)
+
+
+def _global_portrait() -> Path | None:
+    """全局立绘：回退链里第一个存在的文件；全部缺失返回 None。"""
+    for path in _GLOBAL_PORTRAIT_FALLBACKS:
+        if path.exists():
+            return path
+    return None
+
+
 router = APIRouter(tags=["images"])
 
 
@@ -53,8 +74,9 @@ async def persona_image():
 @router.get("/persona/cutout")
 async def persona_cutout():
     """菟菚透明半身立绘（抠图，用于头像/侧栏）。"""
-    if _PERSONA_CUTOUT.exists():
-        return FileResponse(_PERSONA_CUTOUT, media_type="image/png")
+    path = _global_portrait()
+    if path is not None:
+        return FileResponse(path, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 
@@ -68,8 +90,9 @@ async def persona_full():
     active = _active_portrait("plain")
     if active is not None:
         return FileResponse(active, media_type="image/png")
-    if _PERSONA_FULL.exists():
-        return FileResponse(_PERSONA_FULL, media_type="image/png")
+    path = _global_portrait()
+    if path is not None:
+        return FileResponse(path, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 
@@ -99,8 +122,9 @@ async def persona_full_state(state: str):
     path = _PERSONA_STATES / f"{state}.png"
     if path.exists():
         return FileResponse(path, media_type="image/png")
-    if _PERSONA_FULL.exists():
-        return FileResponse(_PERSONA_FULL, media_type="image/png")
+    fallback = _global_portrait()
+    if fallback is not None:
+        return FileResponse(fallback, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 

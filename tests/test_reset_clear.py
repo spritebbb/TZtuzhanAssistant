@@ -192,6 +192,55 @@ def test_shallow_reset_keeps_archives_and_referenced_media() -> int:
     return 0
 
 
+def test_reset_clears_worker_tables() -> int:
+    """P1-2/P1-4：三张带 user_id 的岗位表（画像演变留痕 / 她的自述 / 观点决策日志）
+    此前不在 _TABLES 里，重置后旧行残留且继续被消费。锁成回归。"""
+    from backend.core import reset as reset_mod
+    from backend.core.persona_profiles import active_user_id
+    from backend.core.userdb import db
+
+    uid = active_user_id()
+    db.ensure_user(uid)
+    tables = ("profile_evolution_log", "her_statements", "knowledge_opinion_decisions")
+    with db._lock:
+        db.conn.execute(
+            "INSERT INTO profile_evolution_log "
+            "(user_id, category, old_id, old_content, new_id, new_content, op, reason, decided_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (uid, "habits", 1, "旧条目", 2, "新条目", "replace", "测试", "2026-10-11T00:00:00"),
+        )
+        db.conn.execute(
+            "INSERT INTO her_statements "
+            "(user_id, topic, content, message_id, status, namespace, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (uid, "喜好", "我喜欢雨天", None, "active", "character_fiction", "2026-10-11T00:00:00"),
+        )
+        db.conn.execute(
+            "INSERT INTO knowledge_opinion_decisions "
+            "(user_id, new_opinion_id, target_opinion_id, action, reason, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (uid, 1, None, "add", "测试", "2026-10-11T00:00:00"),
+        )
+        db.conn.commit()
+
+    def _count(table: str) -> int:
+        return int(db.conn.execute(
+            f"SELECT COUNT(*) AS n FROM {table} WHERE user_id=?", (uid,)
+        ).fetchone()["n"])
+
+    # 前置：每张表确实有 1 行，否则后面的「归零」断言等于没测
+    for table in tables:
+        assert _count(table) == 1, f"测试前置失败：{table} 应有 1 行"
+
+    stats = asyncio.run(reset_mod.reset_everything(deep=False))
+    assert stats["ok"], f"重置应整体成功：{stats['failures']}"
+
+    for table in tables:
+        assert _count(table) == 0, f"重置后 {table} 仍有残留（{_count(table)} 行）"
+    print("[OK] 重置清空三张岗位表（画像演变 / 她的自述 / 观点决策）")
+    return 0
+
+
 def main() -> int:
     os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_reset_"))
     failed = (
@@ -199,6 +248,7 @@ def main() -> int:
         + test_media_sweep_keeps_still_referenced_files()
         + test_deep_reset_clears_mem0_media_archives_backups()
         + test_shallow_reset_keeps_archives_and_referenced_media()
+        + test_reset_clears_worker_tables()
     )
     if failed:
         print(f"\n=== 重置清除覆盖：{failed} 项失败 ===")

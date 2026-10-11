@@ -105,13 +105,31 @@ function checkBackend(): Promise<boolean> {
   })
 }
 
-/** 是否是应用自身的页面（后端同源页 / 开发服务器）。 */
+/** 是否是应用自身的页面（后端同源页 / 开发服务器）。
+ *
+ * P2-3：此前用字符串前缀匹配，`http://127.0.0.1:8801@evil.com/x` 的
+ * startsWith(BACKEND_HOST) 为 true（@ 前是 userinfo），但 URL 解析出的 host
+ * 实为 evil.com、origin 为 http://evil.com。于是它被当内链，走
+ * setWindowOpenHandler 的 downloadURL 分支 → 无提示下载攻击者主机的文件。
+ * 改用 origin 精确比较（origin 不含 userinfo/路径/查询，无法被前缀骗过）。
+ * data: 仍不视为内链：内部兜底页经 loadURL 加载，本就不触发 will-navigate。 */
 function isInternalUrl(url: string): boolean {
-  // data: 不再视为内链（P2：data: 放行 will-navigate 与「外链交系统浏览器」
-  // 相悖；内部兜底页经 loadURL 加载，本就不触发 will-navigate）
-  if (url.startsWith(BACKEND_HOST)) return true
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  const internal = new Set<string>([new URL(BACKEND_HOST).origin])
   const dev = process.env.VITE_DEV_SERVER_URL
-  return !!dev && url.startsWith(dev)
+  if (dev) {
+    try {
+      internal.add(new URL(dev).origin)
+    } catch {
+      // 开发服务器地址非法时忽略该来源
+    }
+  }
+  return internal.has(parsed.origin)
 }
 
 /** 外链协议白名单（P2 纵深防御）：只放行 web/邮件协议，file:、ms-*:、

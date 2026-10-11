@@ -121,6 +121,10 @@ def register(ctx=None) -> None:
             "required": ["path", "content"],
         },
         category="write",
+        # P1-3：写文件等价于任意代码/审计改写（可覆写 plugins/*.py 触发热加载执行、
+        # 或清 data/tool_log.jsonl 抹掉痕迹），提升为 high——grace 契约里 high/critical
+        # 永不豁免，前端也不显示「限时免确认」按钮。
+        danger_level="high",
         needs_confirm=True,
     )
     ToolRegistry.register_func(

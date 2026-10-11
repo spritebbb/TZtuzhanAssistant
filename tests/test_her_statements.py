@@ -110,10 +110,21 @@ def test_conservative_extraction() -> int:
     return 0
 
 
+def test_reset_covers_her_statements() -> int:
+    """P1-4：她的自述记忆必须进入 reset 权威清单，否则重置后自述仍在库并被
+    inject_her_statement_conflicts 当演绎提示注入 prompt。"""
+    from backend.core import reset as reset_mod
+
+    assert "her_statements" in reset_mod._TABLES, "reset 权威清单必须覆盖 her_statements"
+    print("[OK] reset 清单覆盖：her_statements")
+    return 0
+
+
 def main() -> int:
     test_extract_conflict_and_hint()
     test_no_conflict_and_failopen()
     test_conservative_extraction()
+    test_reset_covers_her_statements()
     print("\n=== 岗位三·她的自述记忆：全部通过 ===")
     return 0
 

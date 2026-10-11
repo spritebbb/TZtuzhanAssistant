@@ -22,10 +22,17 @@ from backend.core import config as _config  # noqa: E402
 
 async def _run_tick_with_probe(probe_ret: dict) -> int:
     """以给定探测结果跑一轮 _tick_once，返回其返回值。"""
-    _config.desktop_awareness = True
+    # desktop_awareness 是 Config **单例**的属性，initiative 读的正是单例
+    # （initiative.py 顶部 `from .config import config`）。此前这里写的是
+    # `_config.desktop_awareness = True`（_config 是模块）——只在模块上新建了一个
+    # 影子属性，单例上的值仍是 False，于是探测分支永不执行、断言必然失败
+    # （2026-10-11 审计 P2-4：38项#31 的「2/2 全绿」无法复现）。改设单例并保存/还原原值。
+    singleton = _config.config
+    prev_awareness = singleton.desktop_awareness
+    singleton.desktop_awareness = True
+
     initiative._last_global_run = 0.0  # 绕开全局冷却门
     initiative._soft_focus_active = False
-    orig = initiative.probe_foreground if hasattr(initiative, "probe_foreground") else None
     import backend.core.desktop_probe as dp
 
     dp_orig = dp.probe_foreground
@@ -34,7 +41,7 @@ async def _run_tick_with_probe(probe_ret: dict) -> int:
         return await initiative._tick_once()
     finally:
         dp.probe_foreground = dp_orig
-        _config.desktop_awareness = False
+        singleton.desktop_awareness = prev_awareness
 
 
 def test_bump_semantics() -> int:

@@ -117,10 +117,24 @@ def test_empty_and_llm_failure_silent() -> int:
     return 0
 
 
+def test_non_text_response_is_silent() -> int:
+    """P3-4：chat() 返回非文本（None）时不得让 AttributeError 穿透——docstring
+    承诺「失败静默」，否则会打断整批 daily 任务。"""
+    from backend.core import plain_moments as pm
+
+    rows = _rows(_pairs(8))
+    with patch("backend.core.llm.chat", new=AsyncMock(return_value=None)):
+        n = _run(pm.extract_plain_moments(UID, DAY, rows))
+    assert n == 0, "非文本返回应按失败静默处理，返回 0"
+    print("[OK] 非文本返回（None）失败静默，不穿透异常")
+    return 0
+
+
 def main() -> int:
     test_flag_off_and_too_quiet()
     test_extract_writes_low_weight_facts()
     test_empty_and_llm_failure_silent()
+    test_non_text_response_is_silent()
     print("\n=== 38项#26 平淡时刻入账：全部通过 ===")
     return 0
 

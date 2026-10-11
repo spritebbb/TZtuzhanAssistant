@@ -135,9 +135,19 @@ class ConfirmService:
 # 敏感参数名（展示时脱敏）
 _SENSITIVE = ("api_key", "token", "password", "secret", "authorization", "key")
 
+# 展示上限（仅防病态超长；正常命令/代码远低于此）。P2-1
+_MAX_DISPLAY_CHARS = 8000
+
 
 def _display_args(args: dict) -> dict:
-    """确认框展示用参数：递归敏感键脱敏、超长值截断（P3-22 同 audit）。"""
+    """确认框展示用参数：递归敏感键脱敏、超长值保留头尾。
+
+    P2-1：此前 >200 字符只留前 200，而 run_command 把**整条原文**交给 cmd /c——
+    确认框看不到的尾部可能藏着真正要执行的第二个动作（`A & B` 的 B），等于
+    「展示 A、执行 A+B」，用户点「允许」时并不知道自己批了什么。现在正常长度
+    原样展示（不丢尾部），只有病态超长才保留头尾并标注省略量。
+    注意：本函数只用于展示；实际执行用的是原始 args（见 ConfirmService.request）。
+    """
 
     def _walk(value, depth: int = 0):
         if depth > 6:
@@ -152,8 +162,12 @@ def _display_args(args: dict) -> dict:
             return out
         if isinstance(value, list):
             return [_walk(v, depth + 1) for v in value[:20]]
-        if isinstance(value, str) and len(value) > 200:
-            return value[:200] + f"...({len(value)}字符)"
+        if isinstance(value, str) and len(value) > _MAX_DISPLAY_CHARS:
+            head = _MAX_DISPLAY_CHARS // 2
+            tail = _MAX_DISPLAY_CHARS - head
+            return (value[:head]
+                    + f"\n…（已省略 {len(value) - _MAX_DISPLAY_CHARS} 字符）…\n"
+                    + value[-tail:])
         return value
 
     return _walk(args or {})
@@ -165,7 +179,8 @@ def _human_message(tool: str, args: dict) -> str:
     # 常用工具的可读文案
     if tool == "run_command":
         cmd = args.get("command", "")
-        return f"要执行系统命令：`{cmd[:80]}`"
+        # P2-1：不再截到 80 字符——文案必须与将要执行的整条命令一致
+        return f"要执行系统命令：`{cmd}`"
     if tool == "run_python":
         code = args.get("code", "")
         # 展示代码摘要（前 200 字符），让用户能审阅要执行的代码

@@ -186,10 +186,45 @@ def _api_part(root: Path):
     print("[OK] P2 reload + 404 边界")
 
 
+async def _override_chain_part(root: Path):
+    """P3-1：两个插件先后覆盖同一内置工具，按加载顺序卸载也必须恢复内置原版。
+
+    旧实现下：X 先卸载后其状态被 pop，Y 记录的 overridden 快照指向 X 的工具，
+    卸载 Y 时 owner_ok 判定失败 → 内置原版永久丢失（工具名从注册表消失）。
+    """
+    for tag, desc in (("plug_x", "X版"), ("plug_y", "Y版")):
+        (root / f"{tag}.py").write_text(
+            "from backend.tools.base import ToolRegistry\n"
+            "def register():\n"
+            f"    ToolRegistry.register_func(name='test_chain_tool', description='{desc}',\n"
+            f"        func=lambda **kw: '{tag}', is_async=False,\n"
+            "        input_schema={'type': 'object', 'properties': {}})\n",
+            encoding="utf-8")
+
+    builtin = FunctionTool(
+        name="test_chain_tool", description="内置原版",
+        func=lambda **kw: "builtin", is_async=False,
+        input_schema={"type": "object", "properties": {}}, owner="builtin")
+    ToolRegistry.register(builtin)
+
+    assert loader.load_plugin(root / "plug_x.py") == "plug_x"
+    assert loader.load_plugin(root / "plug_y.py") == "plug_y"
+    assert ToolRegistry.get("test_chain_tool").owner == "plug_y"
+
+    # 关键顺序：先卸 X（下层），再卸 Y（上层）
+    loader.unload_plugin("plug_x")
+    assert ToolRegistry.get("test_chain_tool").owner == "plug_y", "卸 X 不应动到 Y 的工具"
+    loader.unload_plugin("plug_y")
+    assert ToolRegistry.get("test_chain_tool") is builtin, \
+        "两个插件按加载顺序卸载后必须恢复内置原版（覆盖链不得断）"
+    print("[OK] P3-1 覆盖链：两插件同名覆盖，按序卸载仍恢复内置原版")
+
+
 def _cleanup(root: Path):
-    for n in ("plug_a", "plug_b", "plug_c"):
+    for n in ("plug_a", "plug_b", "plug_c", "plug_x", "plug_y"):
         loader.unload_plugin(n)
     ToolRegistry.unregister("test_overridden_tool")
+    ToolRegistry.unregister("test_chain_tool")
 
 
 def main():
@@ -204,6 +239,7 @@ def main():
     loader._STATE_FILE = root / "plugins_state.json"
     try:
         asyncio.run(_async_part(root))
+        asyncio.run(_override_chain_part(root))
         _api_part(root)
     finally:
         _cleanup(root)

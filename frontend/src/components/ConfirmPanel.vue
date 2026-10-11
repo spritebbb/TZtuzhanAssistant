@@ -94,6 +94,23 @@ function dangerLabel(d: string): string {
   if (d === 'normal') return '⚡ 常规'
   return 'ℹ️ 信息'
 }
+
+// P2-1：确认框必须能看全将要执行的内容。此前 .arg-val 固定 max-height:60px 硬裁且
+// 没有展开入口，长命令的尾部（真正要执行的第二个动作）用户根本看不到。改为长值默认
+// 折叠、可展开；展开状态按 (request_id, 参数名) 记录。
+const expanded = ref<Set<string>>(new Set())
+function argKey(rid: string, k: string): string {
+  return `${rid}:${k}`
+}
+function isLongArg(v: unknown): boolean {
+  return typeof v === 'string' && (v.length > 160 || v.includes('\n'))
+}
+function toggleArg(key: string): void {
+  const next = new Set(expanded.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expanded.value = next
+}
 </script>
 
 <template>
@@ -108,7 +125,15 @@ function dangerLabel(d: string): string {
       <div class="confirm-args" v-if="Object.keys(pr.args).length > 0">
         <div class="arg-row" v-for="(v, k) in pr.args" :key="k">
           <span class="arg-key">{{ k }}:</span>
-          <span class="arg-val">{{ v }}</span>
+          <div class="arg-body">
+            <span class="arg-val" :class="{ clamped: isLongArg(v) && !expanded.has(argKey(pr.request_id, String(k))) }">{{ v }}</span>
+            <button
+              v-if="isLongArg(v)"
+              type="button"
+              class="arg-toggle"
+              @click="toggleArg(argKey(pr.request_id, String(k)))"
+            >{{ expanded.has(argKey(pr.request_id, String(k))) ? '收起' : `展开全文（${String(v).length} 字符）` }}</button>
+          </div>
         </div>
       </div>
       <div class="confirm-actions">
@@ -200,11 +225,33 @@ function dangerLabel(d: string): string {
   min-width: 60px;
   flex-shrink: 0;
 }
+.arg-body {
+  flex: 1;
+  min-width: 0;
+}
 .arg-val {
+  /* display:block 必需：<span> 默认 inline，而 max-height/overflow 对行内元素无效——
+     否则下面的 .clamped 裁剪是空操作（此前正是如此，长值从未真正被折叠） */
+  display: block;
   color: var(--text-dim);
+  white-space: pre-wrap;
   word-break: break-all;
+}
+/* P2-1：长值默认折叠，但提供「展开全文」入口（此前固定硬裁、无法展开） */
+.arg-val.clamped {
   max-height: 60px;
   overflow: hidden;
+}
+.arg-toggle {
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-decoration: underline;
 }
 .confirm-actions {
   display: flex;

@@ -2562,6 +2562,7 @@ class UserDB:
                 "domain_trust_events", "domain_trust_snapshot",
                 "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
+                "knowledge_opinion_decisions",
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",

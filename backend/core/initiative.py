@@ -173,8 +173,14 @@ def _eligible_users() -> list[dict]:
     return eligible[:3]
 
 
-def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[dict] | None:
-    """拼主动消息的 prompt（含状态帧），失败返回 None。"""
+def _build_proactive_prompt(user_id: str, *, has_image: bool = False,
+                            now: datetime.datetime | None = None) -> list[dict] | None:
+    """拼主动消息的 prompt（含状态帧），失败返回 None。
+
+    now：显式时钟基准（默认取当前时间）。P2-5：问候素材的 30 天窗口与外部
+    新闻的「当日」键都以这个时刻为准；测试/离线补算注入过去时刻即可复现，
+    不再因硬编码日期随真实时钟推移越窗而变红。
+    """
     user = db.get_user(user_id)
     if not user:
         return None
@@ -198,7 +204,7 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
     except Exception:
         pass
 
-    now = datetime.datetime.now()
+    now = now or datetime.datetime.now()
     h = now.hour
     period = "上午" if h < 12 else "下午" if h < 18 else "晚上"
     narrative_hint = ""
@@ -290,11 +296,16 @@ def _mark_proactive_variant_used(user_id: str) -> None:
         logger.warning("[主动性] 变体冷却登记失败: {}", e)
 
 
-async def generate_proactive_message(user_id: str) -> str | None:
-    """为某用户生成一条主动消息。返回文本或 None（失败静默）。"""
+async def generate_proactive_message(user_id: str, *,
+                                     now: datetime.datetime | None = None) -> str | None:
+    """为某用户生成一条主动消息。返回文本或 None（失败静默）。
+
+    now：显式时钟基准（默认当前时间），透传给 _build_proactive_prompt，
+    使注入的时刻对素材窗口与变体选择一致生效（P2-5）。
+    """
     # _build_proactive_prompt 内部含同步 Chroma 检索（collect_offline_context），
     # 放线程池执行，避免慢查询阻塞事件循环
-    msgs = await asyncio.to_thread(_build_proactive_prompt, user_id)
+    msgs = await asyncio.to_thread(_build_proactive_prompt, user_id, now=now)
     if not msgs:
         return None
     try:
