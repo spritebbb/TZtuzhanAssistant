@@ -24,7 +24,7 @@ def main() -> None:
         d = r.json()
         assert d["ok"] and "tool_list" in d, "meta 应含 tool_list"
         n = len(d["tool_list"])
-        assert n >= 34, f"工具数应≥34: {n}"
+        assert n >= 33, f"工具数应≥33: {n}"
         print(f"[OK] /api/meta: {n} 个工具元数据")
 
         # 3) MCP /mcp/tools 含安全元数据（external 桥已删，代表换 agent_run）

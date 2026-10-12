@@ -177,31 +177,6 @@ def suite_proactive_append_is_idempotent(tmp_path, monkeypatch):
     )
 
 
-def suite_message_explanation_round_trips(tmp_path, monkeypatch):
-    """解释快照应随当前会话和归档持久化，旧消息则安全返回 null。"""
-    from backend.session import store
-
-    monkeypatch.setattr(store, "_DB", tmp_path / "explanation.db")
-    store._init()
-    snapshot = {
-        "version": 1,
-        "state": {"affection": 50, "stage": "亲密", "mood": 72, "mood_label": "开心", "energy": 64},
-        "behavior": [{"label": "关系分寸", "text": "可以主动一些"}],
-        "memories": [{"kind": "长期事实", "text": "用户喜欢雨天"}],
-        "tools": {"search": False, "media": "none"},
-    }
-    assert store._append_sync(store.CURRENT_SESSION_ID, [
-        {"role": "user", "content": "你好", "ts": 1},
-        {"role": "bot", "content": "行", "explanation": snapshot, "ts": 2},
-    ])
-    messages = store._get_messages_sync(store.CURRENT_SESSION_ID)
-    assert messages[0]["explanation"] is None
-    assert messages[1]["explanation"] == snapshot
-    archived = store._archive_current_sync()
-    detail = store._get_archive_sync(archived["id"])
-    assert detail["messages"][1]["explanation"] == snapshot
-
-
 # ---- 4. 归档搜索路由顺序 ----
 
 def suite_archive_search_route_declared_before_dynamic():

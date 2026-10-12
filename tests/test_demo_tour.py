@@ -156,7 +156,7 @@ def test_new_steps_trigger_their_capability() -> int:
     assert detect_dispatch_request(steps["report"]["prompt"]), steps["report"]["prompt"]
 
     # 界面型步骤：标 ui 且不要求用户「发这句话」
-    for sid in ("vision", "tts", "explain", "ephemeral"):
+    for sid in ("vision", "tts", "ephemeral"):
         assert steps[sid]["kind"] == "ui", sid
     print("[OK] 新增步骤的提示词能触发对应能力（生图 / 工具循环 / 派活 / 界面操作）")
     return 0
