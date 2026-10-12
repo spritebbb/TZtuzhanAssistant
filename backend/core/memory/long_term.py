@@ -1,11 +1,10 @@
-"""长期记忆检索：三路融合（Chroma 向量 + TF-IDF 稀疏 + Mem0 管理记忆）。
+"""长期记忆检索：两路融合（Chroma 向量 + TF-IDF 稀疏）。
 
 替代原 memory.py 的 recall/recall_facts：
 - 写入侧：每条 long_memory/facts 同时落 SQLite（保持既有接口）+ Chroma 向量
 - 检索侧：疑似回忆时做 LLM 查询扩展，然后
   ① Chroma 向量语义召回（BGE-M3 本地，主路）
   ② TF-IDF 字符二元组稀疏召回（原逻辑保留，作兜底）
-  ③ Mem0 管理记忆召回（偏好/画像/关系，交叉补充）
   三者融合去重，按相关度排序返回 top_k 文本片段。
 """
 import asyncio
@@ -192,20 +191,7 @@ async def _with_expansion(
         except Exception:
             logger.warning("[记忆] 向量检索失败，仅用 TF-IDF")
 
-    # ③ Mem0 管理记忆召回（事实/画像层面交叉补充）
-    try:
-        if config.memory_mem0:
-            from .memory_manager import manager
-
-            mem0_hits = await asyncio.to_thread(manager.search, user_id, query, LONG_TERM_TOP_K)
-            for m in mem0_hits:
-                t = (m.get("text") or "").strip()
-                if t and t not in vec_docs and t not in tfidf_result:
-                    vec_docs.append(t)
-    except Exception:
-        pass
-
-    # 融合：向量/管理记忆在前（语义），TF-IDF 补充（去重）
+    # 融合：向量在前（语义），TF-IDF 补充（去重）
     fused: list[str] = []
     seen: set[str] = set()
     for doc in vec_docs + tfidf_result:

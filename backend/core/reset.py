@@ -7,7 +7,6 @@
   affection_log、mood_log、activities、activity_notes、tasks、user_meta、kv_store（含 greeting 的 web_last_seen、
   initiative 的 daily 标记等）→ 全部清空。
 - 向量库（memory v2）：按 user 前缀的语义向量 → 全清。
-- Mem0 向量库（data/chroma_mem0，独立目录）：按 user_id 的管理记忆 → 全清。
 - 当前会话（sessions.db 'current'）：气泡清空、标题复位为「新会话」。
 - 用户图片：本次删除行引用、且删除后不再被任何行引用的 imgs 文件 → 删除。
 - 物理层：两个库 checkpoint + VACUUM，避免旧内容留在空闲页/WAL 里。
@@ -71,7 +70,6 @@ _TABLES = (
     "persona_evolution_log", "experience_metrics",
     "learning_candidates",
     "kb_documents", "kb_chunks",
-    "manager_memories",
     "situation_files",
 )
 
@@ -126,7 +124,6 @@ async def _quiesce_user_writers() -> None:
     from ..api import chat as chat_api
     from ..agent import session as agent_session
     from . import pipeline, tasks as core_tasks
-    from .memory import engine
 
     # 先落取消状态，再取消执行协程；命令类工具会在 CancelledError 中杀进程树。
     for task_id, task in list(agent_api._agent_bg_by_id.items()):
@@ -136,10 +133,10 @@ async def _quiesce_user_writers() -> None:
     await _cancel_tasks(list(chat_api._bg_tasks))
     await _cancel_tasks(list(core_tasks._tasks))
 
-    # pipeline/Mem0 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，
+    # pipeline 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，
     # 所以必须等待真实完成后再清库；超时则拒绝重置，避免“清完又写回来”。
     writers = [
-        task for task in [*pipeline._memory_tasks, *engine._message_tasks]
+        task for task in pipeline._memory_tasks
         if not task.done()
     ]
     if writers:
@@ -402,7 +399,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             "deep": deep,
             "userdb_tables": 0,
             "vector": 0,
-            "mem0": 0,
             "media": 0,
             "archives": 0,
             "backups": 0,
@@ -463,17 +459,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             except Exception as exc:
                 stats["failures"].append(f"向量库清空失败：{exc}")
                 logger.warning("[重置] 向量库清空失败：{}", exc)
-
-            # Mem0 是独立向量库（data/chroma_mem0），不归 vector_store 管；
-            # 漏掉它会让重置后的长期记忆召回继续命中旧记忆。
-            try:
-                from .memory.memory_manager import manager as memory_manager
-
-                stats["mem0"] = await asyncio.to_thread(memory_manager.clear_user, uid)
-                logger.info("[重置] Mem0 管理记忆已清空：{}", stats["mem0"])
-            except Exception as exc:
-                stats["failures"].append(f"Mem0 管理记忆清空失败：{exc}")
-                logger.warning("[重置] Mem0 管理记忆清空失败：{}", exc)
 
             try:
                 from ..session import store as _store

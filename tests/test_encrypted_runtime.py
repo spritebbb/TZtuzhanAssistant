@@ -24,7 +24,6 @@ sys.path.insert(0, str(ROOT))
 DATA = tempfile.mkdtemp(prefix="tztuzhan_enc_runtime_")
 os.environ["TZTUZHAN_DATA_DIR"] = DATA
 os.environ.setdefault("MEMORY_V2", "0")
-os.environ.setdefault("MEMORY_MEM0", "0")
 
 # 导入顺序纪律：先建数据并完成迁移，再导入 backend.app——日志句柄等会钉住
 # 数据目录，进程内切换前需由句柄释放钩子处理（引擎已支持；本测试用导入顺序

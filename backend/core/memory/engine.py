@@ -3,34 +3,9 @@
 对外职责：
 - ensure_ready()：启动时初始化 Chroma 并触发存量迁移（embedding 模型预热由
   app 启动流程在后台单独调度，这里不强制加载，避免阻塞启动）
-- on_message(user_id, user_text, reply)：对话一轮结束后调用——落 SQLite + 建向量索引 + 提炼画像/事实
-- on_startup()：后台回填（进程启动时）
 """
-import asyncio
-
 from ..config import config
 from ..log import logger
-
-# 持有后台任务强引用，避免 pending task 被 GC 销毁
-_background_tasks: set[asyncio.Task] = set()
-# 只记录会写用户记忆的任务；启动预热/回填不应阻塞“彻底失忆”。
-_message_tasks: set[asyncio.Task] = set()
-
-
-def _spawn(coro, *, user_write: bool = False) -> asyncio.Task:
-    """创建后台任务并持有强引用（与 app.py / agent 的修法一致）。
-
-    只 `ensure_future` 不保存引用的任务在 await 慢操作时可能被 GC 静默丢弃，
-    画像提炼 / Mem0 写入 / 启动回填会因此悄悄丢失。
-    """
-    task = asyncio.ensure_future(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    if user_write:
-        _message_tasks.add(task)
-        task.add_done_callback(_message_tasks.discard)
-    return task
-
 
 def ensure_ready() -> bool:
     """初始化记忆 v2 全部组件（幂等，可反复调用）。
@@ -72,32 +47,3 @@ def ensure_ready() -> bool:
     except Exception as e:
         logger.warning("[记忆引擎] 初始化失败：{}", str(e)[:100])
         return False
-
-
-def on_message(user_id: str, user_text: str, reply: str, mock: bool = False) -> None:
-    """对话一轮结束后的记忆写入（同步；内部异步派发，不阻塞回复）。
-
-    现有 pipeline 已处理 SQLite 落库 + lm 向量索引；这里补充：
-    - Mem0 记忆添加（后台）
-
-    用户画像提炼不再逐条触发：pipeline 1.6 已有批量游标路径（≥10 条消息
-    或空闲补提），逐条再调一次 LLM 会形成双通道重复开销（S2/R6）。
-    """
-    if not config.memory_v2:
-        return
-    try:
-        if user_text and user_text.strip():
-            if config.memory_mem0 and not mock:
-                _spawn(_mem0_add_task(user_id, user_text), user_write=True)
-    except Exception:
-        pass
-
-
-async def _mem0_add_task(user_id: str, text: str) -> None:
-    """后台：把用户话语的关键信息交给 Mem0 管理。失败静默。"""
-    try:
-        from .memory_manager import manager
-
-        await asyncio.to_thread(manager.add, user_id, text)
-    except Exception:
-        pass

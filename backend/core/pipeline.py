@@ -1439,13 +1439,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 记忆后台任务启动失败")
 
-    # 6.2) 记忆引擎 v2：后台提炼画像 / Mem0 记忆管理（失败静默，不阻塞回复）
-    try:
-        from .memory.engine import on_message
-
-        on_message(user_id, text, reply, mock=mock)
-    except Exception:
-        logger.debug("[pipeline] 记忆引擎 on_message 失败（后台提炼，不影响回复）")
     # 本轮吞掉的旁路错误计数（进程级，供 /api/meta 观测）；不暴露用户内容。
     ledger.run("本轮台账记账", _record_ledger, ledger)
     # P3：把 turn_effects 台账的失败项并入本轮 ledger——复用 fail() 的

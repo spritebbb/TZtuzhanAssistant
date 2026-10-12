@@ -4,7 +4,6 @@
 增强：
 - 更强 LLM 提炼 prompt（更结构化、更多分区金属性）
 - 压缩后同时写入 Chroma 向量库（summary kind），跨会话检索更准
-- 与记忆引擎的 Mem0 协同
 """
 import re
 from datetime import datetime

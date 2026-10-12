@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""彻底重置的清除覆盖回归：Mem0 独立向量库、用户图片、归档/备份/缓存与物理回收。
+"""彻底重置的清除覆盖回归：用户图片、归档/备份/缓存与物理回收。
 
-背景：reset 只清 bot.db + 主 Chroma + 当前会话时，Mem0 的独立库
-（data/chroma_mem0）与用户图片会留下来，重置后长期记忆召回仍会命中旧记忆。
+背景：reset 只清 bot.db + 主 Chroma + 当前会话时，
+与用户图片会留下来，重置后长期记忆召回仍会命中旧记忆。
 本文件把这些漏点锁成回归。
 
 隔离：main() 里先把 TZTUZHAN_DATA_DIR 指到临时目录，再导入 backend，
@@ -23,36 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def _write(path: Path, data: bytes = b"x") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-
-
-def test_mem0_manager_clear_user_delegates_to_delete_all() -> int:
-    """Mem0 可用时 clear_user 必须调 delete_all(user_id=...)，并按前后差值报数。"""
-    from backend.core.memory.memory_manager import Mem0Manager
-
-    class _FakeMem0:
-        def __init__(self, items: list[str]):
-            self.items = list(items)
-            self.deleted_for: list[str | None] = []
-
-        def get_all(self, filters=None, **kwargs):
-            return {"results": [{"id": i, "memory": i} for i in self.items]}
-
-        def delete_all(self, user_id=None, agent_id=None, run_id=None):
-            self.deleted_for.append(user_id)
-            self.items = []
-            return {"message": "Mem0 deleted"}
-
-    mgr = Mem0Manager()
-    fake = _FakeMem0(["a", "b", "c"])
-    mgr._mem0 = fake
-    mgr._ready = True  # 跳过真实 Mem0 初始化
-
-    removed = mgr.clear_user("u1")
-    assert fake.deleted_for == ["u1"], f"delete_all 必须带 user_id（实际={fake.deleted_for}）"
-    assert removed == 3, f"应报删除 3 条（实际={removed}）"
-    assert mgr.get_all("u1") == [], "清除后该用户不应还有记忆"
-    print("[OK] Mem0 clear_user 委托 delete_all(user_id) 并正确报数")
-    return 0
 
 
 def test_media_sweep_keeps_still_referenced_files() -> int:
@@ -97,8 +67,8 @@ def test_media_sweep_keeps_still_referenced_files() -> int:
     return 0
 
 
-def test_deep_reset_clears_mem0_media_archives_backups() -> int:
-    """端到端：deep 重置后 Mem0 被清、图片/归档/备份/缓存消失，用户行零残留。"""
+def test_deep_reset_clears_media_archives_backups() -> int:
+    """端到端：deep 重置后图片/归档/备份/缓存消失，用户行零残留。"""
     from backend.core import reset as reset_mod
     from backend.core.config import config
     from backend.core.persona_profiles import active_id, active_user_id
@@ -131,16 +101,9 @@ def test_deep_reset_clears_mem0_media_archives_backups() -> int:
     tts_dir = config.data_dir / "tts_cache"
     _write(tts_dir / "cache.mp3", b"old")
 
-    # Mem0 用假对象替身：真实初始化代价高，委托逻辑已由单测覆盖
-    from backend.core.memory import memory_manager as mm
-
-    cleared: list[str] = []
-    mm.manager.clear_user = lambda user_id: cleared.append(user_id) or 7  # type: ignore[assignment]
-
     stats = asyncio.run(reset_mod.reset_everything(deep=True))
 
     assert stats["ok"], f"重置应整体成功：{stats['failures']}"
-    assert stats["mem0"] == 7 and cleared == [uid], f"Mem0 清除未接入（{cleared}）"
     assert stats["media"] == 1, f"用户图片应被删除（实际={stats['media']}）"
     assert not (config.data_dir / "imgs" / img_name).exists(), "图片文件仍在"
     assert stats["archives"] == 1, f"归档应被删除（实际={stats['archives']}）"
@@ -151,7 +114,7 @@ def test_deep_reset_clears_mem0_media_archives_backups() -> int:
 
     left = db.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE user_id=?", (uid,)).fetchone()
     assert int(left["n"]) == 0, "重置后 bot.db 消息仍有残留"
-    print("[OK] deep 重置清空 Mem0/图片/归档/备份/缓存并做物理回收")
+    print("[OK] deep 重置清空图片/归档/备份/缓存并做物理回收")
     return 0
 
 
@@ -195,9 +158,8 @@ def test_shallow_reset_keeps_archives_and_referenced_media() -> int:
 def main() -> int:
     os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_reset_"))
     failed = (
-        test_mem0_manager_clear_user_delegates_to_delete_all()
         + test_media_sweep_keeps_still_referenced_files()
-        + test_deep_reset_clears_mem0_media_archives_backups()
+        + test_deep_reset_clears_media_archives_backups()
         + test_shallow_reset_keeps_archives_and_referenced_media()
     )
     if failed:

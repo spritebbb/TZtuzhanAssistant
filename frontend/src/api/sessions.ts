@@ -54,7 +54,6 @@ export interface ArchiveSearchResult {
 export interface ResetStats {
   userdb_tables: number
   vector: number
-  mem0: number
   media: number
   archives: number
   backups: number
@@ -88,7 +87,7 @@ export async function resetUser(deep = false): Promise<ResetStats> {
   const r = await apiFetch(`/api/user/reset${deep ? '?deep=true' : ''}`, { method: 'POST' })
   const d = await r.json()
   if (!r.ok || !d.ok) throw new Error(d.error || '重置失败')
-  return d.reset ?? { userdb_tables: 0, vector: 0, mem0: 0, media: 0, archives: 0, backups: 0, tts_cache: 0, session_msgs: 0 }
+  return d.reset ?? { userdb_tables: 0, vector: 0, media: 0, archives: 0, backups: 0, tts_cache: 0, session_msgs: 0 }
 }
 
 /** 重命名（NP-03）：id='current' 改当前会话标题，否则改对应归档标题。 */

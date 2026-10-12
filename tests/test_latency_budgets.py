@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["TZTUZHAN_DATA_DIR"] = tempfile.mkdtemp(prefix="tztuzhan-latency-")
 os.environ["MEMORY_V2"] = "0"
-os.environ["MEMORY_MEM0"] = "0"
 
 
 def _p95(samples: list[float]) -> float:

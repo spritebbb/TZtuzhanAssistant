@@ -20,7 +20,6 @@ sys.path.insert(0, str(ROOT))
 DATA = tempfile.mkdtemp(prefix="tztuzhan_enc_enable_")
 os.environ["TZTUZHAN_DATA_DIR"] = DATA
 os.environ.setdefault("MEMORY_V2", "0")
-os.environ.setdefault("MEMORY_MEM0", "0")
 
 PASS = "enable-flow 口令"
 

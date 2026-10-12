@@ -5,7 +5,6 @@ compact_context / load_compact_summary / looks_like_recall 等），调用方无
 
 新能力：
 - Chroma 向量库（本地持久化）+ BGE-M3 本地 embedding
-- Mem0 记忆管理器（回溯/冲突解决/重要性/遗忘）
 - 更强 LLM 事实抽取（置信度/类别）与冲突调和
 """
 from .compress import (
@@ -25,7 +24,6 @@ from .long_term import (
 # 兼容旧版私有函数名（tools/builtin/memory.py 等仍引用）
 from .long_term import _with_expansion as _recall_with_expansion
 from .long_term import _with_expansion as _facts_with_expansion
-from .memory_manager import manager
 from .short_term import short_term_messages
 
 __all__ = [
@@ -41,7 +39,6 @@ __all__ = [
     "extract_triples",
     "extract_profile",
     "reconcile",
-    "manager",
     "_recall_with_expansion",
     "_facts_with_expansion",
 ]

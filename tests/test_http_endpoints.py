@@ -27,11 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 测试环境收敛：embedding 走哈希（不下载模型）、关 Mem0/画像后台、关搜索与天气。
+# 测试环境收敛：embedding 走哈希（不下载模型）、关画像后台、关搜索与天气。
 # 用显式赋值（而非 setdefault）确保覆盖父进程/CI 可能继承的同名变量，避免
 # "旧版检索"路径被错误短路。本脚本以独立子进程运行，环境变量不会泄漏到其它测试。
 os.environ["MEMORY_EMBED_FORCE"] = "1"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"
@@ -63,7 +62,6 @@ _initiative.initiative_loop = _disabled_initiative_loop
 config.mood_city = ""
 config.search_enabled = False
 config.memory_v2 = False
-config.memory_mem0 = False
 config.memory_embed_force = True
 
 # 把 DB/审计日志落地路径重定向到临时目录（这些模块级变量在 import 期已捕获路径，

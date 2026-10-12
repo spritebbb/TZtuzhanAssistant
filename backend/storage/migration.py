@@ -266,7 +266,6 @@ def migrate_data_root(
         "databases": list(DATABASE_NAMES), "asset_count": 0,
         "skipped": {
             "chroma": "可重建向量索引（C 片 vector_embeddings 接管）",
-            "chroma_mem0": "可重建向量索引",
             "tts_cache": "可重建语音缓存",
             "telemetry.db": "可重建日聚合（Q3）",
             "backups": "历史明文备份留在明文目录；加密备份由 F 片接管",
