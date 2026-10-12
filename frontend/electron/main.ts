@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell, desktopCapturer } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, dialog, shell, desktopCapturer, screen } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
 import { dirname, join, resolve } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -605,7 +605,7 @@ if (!app.requestSingleInstanceLock()) {
       const okShot = globalShortcut.register(SCREENSHOT_HOTKEY, async () => {
         console.log(`[截图热键] 触发：${SCREENSHOT_HOTKEY}`)
         try {
-          const primary = require('electron').screen.getPrimaryDisplay()
+          const primary = screen.getPrimaryDisplay()
           const sources = await desktopCapturer.getSources({
             types: ['screen'],
             thumbnailSize: { width: primary.size.width * primary.scaleFactor, height: primary.size.height * primary.scaleFactor },
