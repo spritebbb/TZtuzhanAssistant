@@ -42,7 +42,6 @@ from .api import (
     telemetry,
     plugins as plugins_api,
     relationship,
-    remote,
     sessions,
     tts,
     usage,
@@ -170,10 +169,6 @@ def create_app() -> FastAPI:
     # 除健康探针外，所有 API、插件网关和人物图片均可能泄露私人数据或触发动作；
     # 非回环来源必须统一鉴权，不能只保护写接口而把会话/配置/日志的 GET 裸露在 LAN。
     _PUBLIC_REMOTE_PATHS = {"/api/health"}
-    # remote/task 兼容 token 放在 JSON/form body 的既有调用协议；HTTP 中间件还未
-    # 解析 body，故该一个入口由路由自身执行同一套来源+常量时间 token 校验。
-    _BODY_AUTH_REMOTE_PATHS = {"/api/remote/task"}
-
     @app.middleware("http")
     async def _remote_auth_guard(request, call_next):
         path = request.url.path
@@ -184,7 +179,6 @@ def create_app() -> FastAPI:
             or (
                 path.startswith("/api/")
                 and path not in _PUBLIC_REMOTE_PATHS
-                and path not in _BODY_AUTH_REMOTE_PATHS
             )
         )
         if not protected:
@@ -279,13 +273,6 @@ def create_app() -> FastAPI:
     app.include_router(meta.router)
     app.include_router(personas.router)
     app.include_router(audit.router)
-    # MCP 对外端点按需注册（2026-09-30 拍板）：未配置 AGENT_REMOTE_TOKEN 时
-    # 不挂载 /api/remote/*（404 不可探测），配了 token 才对外提供远程任务入口
-    # （回环本机调用本就免 token，不受此影响）。
-    from .core.config import config as _cfg
-
-    if _cfg.agent_remote_token:
-        app.include_router(remote.router)
     app.include_router(config_api.router)
     app.include_router(greeting.router)
     app.include_router(initiative.router)
