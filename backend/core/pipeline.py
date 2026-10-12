@@ -490,21 +490,6 @@ def _mcp_tool_filter(user_text: str, skill_texts: list[str]):
         return None
 
 
-def _cost_line(user_id: str) -> str:
-    """D10 成本熔断叙事面 → 行为帧 cost_line。
-
-    提示类（事多轻提）每日一次由 cost_guard 内部 kv 门控；extreme 的
-    「更简短」是常驻质地约束。任一失败即空串，不阻塞回复。
-    """
-    try:
-        from .cost_guard import cost_lines
-
-        hint, standing = cost_lines(user_id)
-        return " ".join(p for p in (hint, standing) if p)
-    except Exception:
-        return ""
-
-
 # NP-14：类别 → 行为帧提示语（只说类别，不说进程名——话术披露红线）
 _AWARENESS_LINES = {
     "code": "用户此刻大概率在写代码或用终端，打扰要克制，长内容给结论优先",
@@ -1088,7 +1073,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             calendar_line=compose_line(cal_mod),
             style_line=_style_line(user_id),
             evolution_line=_evolution_line(user_id),
-            cost_line=_cost_line(user_id),
             awareness_line=_awareness_line(),
         )
     except Exception:

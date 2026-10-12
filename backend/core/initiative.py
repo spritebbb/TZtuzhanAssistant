@@ -355,7 +355,7 @@ async def _tick_once() -> int:
     _last_global_run = now
 
     # D10 成本闸：hard/extreme 档自主主动整体暂停（次级源在 _arbited_proactive
-    # 另有一道；此处拦主循环与通用主动，叙事面走行为帧 cost_line）
+    # 另有一道；此处拦主循环与通用主动）
     try:
         from .cost_guard import check as _cost_ok
 

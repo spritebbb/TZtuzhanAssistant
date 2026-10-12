@@ -36,7 +36,6 @@ def _seed() -> None:
     db.ensure_user(UID)
     from backend.core.goals import start_goal
     from backend.core.open_questions import track_question
-    from backend.core.userdb import kv_set
 
     try:
         start_goal(UID, "把酒馆同玩打磨顺手", "想让剧情回忆更自然", "补一次真机对局")
@@ -59,7 +58,6 @@ def _seed() -> None:
             i + 1,
             payload=payload,
         )
-    kv_set(UID, "cost:hint_day", "")
 
 
 def test_rebuild_sections_maps_real_data() -> None:
