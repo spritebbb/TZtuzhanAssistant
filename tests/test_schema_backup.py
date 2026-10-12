@@ -115,8 +115,7 @@ def main() -> None:
                 }
                 assert {
                     "activity_viewpoints",
-                    "relationship_events", "artifacts", "future_letters",
-                    "relationship_snapshots", "dual_perspectives",
+                    "relationship_events", "artifacts",
                     "reunion_arcs",
                     "knowledge_opinions", "knowledge_opinion_sources",
                     "relationship_style_evidence", "memory_policy",

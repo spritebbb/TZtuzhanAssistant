@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 57  # v57: 删除 M3.3/M3.4 目标·清单四表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 58  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -502,26 +502,6 @@ CREATE TABLE IF NOT EXISTS voice_profiles (
     created_at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_voice_profiles_persona ON voice_profiles(persona_id, enabled);
--- M8「写给未来的我们」：用户亲手写的未来信件。正文是唯一的私密内容，
--- 锁定态（sealed 且条件未达成）绝不离开后端；ready 由查询时按条件确定性计算。
-CREATE TABLE IF NOT EXISTS future_letters (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id       TEXT NOT NULL,
-    title         TEXT NOT NULL DEFAULT '',
-    body          TEXT NOT NULL,                   -- 正文：锁定态任何接口都不返回
-    unlock_type   TEXT NOT NULL,                   -- date / goal / event
-    unlock_at     TEXT,                            -- date：到达时刻（必须晚于创建时间）
-    goal_id       INTEGER,                         -- goal：activities.id（kind='goal'）
-    event_type    TEXT,                            -- event：完成/修复类事件白名单
-    status        TEXT NOT NULL DEFAULT 'sealed',  -- sealed / opened（ready 是计算态不落状态列）
-    unlocked_at   TEXT,                            -- 条件达成落账时间（惰性写、幂等）
-    unlocked_by_event_id INTEGER,                  -- event 类型首次匹配的关系事件 id
-    opened_at     TEXT,
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_future_letters_user
-    ON future_letters(user_id, status, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -542,58 +522,6 @@ CREATE TABLE IF NOT EXISTS relationship_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_events_idem
     ON relationship_events(user_id, event_type, source_id) WHERE status = 'active';
--- M8 第二垂直切片：30/100/365 天关系快照。确定性汇编真实持久数据（不调用
--- LLM），用户显式创建/删除、绝不自动再生；UNIQUE(user_id, snapshot_days)
--- 保证每个里程碑至多一页。
-CREATE TABLE IF NOT EXISTS relationship_snapshots (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id             TEXT NOT NULL,
-    snapshot_days       INTEGER NOT NULL,              -- 30 / 100 / 365
-    start_date          TEXT NOT NULL,                 -- 关系起点（最早 user 消息的本地日期）
-    cutoff_date         TEXT NOT NULL,                 -- start_date + snapshot_days - 1
-    generated_at        TEXT NOT NULL,                 -- 快照整理时刻
-    source_manifest_json TEXT NOT NULL DEFAULT '{}',   -- 来源清单（type/id/date + counts/omitted）
-    rendered_markdown   TEXT NOT NULL,                 -- 模板化正文（只来自真实行）
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL,
-    UNIQUE(user_id, snapshot_days)
-);
-CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_user
-    ON relationship_snapshots(user_id, snapshot_days);
--- M8 第三垂直切片：双视角叙事。同一件真实经历，用户与菟菚各自保留一段解释，
--- 并存不合并；菟菚视角默认由 LLM 基于锚点真实记录生成草稿、经用户确认落库，
--- 也可由用户代填（origin 标记来源）。锚点可空（自由主题）；有锚点时取其
--- 真实记录作生成素材并用于展示跳转，锚点 id 属展示性快照，不参与导出重映射。
-CREATE TABLE IF NOT EXISTS dual_perspectives (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id            TEXT NOT NULL,
-    title              TEXT NOT NULL,               -- 经历标题（用户起名）
-    source_type        TEXT,                        -- event / diary / activity / artifact / free
-    source_id          INTEGER,                     -- 锚点 id（free 为 NULL）
-    source_date        TEXT,                        -- 锚点日期快照（展示用）
-    source_label       TEXT NOT NULL DEFAULT '',    -- 锚点摘要快照（展示与取材说明）
-    user_view          TEXT NOT NULL DEFAULT '',
-    tuzhan_view        TEXT NOT NULL DEFAULT '',
-    tuzhan_view_origin TEXT NOT NULL DEFAULT 'user',  -- llm / user
-    created_at         TEXT NOT NULL,
-    updated_at         TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_dual_perspectives_user
-    ON dual_perspectives(user_id, id);
--- M8.7「不同版本的我们」：用户显式创建的关系版本检查点。snapshot_json 只保存
--- 当时的结构化状态、行为帧白名单与记录计数（format_version=1），绝不保存消息
--- 原文、事实正文、事件 payload 或日记/产物内容；一经创建不可修改，只可删除。
-CREATE TABLE IF NOT EXISTS relationship_versions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    label TEXT NOT NULL,
-    captured_at TEXT NOT NULL,
-    schema_version INTEGER NOT NULL,
-    snapshot_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_relationship_versions_user
-    ON relationship_versions(user_id, captured_at, id);
 -- M2 前置最小版：可保存的共同产物（首批：共读共同书摘）。
 CREATE TABLE IF NOT EXISTS artifacts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2332,8 +2260,6 @@ class UserDB:
                 "domain_trust_events", "domain_trust_snapshot",
                 "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
-                "future_letters", "relationship_snapshots", "dual_perspectives",
-                "relationship_versions",
                 "kb_documents", "kb_chunks", "mood_log",
                 "tavern_sessions",
                 "situation_files",

@@ -24,8 +24,6 @@ from .api import (
     confirm,
     diary,
     encryption,
-    dual_perspectives,
-    future_letters,
     greeting,
     health,
     images,
@@ -42,11 +40,8 @@ from .api import (
     desktop,
     tour,
     telemetry,
-    possibilities,
     plugins as plugins_api,
     relationship,
-    relationship_snapshots,
-    relationship_versions,
     remote,
     sessions,
     tts,
@@ -268,13 +263,8 @@ def create_app() -> FastAPI:
     app.include_router(activities.router)
     app.include_router(artifacts.router)
     app.include_router(diary.router)
-    app.include_router(future_letters.router)
     app.include_router(writings.router)
     app.include_router(relationship.router)
-    app.include_router(relationship_snapshots.router)
-    app.include_router(relationship_versions.router)
-    app.include_router(dual_perspectives.router)
-    app.include_router(possibilities.router)
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
     app.include_router(tour.router)
