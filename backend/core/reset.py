@@ -3,7 +3,7 @@
 
 仅用于用户明确选择「重新开始」时调用。范围：
 - userdb（bot.db）：好感度/昵称/恋人确认、messages、long_memory、facts、triples、
-  important_dates、stickers、user_profile、user_terms、user_style_map、diary、research_reports、
+  important_dates、stickers、user_profile、user_terms、user_style_map、diary、
   affection_log、mood_log、activities、activity_notes、tasks、user_meta、kv_store（含 greeting 的 web_last_seen、
   initiative 的 daily 标记等）→ 全部清空。
 - 向量库（memory v2）：按 user 前缀的语义向量 → 全清。
@@ -51,7 +51,7 @@ def _connect_reset(path, *, timeout: float = 10.0):
 _TABLES = (
     "affection_log", "mood_log", "long_memory", "facts", "user_meta", "messages",
     "users", "kv_store", "important_dates", "stickers",
-    "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
+    "user_profile", "user_terms", "user_style_map", "diary", "triples",
     "tasks", "promises", "usage_log", "activity_notes", "activities",
     "activity_viewpoints",
     "activity_writings", "writing_turns",

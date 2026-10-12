@@ -36,7 +36,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
                "memory_policy", "memory_annotations", "first_occurrences",
                "learning_candidates", "user_preferences", "profile_evolution_log"),
     "milestones": ("affection_log", "mood_log", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "character_life_events", "reunion_arcs", "source_links",
+    "life": ("diary", "stickers", "character_life_events", "reunion_arcs", "source_links",
              "persona_evolution_log", "her_statements"),
     "tasks": ("tasks", "promises"),
     "activities": (

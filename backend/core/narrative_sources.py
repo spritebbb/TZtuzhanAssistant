@@ -19,7 +19,7 @@ from datetime import datetime
 
 from .log import logger
 
-OWNER_TYPES: tuple[str, ...] = ("diary", "research", "promise", "artifact")
+OWNER_TYPES: tuple[str, ...] = ("diary", "promise", "artifact")
 SOURCE_TYPES: tuple[str, ...] = ("event", "activity", "fact", "knowledge", "character_life")
 
 MAX_DEPTH = 2

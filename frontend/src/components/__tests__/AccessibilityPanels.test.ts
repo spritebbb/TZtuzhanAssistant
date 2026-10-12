@@ -10,7 +10,6 @@ vi.mock('../../api', () => ({
 }))
 vi.mock('../../api/diary', () => ({
   getDiaries: vi.fn(async () => []),
-  getResearchReports: vi.fn(async () => []),
 }))
 vi.mock('../../api/relationship', () => ({
   getRelationshipStyle: vi.fn(async () => ({
