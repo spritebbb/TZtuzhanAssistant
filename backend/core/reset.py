@@ -67,7 +67,7 @@ _TABLES = (
     "activity_draft_receipts", "document_segments", "document_import_jobs", "observation_entries",
     "domain_trust_events", "domain_trust_snapshot",
     "shared_resources", "resource_grants",
-    "persona_evolution_log", "experience_metrics",
+    "persona_evolution_log",
     "learning_candidates",
     "kb_documents", "kb_chunks",
     "situation_files",
@@ -406,7 +406,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             "compact": "",
             "session_msgs": 0,
             "agent_tasks": 0,
-            "telemetry": 0,
             "failures": [],
         }
         try:
@@ -476,14 +475,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             except Exception as exc:
                 stats["failures"].append(f"Agent 任务清空失败：{exc}")
                 logger.warning("[重置] Agent 任务清空失败：{}", exc)
-
-            try:
-                from .telemetry import clear_user as clear_telemetry
-
-                stats["telemetry"] = await asyncio.to_thread(clear_telemetry, uid)
-            except Exception as exc:
-                stats["failures"].append(f"本地遥测清空失败：{exc}")
-                logger.warning("[重置] 本地遥测清空失败：{}", exc)
 
             if deep:
                 try:

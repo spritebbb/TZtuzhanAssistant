@@ -39,7 +39,6 @@ from .api import (
     situation,
     desktop,
     tour,
-    telemetry,
     plugins as plugins_api,
     relationship,
     sessions,
@@ -261,7 +260,6 @@ def create_app() -> FastAPI:
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
     app.include_router(tour.router)
-    app.include_router(telemetry.router)
     app.include_router(activity_drafts.router)
     app.include_router(observations.router)
     app.include_router(keepsake.router)

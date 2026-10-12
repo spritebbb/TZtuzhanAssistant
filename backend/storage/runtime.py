@@ -10,7 +10,7 @@
 - ``close_all_databases()``：应用锁锁定时由锁端点调用，关闭已打开的库连接
   （忘钥匙的存储侧落实；解锁后由惰性开库按需重连）。
 
-导入纪律：本模块对 core（key broker/userdb/telemetry）的引用全部放在函数
+导入纪律：本模块对 core（key broker/userdb）的引用全部放在函数
 体内，避免 storage ↔ core 的导入环。
 """
 from __future__ import annotations
@@ -100,12 +100,6 @@ def close_all_databases() -> None:
         userdb.db.close()
     except Exception as exc:
         logger.error("[应用锁] userdb 关闭失败（锁定态可能不完整）：{}", exc)
-    try:
-        from ..core import telemetry
-
-        telemetry.close()
-    except Exception as exc:
-        logger.error("[应用锁] telemetry 关闭失败（锁定态可能不完整）：{}", exc)
 
 
 # ---- 持久化门（P3-04 E/F）：迁移或一致性备份期间暂停写入 ----

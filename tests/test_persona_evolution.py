@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_p305_"))
 
-from backend.core import experience_metrics as metrics
 from backend.core import persona_evolution as evo
 from backend.core.userdb import db
 
@@ -106,30 +105,6 @@ def test_source_death_invalidates_offset() -> int:
     return 0
 
 
-def test_metrics_aggregate_and_exclusion() -> int:
-    uid = "p305-metrics"
-    db.ensure_user(uid)
-    # 2026-09-30 批6c 观测账本合并：latency kind 已删（延迟归 telemetry），
-    # 聚合断言换仍存活的 repetition
-    assert metrics.record(uid, "repetition", "recent60")
-    assert metrics.record(uid, "repetition", "recent60", count=2)
-    assert metrics.record(uid, "rule_failure", "style_guard")
-    assert metrics.record(uid, "not_a_kind", "x") is False
-    assert metrics.record(uid, "source_pick", "knowledge_opinions")
-    total = {s["kind"]: s["total"] for s in metrics.summary(uid)}
-    assert total["repetition"] == 3 and total["rule_failure"] == 1
-    # 清理
-    assert metrics.clear_user(uid) == 3
-    assert metrics.summary(uid) == []
-    # 不入关系包
-    from backend.core.relationship_export import CATEGORIES
-
-    assert "experience_metrics" not in CATEGORIES["life"]
-    assert all("experience_metrics" not in tables for tables in CATEGORIES.values())
-    print("[OK] 统计聚合 / 清理 / 不入关系包")
-    return 0
-
-
 def test_export_roundtrip_evolution() -> int:
     from backend.core.relationship_export import export_bundle, restore_bundle
 
@@ -166,7 +141,6 @@ def main() -> int:
         test_whitelist_and_step_cap()
         + test_idempotent_and_revert_recompute()
         + test_source_death_invalidates_offset()
-        + test_metrics_aggregate_and_exclusion()
         + test_export_roundtrip_evolution()
         + test_behavior_hints_and_consumption()
     )
