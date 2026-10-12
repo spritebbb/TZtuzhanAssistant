@@ -49,7 +49,6 @@ from .api import (
     user_reset,
     vision,
     writings,
-    tavern,
 )
 from .maintenance.loop import checkpoint_all, maintenance_loop
 from .session import store as session_store
@@ -82,7 +81,7 @@ def create_app() -> FastAPI:
     # 的 Origin 均为 null，放行它等于给恶意本地 HTML/嵌 iframe 的网页开 CORS 读取。
     # Electron 生产环境已改为加载 http://127.0.0.1:8801（同源，见 electron/main.ts）；
     # Vite dev 是 localhost:5173。收窄后，恶意网页无法借 CORS 读本机 API 响应。
-    # AGENT_EXTRA_ORIGINS 追加本机其他可信前端（如酒馆同玩扩展页面，默认 :8000）。
+    # AGENT_EXTRA_ORIGINS 追加本机其他可信前端（默认 :8000）。
     from .core.config import config as _config
 
     app.add_middleware(
@@ -292,7 +291,6 @@ def create_app() -> FastAPI:
     app.include_router(initiative.router)
     app.include_router(tts.router)
     app.include_router(user_reset.router)
-    app.include_router(tavern.router)
     app.include_router(mcp_servers.router)
     app.include_router(mcp_server.router)
     app.include_router(plugins_api.router)

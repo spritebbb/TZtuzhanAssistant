@@ -8,7 +8,7 @@
 - 恢复预览：先校验格式、schema 版本、引用完整性（含跨类别引用），再展示
   将写入的计数；不做静默覆盖。
 - 恢复写入当前 bot.db 的目标命名空间：要求目标命名空间为空；主键一律重新
-  分配（整数主键按 AUTOINCREMENT，文本主键如 tavern_sessions 的 uuid 重新
+  分配（整数主键按 AUTOINCREMENT，文本主键重新
   生成）——主键在 bot.db 内全局唯一且不含 user_id，原样保留会让同一份备份
   恢复进第二个命名空间时主键冲突；引用列按映射重建，user_id 文本列一律
   重写为目标命名空间。
@@ -37,7 +37,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
                "learning_candidates", "manager_memories", "user_preferences", "profile_evolution_log"),
     "milestones": ("affection_log", "mood_log", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "character_life_events", "reunion_arcs", "source_links",
-             "persona_evolution_log", "tavern_sessions", "her_statements"),
+             "persona_evolution_log", "her_statements"),
     "tasks": ("tasks", "promises"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints",
@@ -355,7 +355,7 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
 
     data: dict[str, list[dict]] = bundle["data"]
     kv_export: dict[str, str] = (bundle.get("kv") or {}).get("exported") or {}
-    # 主键映射：整数主键 old_int → new_int；文本主键（tavern_sessions 的 uuid）
+    # 主键映射：整数主键 old_int → new_int；文本主键
     # old_str → new_str。两者都重新分配，见模块 docstring 的恢复契约。
     id_maps: dict[str, dict] = defaultdict(dict)
     self_fixups: list[tuple[str, str, str, int, int]] = []  # (table, column, ref_table, referencing_old_id, old_ref_value)

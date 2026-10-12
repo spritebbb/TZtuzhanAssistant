@@ -248,9 +248,9 @@ class Config:
                 "127.0.0.1:8801;localhost:8801;[::1]:8801",
             ).split(";") if p.strip()
         ]
-        # 额外可信浏览器来源（分号分隔）：本机其他可信前端所在 origin，如
-        # SillyTavern 酒馆同玩扩展页面（默认 :8000）。只追加进 CORS 与 Origin
-        # 白名单，不放宽 Host 校验，也不影响 token 语义（回环仍免 token）。
+        # 额外可信浏览器来源（分号分隔）：本机其他可信前端所在 origin。
+        # 只追加进 CORS 与 Origin 白名单，不放宽 Host 校验，也不影响 token
+        # 语义（回环仍免 token）。
         self.agent_extra_origins: list[str] = [
             p.strip().lower().rstrip("/") for p in os.getenv(
                 "AGENT_EXTRA_ORIGINS",

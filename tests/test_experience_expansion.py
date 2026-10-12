@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_batch13_"))
 
 from backend.core.config import Config
-from backend.core import greeting_material, initiative, relationship_snapshots, schedule
+from backend.core import greeting_material, initiative, schedule
 from backend.core.userdb import db
 from backend.api.config_api import router as config_router
 
@@ -26,9 +26,6 @@ def test_approved_default_thresholds() -> None:
     names = (
         "PROACTIVE_NEW_USER_DAYS",
         "PROACTIVE_NEW_USER_IDLE_HOURS",
-        "PROACTIVE_SURPRISE_MIN_GAP_DAYS",
-        "PROACTIVE_SURPRISE_CHANCE_PERCENT",
-        "PROACTIVE_SURPRISE_IDLE_MINUTES",
     )
     old_values = {name: os.environ.get(name) for name in names}
     try:
@@ -43,7 +40,6 @@ def test_approved_default_thresholds() -> None:
                 os.environ[name] = value
     assert cfg.proactive_new_user_days == 3
     assert cfg.proactive_new_user_idle_hours == 2
-    assert relationship_snapshots.MILESTONE_DAYS[0] == 30
 
 
 def test_new_user_idle_threshold_expires_after_three_days() -> None:

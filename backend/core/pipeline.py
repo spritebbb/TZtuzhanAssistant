@@ -974,7 +974,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     kb_hits = gathered["kb_hits"]
     reading_context = gathered["reading_context"]
     writing_ctx = gathered["writing_ctx"]
-    tavern_mem_ctx = gathered["tavern_mem_ctx"]
     list_ctx = gathered["list_ctx"]
     context_selection = gathered["context_selection"]
     event_recall_result = gathered["event_recall_result"]
@@ -1111,7 +1110,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         messages,
         reading_context=reading_context,
         writing_ctx=writing_ctx,
-        tavern_mem_ctx=tavern_mem_ctx,
         list_ctx=list_ctx,
         event_recall_result=event_recall_result,
     )

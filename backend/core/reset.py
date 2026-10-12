@@ -72,7 +72,6 @@ _TABLES = (
     "learning_candidates",
     "kb_documents", "kb_chunks",
     "manager_memories",
-    "tavern_sessions",
     "situation_files",
 )
 
