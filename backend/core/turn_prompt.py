@@ -389,11 +389,10 @@ def inject_activity_contexts(
     *,
     reading_context: str = "",
     writing_ctx: str = "",
-    tavern_mem_ctx: str = "",
     list_ctx: str = "",
     event_recall_result: dict | None = None,
 ) -> None:
-    """共读 / 创作 / 酒馆 / 清单 / 关系事件：各自独立成一条 system。
+    """共读 / 创作 / 清单 / 关系事件：各自独立成一条 system。
 
     这些是「你们正在做的事」与「真实发生过的事」，与记忆块分开注入——来源语义不同，
     混在一条里容易让模型把资料或虚构情节错当成现实记忆。
@@ -401,7 +400,6 @@ def inject_activity_contexts(
     for content in (
         reading_context,
         writing_ctx,
-        tavern_mem_ctx,
         list_ctx,
     ):
         if content:

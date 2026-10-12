@@ -46,33 +46,19 @@ def _switch_back_to_default() -> None:
     persona_profiles.activate(persona_profiles.DEFAULT_PERSONA_ID)
 
 
-def test_dual_perspectives_draft_prompt() -> None:
-    from backend.core.dual_perspectives import _DRAFT_PROMPT
-
-    _switch_to_alt()
-    try:
-        # 模板常量本身不动，调用方 replace 后必须出现新人格名
-        assert "菟菚" in _DRAFT_PROMPT
-        swapped = _DRAFT_PROMPT.replace("菟菚", persona_profiles.active_name())
-        assert "你是「橘九」" in swapped and "菟菚" not in swapped
-    finally:
-        _switch_back_to_default()
-    print("[OK] dual_perspectives 草稿提示词可按人格替换")
-
-
-def test_viewpoint_and_letter_prompts_replaceable() -> None:
+def test_viewpoint_and_diary_prompts_replaceable() -> None:
     from backend.core.activities import _VIEWPOINT_DRAFT_PROMPT
-    from backend.core.sealing import _LETTER_PROMPT
+    from backend.core.daily import DIARY_PROMPT as _DIARY_PROMPT
 
     _switch_to_alt()
     try:
         name = persona_profiles.active_name()
-        for template in (_VIEWPOINT_DRAFT_PROMPT, _LETTER_PROMPT):
+        for template in (_VIEWPOINT_DRAFT_PROMPT, _DIARY_PROMPT):
             swapped = template.replace("菟菚", name)
             assert "橘九" in swapped and "菟菚" not in swapped
     finally:
         _switch_back_to_default()
-    print("[OK] activities/sealing 提示词可按人格替换")
+    print("[OK] activities/daily 提示词可按人格替换")
 
 
 def test_dispatch_pattern_follows_persona() -> None:
@@ -89,17 +75,6 @@ def test_dispatch_pattern_follows_persona() -> None:
         _switch_back_to_default()
     assert detect_dispatch_request("给菟菚派任务:整理周报") == "整理周报"
     print("[OK] 派单正则跟随激活人格（含缓存切换）")
-
-
-def test_tavern_clean_reply_and_identity() -> None:
-    from backend.core.tavern import _clean_reply
-
-    assert _clean_reply("菟菚：你好呀") == "你好呀"
-    assert _clean_reply("【菟菚】你好") == "你好"
-    assert _clean_reply("橘九：喵，上线了", "橘九") == "喵，上线了"
-    assert _clean_reply("【橘九】喵", "橘九") == "喵"
-    assert _clean_reply("没有标签的话", "橘九") == "没有标签的话"
-    print("[OK] tavern 发言标签剥离接受动态人格名")
 
 
 def test_image_prompts_diverge_by_persona() -> None:
@@ -157,10 +132,8 @@ def test_canon_life_gated() -> None:
 
 
 def main() -> None:
-    test_dual_perspectives_draft_prompt()
-    test_viewpoint_and_letter_prompts_replaceable()
+    test_viewpoint_and_diary_prompts_replaceable()
     test_dispatch_pattern_follows_persona()
-    test_tavern_clean_reply_and_identity()
     test_image_prompts_diverge_by_persona()
     test_her_profile_gated()
     test_canon_life_gated()

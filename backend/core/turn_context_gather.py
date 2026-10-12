@@ -3,7 +3,7 @@
 
 从 ``pipeline._process_locked`` 抽出的第二段。与 :mod:`turn_effects` 相对：那边是
 写副作用，这边是读上下文。共同点是**每个采集器失败都必须降级成空值**，让回复照常
-生成——搜索/知识库/共读/专注/目标/创作/酒馆/清单/关系事件/记忆任一路挂掉，都只是
+生成——搜索/知识库/共读/创作/清单/关系事件/记忆任一路挂掉，都只是
 「这一轮少一点背景」，不是「这一轮没有回复」。
 
 每个采集器返回 ``(value, failure)``：``failure`` 为 ``None`` 表示成功，否则是
@@ -73,16 +73,6 @@ async def gather_writing(user_id: str, text: str) -> tuple[str, Failure]:
         return await _to_thread(cowriting_context, user_id, text), None
     except Exception as exc:  # noqa: BLE001
         return "", ("共同创作上下文", exc)
-
-
-async def gather_tavern(user_id: str, text: str) -> tuple[str, Failure]:
-    """酒馆同玩回忆：真回忆，门控在 tavern_context 内部。"""
-    from .tavern import tavern_context
-
-    try:
-        return await _to_thread(tavern_context, user_id, text), None
-    except Exception as exc:  # noqa: BLE001
-        return "", ("酒馆回忆", exc)
 
 
 async def gather_list_context(
@@ -221,7 +211,6 @@ async def gather_all(
         await gather_knowledge(user_id, text, mock=mock),
         await gather_reading(user_id, text),
         await gather_writing(user_id, text),
-        await gather_tavern(user_id, text),
         await gather_list_context(user_id, text, turn_id=turn_id, ephemeral=ephemeral),
         await gather_event_recall(user_id, text),
         await gather_search(text, mock=mock, needs_search=needs_search),
@@ -232,7 +221,6 @@ async def gather_all(
         knowledge,
         reading,
         writing,
-        tavern,
         lists,
         events,
         search,
@@ -247,7 +235,6 @@ async def gather_all(
         "kb_hits": knowledge[0],
         "reading_context": reading[0],
         "writing_ctx": writing[0],
-        "tavern_mem_ctx": tavern[0],
         "list_ctx": lists[0]["text"],
         "context_selection": lists[0]["selection"],
         "event_recall_result": events[0],

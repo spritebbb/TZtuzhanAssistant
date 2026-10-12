@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 58  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 59  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -440,19 +440,6 @@ CREATE TABLE IF NOT EXISTS writing_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_writing_turns_activity
     ON writing_turns(user_id, activity_id, id);
--- 酒馆同玩：一局结束后的剧情沉淀。剧情是「真回忆」（用户拍板 2026-09-14）：
--- 摘要同时写入长期记忆供 recall 检索；本表保存忠实原文，供回忆注入与追溯。
-CREATE TABLE IF NOT EXISTS tavern_sessions (
-    id          TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL,
-    card_name   TEXT NOT NULL DEFAULT '',
-    summary     TEXT NOT NULL DEFAULT '',
-    turns_json  TEXT NOT NULL DEFAULT '[]',
-    played_at   TEXT NOT NULL,
-    created_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tavern_sessions_user
-    ON tavern_sessions(user_id, played_at);
 -- D9 局势档案：每人格一行的恒定世界快照（派生态，重编译可重建，不进关系包导出）。
 -- state_json 六节 + LLM 压缩段；turn_count 为距上次更新的轮数（触发每10轮刷新）。
 CREATE TABLE IF NOT EXISTS situation_files (
@@ -2232,7 +2219,6 @@ class UserDB:
                 "domain_trust_events", "domain_trust_snapshot",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "kb_documents", "kb_chunks", "mood_log",
-                "tavern_sessions",
                 "situation_files",
                 "voice_profiles", "voice_manifests",
             ):
