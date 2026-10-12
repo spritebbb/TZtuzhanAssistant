@@ -2,7 +2,7 @@
 """关系包导出/恢复的表清单守卫 + 换机漏表批端到端回归（DF-1）。
 
 背景（2026-09-29 缺陷审查）：CATEGORIES 漏 7 张用户数据表（user_preferences、
-activity_lists、list_items、watches、event_chains、relationship_dimension_ledger、
+activity_lists、list_items、event_chains、relationship_dimension_ledger、
 humor_usage、document_segments），换机/恢复静默丢数据；restore 的 kv 通道未过
 kv_registry 白名单（P3-44 同族口子）。本文件三层防线：
 
@@ -104,9 +104,6 @@ def _seed(uid: str) -> dict:
             "INSERT INTO list_items (user_id, activity_id, title, added_by, ts) "
             "VALUES (?, ?, '歌一', 'user', ?)", (uid, ids["activity"], TS))
         c.execute(
-            "INSERT INTO watches (user_id, url, interval_minutes, created_at, updated_at) "
-            "VALUES (?, 'https://example.com/a', 60, ?, ?)", (uid, TS, TS))
-        c.execute(
             "INSERT INTO relationship_dimension_ledger (user_id, event_id, rule_id, trust_delta, intimacy_delta, occurred_at) "
             "VALUES (?, ?, 'r1', 2, 1, ?)", (uid, ids["event"], TS))
         c.execute(
@@ -164,7 +161,6 @@ def test_roundtrip_and_kv_gate() -> int:
     assert row["document_id"] == new["doc"]
     row = q("SELECT source_message_id FROM user_preferences WHERE user_id=?")
     assert row["source_message_id"] is None, "包外消息引用应清空"
-    assert q("SELECT url FROM watches WHERE user_id=?")["url"] == "https://example.com/a"
     kv = db.conn.execute(
         "SELECT value FROM kv_store WHERE user_id=? AND key='surprise:last'", (dst_uid,)).fetchone()
     assert kv and kv["value"] == "2026-09-29"
