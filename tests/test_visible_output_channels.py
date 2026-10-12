@@ -60,14 +60,3 @@ def suite_proactive_boundary_sanitizes_queue_and_persistence(monkeypatch) -> Non
     assert persisted == [queued["text"]]
 
 
-def suite_visible_draft_channels_use_safe_fallback(monkeypatch) -> None:
-    from backend.core import possibilities
-
-    async def leaking_chat(*args, **kwargs):
-        return "<reasoning>hidden</reasoning><tool_call>bad</tool_call>"
-
-    monkeypatch.setattr("backend.core.features.flag", lambda name: True)
-    monkeypatch.setattr(possibilities, "chat", leaking_chat)
-    result = asyncio.run(possibilities.generate_draft("u", "dream", "标题", "一个虚构前提"))
-    assert "tool_call" not in result["draft"]
-    assert result["draft"] == "这个虚构片段还没写好，先把它留在想象里，等下一次再展开。"

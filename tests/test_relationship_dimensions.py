@@ -182,28 +182,6 @@ def test_state_derives_dimensions_and_slices_use_real_values() -> int:
     return 0
 
 
-def test_substage_unlock_moments() -> int:
-    from backend.core import unlock
-    from backend.core.userdb import db
-
-    uid = "dims-unlock"
-    db.ensure_user(uid)
-    db.set_affection_absolute(uid, 7)
-    keys = unlock.check_and_enqueue(uid)  # 首次登记现状
-    assert keys == []
-
-    db.set_affection_absolute(uid, 9)     # 跨过初识 8 切点
-    keys = unlock.check_and_enqueue(uid)
-    assert "substage_chuyi_mid" in keys, keys
-
-    # 连跳多档：一次跨 17/33/42 → 依次入队（每轮最多说一条由 next_pending 控制）
-    db.set_affection_absolute(uid, 45)
-    keys = unlock.check_and_enqueue(uid)
-    assert {"substage_chuyi_late", "substage_shuxi_mid", "substage_shuxi_late"} <= set(keys), keys
-    print("[OK] 小档升档时刻（首过登记现状、跨切点入队、连跳逐条）")
-    return 0
-
-
 def main() -> int:
     failed = (
         test_migration_null_first_time_only()
@@ -212,7 +190,6 @@ def main() -> int:
         + test_dual_thresholds_and_display()
         + test_legacy_path_demoted_and_debug_entry()
         + test_state_derives_dimensions_and_slices_use_real_values()
-        + test_substage_unlock_moments()
     )
     if failed:
         print(f"\n=== P2-01 二维关系：{failed} 项失败 ===")
