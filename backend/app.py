@@ -18,7 +18,6 @@ from .api import (
     audit,
     backup,
     chat,
-    colists,
     activity_drafts,
     observations,
     config_api,
@@ -27,9 +26,7 @@ from .api import (
     diary,
     encryption,
     dual_perspectives,
-    focus,
     future_letters,
-    goals,
     greeting,
     health,
     images,
@@ -275,9 +272,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts.router)
     app.include_router(dashboard.router)
     app.include_router(diary.router)
-    app.include_router(focus.router)
     app.include_router(future_letters.router)
-    app.include_router(goals.router)
     app.include_router(writings.router)
     app.include_router(relationship.router)
     app.include_router(relationship_snapshots.router)
@@ -285,7 +280,6 @@ def create_app() -> FastAPI:
     app.include_router(dual_perspectives.router)
     app.include_router(sealing.router)
     app.include_router(possibilities.router)
-    app.include_router(colists.router)
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
     app.include_router(tour.router)

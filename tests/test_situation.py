@@ -32,14 +32,8 @@ UID = "situation-user-1"
 
 
 def _seed() -> None:
-    """造真实数据：一个进行中目标、一条开着的约定、一个悬念、几条关系事件。"""
+    """造真实数据：一条开着的约定、几条关系事件。"""
     db.ensure_user(UID)
-    from backend.core.goals import start_goal
-
-    try:
-        start_goal(UID, "把酒馆同玩打磨顺手", "想让剧情回忆更自然", "补一次真机对局")
-    except Exception:
-        pass  # 已存在（幂等种子）
     save_promise(UID, "周末把那本书的最后一章读完")
     for i, payload in enumerate([
         {"title": "一起读完《灯塔》并留下书摘"},
@@ -58,7 +52,6 @@ def _seed() -> None:
 def test_rebuild_sections_maps_real_data() -> None:
     _seed()
     sections = situation.rebuild_sections(UID)
-    assert any("酒馆同玩" in g for g in sections["goals"]), f"目标节应含进行中目标: {sections['goals']}"
     assert any("最后一章" in p for p in sections["promises"]), "约定节应含开着的约定"
     titles = [e["text"] for e in sections["events_recent"]]
     assert any("灯塔" in t for t in titles), f"事件节应含真实事件: {titles}"
@@ -72,7 +65,7 @@ def test_injection_render_and_flag() -> None:
     situation.recompile(UID)
     ctx = situation.situation_context(UID)
     assert ctx.startswith("[局势档案]"), "注入块应有固定头"
-    assert "酒馆同玩" in ctx and "最后一章" in ctx, "注入块应包含快照内容"
+    assert "最后一章" in ctx, "注入块应包含快照内容"
     # flag 关闭整层退场
     features.set_flag("situation_enabled", False)
     try:

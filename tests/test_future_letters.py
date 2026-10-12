@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_test_letters_"))
 os.environ.setdefault("MEMORY_V2", "0")
 
-from backend.core import future_letters, goals, relationship_export as rex  # noqa: E402
+from backend.core import future_letters, relationship_export as rex  # noqa: E402
 from backend.core.future_letters import EVENT_UNLOCK_TYPES, FutureLetterError  # noqa: E402
 from backend.core.relationship_events import record as record_event  # noqa: E402
 from backend.core.userdb import db, save_promise  # noqa: E402
@@ -110,62 +110,6 @@ def _test_date_letter_boundaries() -> None:
     return letter["id"]
 
 
-def _test_goal_letter_lifecycle() -> int:
-    goal = goals.start_goal(UID, "一起整理完相册", "留住今年", "先挑出 30 张")
-    # 他人命名空间的目标不能选
-    other_goal = goals.start_goal(UID2, "别人的目标", "动机", "下一步")
-    _expect_error(
-        lambda: future_letters.create_letter(UID, BODY, "goal", goal_id=other_goal["id"]),
-        "不存在",
-    )
-    # 非 goal 类活动不能选
-    now = _iso(datetime.now())
-    with db._lock:
-        cur = db.conn.execute(
-            "INSERT INTO activities (user_id, kind, document_id, title, status, position, created_at, updated_at) "
-            "VALUES (?, 'reading', 0, '一本书', 'active', 0, ?, ?)",
-            (UID, now, now),
-        )
-        reading_id = int(cur.lastrowid)
-        db.conn.commit()
-    _expect_error(
-        lambda: future_letters.create_letter(UID, BODY, "goal", goal_id=reading_id),
-        "不存在",
-    )
-
-    letter = future_letters.create_letter(UID, BODY, "goal", goal_id=goal["id"])
-    assert letter["status"] == "sealed" and letter["goal_id"] == goal["id"]
-    assert _letter_status(letter["id"]) == "sealed"
-    _expect_error(lambda: future_letters.open_letter(UID, letter["id"]), "还打不开")
-
-    goals.complete_goal(UID, goal["id"])
-    listed = future_letters.list_letters(UID)
-    assert next(item for item in listed if item["id"] == letter["id"])["status"] == "ready"
-
-    # 已完成的目标不能再作为解锁条件写信（否则解锁瞬间就发生）
-    _expect_error(
-        lambda: future_letters.create_letter(UID, BODY, "goal", goal_id=goal["id"]),
-        "已经结束",
-    )
-
-    opened = future_letters.open_letter(UID, letter["id"])
-    assert opened["status"] == "opened" and opened["body"] == BODY and opened["opened_at"]
-    assert len(_future_artifacts(UID, letter["id"])) == 1, "拆信应幂等创建唯一 artifact"
-    reopened = future_letters.open_letter(UID, letter["id"])
-    assert reopened["body"] == BODY and reopened["opened_at"] == opened["opened_at"]
-    assert len(_future_artifacts(UID, letter["id"])) == 1
-    print("[OK] 目标信：归属校验、完成后才 ready、显式拆信幂等且落 artifact")
-
-    # 已取消的目标：条件永远无法达成，信保持锁定
-    cancelled = goals.start_goal(UID2, "会取消的目标", "动机", "下一步")
-    letter2 = future_letters.create_letter(UID2, BODY, "goal", goal_id=cancelled["id"])
-    goals.cancel_goal(UID2, cancelled["id"])
-    listed = future_letters.list_letters(UID2)
-    assert next(item for item in listed if item["id"] == letter2["id"])["status"] == "sealed"
-    print("[OK] 目标信：已取消的目标永远不可拆")
-    return letter["id"]
-
-
 def _test_event_letter_lifecycle() -> int:
     assert "important_date" not in EVENT_UNLOCK_TYPES, "日期提醒不是完成/修复类，不应进白名单"
     _expect_error(
@@ -243,8 +187,10 @@ def _test_delete_cascade() -> None:
 
 
 def _test_export_restore_references() -> None:
-    goal = goals.start_goal(UID, "写完邀请函", "给朋友", "列名单")
-    future_letters.create_letter(UID, "给完成后的我们", "goal", goal_id=goal["id"])
+    future_letters.create_letter(
+        UID, BODY, "date", title="给完成后的我们",
+        unlock_at=_iso(datetime.now() + timedelta(days=30)),
+    )
     bundle = rex.export_bundle(UID)
     target = "letters-restored"
     preview = rex.preview_restore(bundle, target)
@@ -254,7 +200,7 @@ def _test_export_restore_references() -> None:
 
     src = _rows("SELECT * FROM future_letters WHERE user_id = ?", (UID,))
     dst = _rows("SELECT * FROM future_letters WHERE user_id = ?", (target,))
-    assert len(dst) == len(src) >= 3, "信件计数应一致"
+    assert len(dst) == len(src) >= 2, "信件计数应一致"
 
     def _key(row) -> tuple:
         return (row["unlock_type"], row["title"], row["body"])
@@ -364,7 +310,6 @@ def _test_reset_clears_letters() -> None:
 
 async def main() -> None:
     date_letter_id = _test_date_letter_boundaries()
-    _test_goal_letter_lifecycle()
     _test_event_letter_lifecycle()
     _test_multi_user_isolation(date_letter_id)
     _test_delete_cascade()

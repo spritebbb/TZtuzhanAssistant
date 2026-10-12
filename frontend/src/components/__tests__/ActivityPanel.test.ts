@@ -19,7 +19,6 @@ import {
   type ReadingActivity,
 } from '../../api/activities'
 import { listKnowledgeDocuments } from '../../api/knowledge'
-import { listGoals, startGoal } from '../../api/goals'
 import {
   addWritingTurn,
   listWritings,
@@ -27,7 +26,6 @@ import {
   startWriting,
   type CoWriting,
 } from '../../api/writings'
-import { listLists, startList, addListItem, type SharedList } from '../../api/lists'
 import { addObservationEntry, listObservations, startObservation } from '../../api/observations'
 import ActivityPanel from '../ActivityPanel.vue'
 
@@ -57,27 +55,6 @@ vi.mock('../../api/observations', () => ({
   completeObservation: vi.fn(),
   cancelObservation: vi.fn(),
 }))
-vi.mock('../../api/goals', () => ({
-  addGoalProgress: vi.fn(),
-  cancelGoal: vi.fn(),
-  completeGoal: vi.fn(),
-  exportGoalUrl: vi.fn((id: number) => `/api/goals/${id}/export?format=md`),
-  listGoals: vi.fn(),
-  pauseGoal: vi.fn(),
-  resumeGoal: vi.fn(),
-  startGoal: vi.fn(),
-}))
-vi.mock('../../api/lists', () => ({
-  addListItem: vi.fn(),
-  cancelList: vi.fn(),
-  completeList: vi.fn(),
-  exportListUrl: vi.fn((id: number) => `/api/lists/${id}/export?format=md`),
-  listLists: vi.fn(),
-  pauseList: vi.fn(),
-  removeListItem: vi.fn(),
-  resumeList: vi.fn(),
-  startList: vi.fn(),
-}))
 vi.mock('../../api/writings', () => ({
   addWritingTurn: vi.fn(),
   cancelWriting: vi.fn(),
@@ -101,32 +78,10 @@ const mockedPosition = vi.mocked(setReadingPosition)
 const mockedNote = vi.mocked(saveReadingNote)
 const mockedViewpoint = vi.mocked(saveReadingViewpoint)
 const mockedComplete = vi.mocked(completeReading)
-const mockedGoals = vi.mocked(listGoals)
-const mockedStartGoal = vi.mocked(startGoal)
 const mockedWritings = vi.mocked(listWritings)
 const mockedStartWriting = vi.mocked(startWriting)
 const mockedAddTurn = vi.mocked(addWritingTurn)
 const mockedTuzhanTurn = vi.mocked(requestTuzhanTurn)
-const mockedLists = vi.mocked(listLists)
-const mockedStartList = vi.mocked(startList)
-const mockedAddItem = vi.mocked(addListItem)
-
-function sharedList(overrides: Partial<SharedList> = {}): SharedList {
-  return {
-    id: 31,
-    kind: 'list',
-    title: '换季歌单',
-    status: 'active',
-    list_kind: 'song',
-    kind_label: '歌单',
-    created_at: '2026-09-06T12:00:00',
-    updated_at: '2026-09-06T12:00:00',
-    completed_at: null,
-    items: [],
-    compiled: '',
-    ...overrides,
-  }
-}
 
 function writing(overrides: Partial<CoWriting> = {}): CoWriting {
   return {
@@ -173,9 +128,7 @@ describe('ActivityPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockedList.mockResolvedValue([])
-    mockedGoals.mockResolvedValue([])
     mockedWritings.mockResolvedValue([])
-    mockedLists.mockResolvedValue([])
     mockedDocuments.mockResolvedValue([{
       id: 3,
       filename: '藤本植物.txt',
@@ -232,21 +185,6 @@ describe('ActivityPanel', () => {
       viewpoints: [{ role, position: 0, content, ts: '2026-09-04T12:00:00' }],
     }))
     mockedComplete.mockResolvedValue(activity({ status: 'completed', completed_at: '2026-09-04T13:00:00', summary: '《藤本植物.txt》读完时留下的东西：' }))
-    mockedStartGoal.mockResolvedValue({
-      id: 18,
-      kind: 'goal',
-      title: '整理作品集',
-      status: 'active',
-      motivation: '想把做过的事讲清楚',
-      next_step: '先挑三个项目',
-      support_mode: 'companion',
-      reminder_at: null,
-      created_at: '2026-09-05T12:00:00',
-      updated_at: '2026-09-05T12:00:00',
-      completed_at: null,
-      progress_entries: [],
-      review: '',
-    })
   })
 
   it('shows the reading map and finishes the current segment', async () => {
@@ -296,26 +234,6 @@ describe('ActivityPanel', () => {
     expect(mockedStart).toHaveBeenCalledWith(3)
     expect(wrapper.text()).toContain('第一段讲菟丝子的生长')
     expect(wrapper.text()).toContain('第 1 / 2 段')
-  })
-
-  it('creates a shared goal with an explicit next small step', async () => {
-    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
-    await flushPromises()
-
-    await wrapper.get('.goal-section .open-bookshelf').trigger('click')
-    const inputs = wrapper.findAll('.goal-create input[type="text"], .goal-create input:not([type])')
-    await inputs[0].setValue('整理作品集')
-    await wrapper.get('.goal-create textarea').setValue('想把做过的事讲清楚')
-    await inputs[1].setValue('先挑三个项目')
-    await wrapper.get('.goal-create .talk').trigger('click')
-    await flushPromises()
-
-    expect(mockedStartGoal).toHaveBeenCalledWith(expect.objectContaining({
-      title: '整理作品集',
-      next_step: '先挑三个项目',
-      support_mode: 'companion',
-    }))
-    expect(wrapper.text()).toContain('NEXT SMALL STEP')
   })
 
   it('saves a bookmark, turns the page and hands a draft back to chat', async () => {
@@ -434,33 +352,6 @@ describe('ActivityPanel', () => {
     expect(mockedTuzhanTurn).toHaveBeenCalledWith(22)
     expect(wrapper.text()).toContain('第八天，灯塔亮了第二次')
     expect(wrapper.text()).toContain('她接了一段')
-  })
-
-  it('creates a shared list and records an item', async () => {
-    mockedStartList.mockResolvedValue(sharedList())
-    mockedAddItem.mockImplementation(async (_id, item) =>
-      sharedList({
-        items: [{ id: 1, title: item.title!, creator: item.creator ?? '', note: item.note ?? '', added_by: 'user', ts: '2026-09-06T12:01:00' }],
-      }),
-    )
-    const wrapper = mount(ActivityPanel, { props: { show: true, personaName: '菟菚' } })
-    await flushPromises()
-
-    await wrapper.get('.list-section .open-bookshelf').trigger('click')
-    await wrapper.get('.list-section .goal-create input').setValue('换季歌单')
-    await wrapper.get('.list-section .goal-create .talk').trigger('click')
-    await flushPromises()
-
-    expect(mockedStartList).toHaveBeenCalledWith('换季歌单', 'song')
-    expect(wrapper.text()).toContain('清单还空着')
-
-    await wrapper.get('.writing-turn-form input').setValue('夜空中最亮的星')
-    await wrapper.get('.writing-turn-form textarea').setValue('换季必循环')
-    await wrapper.get('.writing-actions button').trigger('click')
-    await flushPromises()
-
-    expect(mockedAddItem).toHaveBeenCalledWith(31, { title: '夜空中最亮的星', creator: '', note: '换季必循环' })
-    expect(wrapper.text()).toContain('夜空中最亮的星')
   })
 
   it('shows the shared book summary from the finished list', async () => {

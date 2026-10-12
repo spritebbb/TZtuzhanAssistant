@@ -33,7 +33,6 @@ _RESOURCE_TABLES = {
     "kb_document": "kb_documents",
     "artifact": "artifacts",
     "writing": "activity_writings",
-    "list": "activity_lists",
 }
 
 

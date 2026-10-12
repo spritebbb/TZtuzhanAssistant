@@ -41,30 +41,16 @@ def _parse_ts(value: str) -> datetime:
 
 
 def pause_all_active_locked(user_id: str, now: str) -> None:
-    """暂停该用户所有进行中的活动（同时只活跃一场）。
-
-    focus 类型的行带计时：暂停前必须把 ends_at 结算成 remaining_seconds，
-    否则恢复时会按旧 ends_at 少算剩余时间。调用方需持有 db._lock。
-    """
+    """暂停该用户所有进行中的活动（同时只活跃一场）。调用方需持有 db._lock。"""
     rows = db.conn.execute(
-        "SELECT id, kind, ends_at FROM activities WHERE user_id = ? AND status = 'active'",
+        "SELECT id FROM activities WHERE user_id = ? AND status = 'active'",
         (user_id,),
     ).fetchall()
     for row in rows:
-        if row["kind"] == "focus" and row["ends_at"]:
-            remaining = max(
-                0, int((_parse_ts(row["ends_at"]) - _parse_ts(now)).total_seconds())
-            )
-            db.conn.execute(
-                "UPDATE activities SET status = 'paused', remaining_seconds = ?, "
-                "ends_at = NULL, updated_at = ? WHERE id = ?",
-                (remaining, now, row["id"]),
-            )
-        else:
-            db.conn.execute(
-                "UPDATE activities SET status = 'paused', updated_at = ? WHERE id = ?",
-                (now, row["id"]),
-            )
+        db.conn.execute(
+            "UPDATE activities SET status = 'paused', updated_at = ? WHERE id = ?",
+            (now, row["id"]),
+        )
 
 
 def _viewpoints_locked(user_id: str, activity_id: int) -> list[dict]:
@@ -434,39 +420,6 @@ _VIEWPOINT_DRAFT_PROMPT = """你是「菟菚」。下面是你们一件共同活
 
 
 def _draft_material_locked(user_id: str, activity_id: int, kind: str, title: str) -> str:
-    if kind == "goal":
-        goal = db.conn.execute(
-            "SELECT motivation, next_step, support_mode FROM activity_goals WHERE activity_id = ?",
-            (activity_id,),
-        ).fetchone()
-        progress = db.conn.execute(
-            "SELECT content FROM goal_progress WHERE user_id = ? AND activity_id = ? "
-            "ORDER BY id DESC LIMIT 5",
-            (user_id, activity_id),
-        ).fetchall()
-        parts = [f"共同目标「{title}」。"]
-        if goal is not None:
-            if str(goal["motivation"] or "").strip():
-                parts.append(f"初衷：{str(goal['motivation'])[:200]}")
-            if str(goal["next_step"] or "").strip():
-                parts.append(f"下一步：{str(goal['next_step'])[:120]}")
-        if progress:
-            parts.append("最近进展：" + "；".join(str(r["content"])[:80] for r in progress))
-        return "\n".join(parts)
-    if kind == "list":
-        items = db.conn.execute(
-            "SELECT title, note FROM list_items WHERE user_id = ? AND activity_id = ? "
-            "ORDER BY id LIMIT 20",
-            (user_id, activity_id),
-        ).fetchall()
-        listing = db.conn.execute(
-            "SELECT list_kind FROM activity_lists WHERE activity_id = ?",
-            (activity_id,),
-        ).fetchone()
-        list_kind = str(listing["list_kind"]) if listing else "song"
-        lines = [f"我们的共同{'书单' if list_kind == 'book' else '歌单'}「{title}」，里面有："]
-        lines.extend(f"- {str(r['title'])[:60]}" for r in items)
-        return "\n".join(lines)
     if kind == "writing":
         turns = db.conn.execute(
             "SELECT COUNT(*) AS n, SUM(author = 'user') AS mine FROM writing_turns "
@@ -479,18 +432,6 @@ def _draft_material_locked(user_id: str, activity_id: int, kind: str, title: str
             f"我们一起轮流续写的故事「{title}」，一共写了{total_turns}段"
             f"（其中你写了{my_turns}段）。故事正文是只有显式收藏才保留的虚构内容，"
             "这里只有标题与轮数。"
-        )
-    if kind == "focus":
-        row = db.conn.execute(
-            "SELECT planned_minutes, status, created_at, completed_at FROM activities "
-            "WHERE user_id = ? AND id = ?",
-            (user_id, activity_id),
-        ).fetchone()
-        if row is None:
-            return f"一次专注陪伴「{title}」。"
-        return (
-            f"一次专注陪伴「{title}」：计划 {row['planned_minutes']} 分钟，"
-            f"状态 {row['status']}" + (f"，完成于 {str(row['completed_at'])[:16]}" if row["completed_at"] else "") + "。"
         )
     # reading 及其他：用活动标题兜底
     return f"共同活动「{title}」。"

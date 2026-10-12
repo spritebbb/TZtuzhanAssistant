@@ -24,26 +24,20 @@ from datetime import datetime, timedelta
 
 from .log import logger
 
-KINDS: tuple[str, ...] = ("goal", "writing", "song_list", "book_list")
+KINDS: tuple[str, ...] = ("writing",)
 DRAFT_TTL_MINUTES = 20
 _MAX_TITLE = 60
 _MAX_TEXT = 400
 
 # payload 白名单：只允许各既有创建接口认识的字段
 _PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
-    "goal": ("motivation", "next_step", "support_mode"),
     "writing": ("premise", "genre"),
-    "song_list": ("theme",),
-    "book_list": ("theme",),
 }
 
 # 明确邀请：必须出现「一起做/一起开始/想一起」这类意向词 + 可识别活动类型
 _INVITE_RE = re.compile(r"想一起|一起做|一起开始|咱们一起|要不要一起|陪我一起|和我一起")
 _KIND_RE: tuple[tuple[str, re.Pattern], ...] = (
-    ("goal", re.compile(r"目标|计划|坚持|打卡|一起做点什么")),
     ("writing", re.compile(r"写故事|共同创作|一起写|故事|小说")),
-    ("song_list", re.compile(r"歌单|一起听|挑歌|音乐")),
-    ("book_list", re.compile(r"书单|一起读|共读|读书")),
 )
 
 _SECRET = secrets.token_bytes(32)  # 进程级密钥：重启即失效（设计允许）
@@ -187,27 +181,10 @@ def confirm_draft(user_id: str, token: str, *, title: str | None = None,
 def _start_authoritative(user_id: str, kind: str, title: str, payload: dict) -> dict | None:
     """复用既有权威创建函数（不新造第二套创建路径）。"""
     try:
-        if kind == "goal":
-            from .goals import start_goal
-
-            return start_goal(
-                user_id, title,
-                motivation=str(payload.get("motivation") or ""),
-                next_step=str(payload.get("next_step") or ""),
-                support_mode=str(payload.get("support_mode") or "companion"),
-            )
         if kind == "writing":
             from .cowriting import start_writing
 
             return start_writing(user_id, title)
-        if kind == "song_list":
-            from .colists import start_list
-
-            return start_list(user_id, title, "song")
-        if kind == "book_list":
-            from .colists import start_list
-
-            return start_list(user_id, title, "book")
     except Exception as exc:
         logger.warning("[活动草稿] 权威创建失败 {}：{}", kind, exc)
     return None
@@ -217,8 +194,7 @@ def active_mutex_notice(user_id: str, kind: str) -> str:
     """活动互斥告知：同壳有进行中的活动时，确认会先暂停它。"""
     from .userdb import db
 
-    shell = {"goal": "goal", "writing": "writing",
-             "song_list": "list", "book_list": "list"}.get(kind)
+    shell = {"writing": "writing"}.get(kind)
     if shell is None:
         return ""
     with db._lock:

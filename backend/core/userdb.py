@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 56  # v56: 删除 M5 pending_thoughts 表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 57  # v57: 删除 M3.3/M3.4 目标·清单四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -433,30 +433,6 @@ CREATE TABLE IF NOT EXISTS activity_viewpoints (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_viewpoints_activity
     ON activity_viewpoints(user_id, activity_id);
--- M3.3 共同目标：活动壳负责生命周期，目标表保存动机、下一步与陪伴偏好。
-CREATE TABLE IF NOT EXISTS activity_goals (
-    activity_id  INTEGER PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    motivation   TEXT NOT NULL DEFAULT '',
-    next_step    TEXT NOT NULL DEFAULT '',
-    support_mode TEXT NOT NULL DEFAULT 'companion', -- companion / reminder
-    reminder_at  TEXT,
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS goal_progress (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    activity_id INTEGER NOT NULL,
-    content     TEXT NOT NULL,
-    percent     INTEGER,
-    next_step   TEXT NOT NULL DEFAULT '',
-    ts          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_activity_goals_user
-    ON activity_goals(user_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_goal_progress_activity
-    ON goal_progress(user_id, activity_id, ts);
 -- M3.4 共同创作：活动壳负责生命周期，开头设定与轮流正文保存在专属侧表。
 -- 虚构隔离：故事正文只存这里，不进会话历史与记忆提炼；进 prompt 的唯一
 -- 通道是 cowriting.cowriting_context 的虚构声明门控注入。
@@ -526,26 +502,6 @@ CREATE TABLE IF NOT EXISTS voice_profiles (
     created_at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_voice_profiles_persona ON voice_profiles(persona_id, enabled);
--- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
-CREATE TABLE IF NOT EXISTS activity_lists (
-    activity_id  INTEGER PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    list_kind    TEXT NOT NULL DEFAULT 'song',   -- song / book
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS list_items (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    activity_id INTEGER NOT NULL,
-    title       TEXT NOT NULL,
-    creator     TEXT NOT NULL DEFAULT '',
-    note        TEXT NOT NULL DEFAULT '',
-    added_by    TEXT NOT NULL DEFAULT 'user',    -- user / tuzhan
-    ts          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_list_items_activity
-    ON list_items(user_id, activity_id, id);
 -- M8「写给未来的我们」：用户亲手写的未来信件。正文是唯一的私密内容，
 -- 锁定态（sealed 且条件未达成）绝不离开后端；ready 由查询时按条件确定性计算。
 CREATE TABLE IF NOT EXISTS future_letters (
@@ -1400,7 +1356,7 @@ class UserDB:
             "messages", "long_memory", "facts", "affection_log", "important_dates",
             "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
             "promises", "usage_log", "kb_documents", "kb_chunks", "activities", "activity_notes",
-            "activity_goals", "goal_progress", "profile_evolution_log", "her_statements",
+            "profile_evolution_log", "her_statements",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -2373,8 +2329,8 @@ class UserDB:
                 "users", "kv_store", "important_dates", "stickers",
                 "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
-                "activity_viewpoints", "activity_goals", "goal_progress",
-                "activity_writings", "writing_turns", "activity_lists", "list_items",
+                "activity_viewpoints",
+                "activity_writings", "writing_turns",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
                 "persona_evolution_log", "experience_metrics",

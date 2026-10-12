@@ -153,14 +153,6 @@ def _eligible_users() -> list[dict]:
         # 今天已经主动过 → 跳过
         if _proactive_done_today(uid):
             continue
-        # 专注陪伴进行中 → 静默（M3.2：安静模式不主动打扰）
-        try:
-            from .focus import focus_in_progress
-
-            if focus_in_progress(uid):
-                continue
-        except Exception:
-            pass
         # 没聊过或最近在聊 → 跳过（不骚扰正在聊天的人）
         last = _last_chat_ts(uid)
         idle_hours = _idle_hours_for_user(uid, now_ts=now)
@@ -389,9 +381,8 @@ async def _tick_once() -> int:
         from .persona_profiles import active_user_id
 
         uid = active_user_id()
-        from .focus import focus_in_progress
 
-        if db.get_user(uid) and not focus_in_progress(uid):
+        if db.get_user(uid):
             await _arbitrate_secondary(uid)
     except Exception as e:
         logger.warning("[主动性] 次级主动源仲裁失败: {}", e)
@@ -649,14 +640,6 @@ async def poll_message_for(user_id: str) -> ProactiveMessage | None:
     # 今天已主动过
     if _proactive_done_today(user_id):
         return None
-    # 专注陪伴进行中 → 静默（M3.2）
-    try:
-        from .focus import focus_in_progress
-
-        if focus_in_progress(user_id):
-            return None
-    except Exception:
-        pass
     # 最近在聊则不打扰。P3-37：与 push 通道同口径使用 _idle_hours_for_user——
     # 拉模式此前恒用 config 默认 6h，新用户前 3 天的 2h 档在桌面端主路径不生效
     last = _last_chat_ts(user_id)
@@ -765,13 +748,6 @@ async def _arbited_proactive(
     last = _last_chat_ts(user_id)
     if last is not None and time.time() - last < idle_minutes * 60:
         return None
-    try:
-        from .focus import focus_in_progress
-
-        if focus_in_progress(user_id):
-            return None
-    except Exception:
-        pass
     if done_today():
         return None
     from .proactive_policy import finish_active_claim, try_claim_active

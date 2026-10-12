@@ -978,8 +978,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     fact_id_map = gathered["fact_id_map"]
     kb_hits = gathered["kb_hits"]
     reading_context = gathered["reading_context"]
-    focus_ctx = gathered["focus_ctx"]
-    goal_ctx = gathered["goal_ctx"]
     writing_ctx = gathered["writing_ctx"]
     tavern_mem_ctx = gathered["tavern_mem_ctx"]
     list_ctx = gathered["list_ctx"]
@@ -1119,8 +1117,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     inject_activity_contexts(
         messages,
         reading_context=reading_context,
-        focus_ctx=focus_ctx,
-        goal_ctx=goal_ctx,
         writing_ctx=writing_ctx,
         tavern_mem_ctx=tavern_mem_ctx,
         list_ctx=list_ctx,
