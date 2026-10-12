@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["TZTUZHAN_DATA_DIR"] = tempfile.mkdtemp(prefix="tztuzhan_test_hygiene_")
 os.environ["MEMORY_V2"] = "0"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["SEARCH_ENABLED"] = "0"
 os.environ["MOOD_CITY"] = ""
 

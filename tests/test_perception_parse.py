@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault("MEMORY_EMBED_FORCE", "1")
-os.environ.setdefault("MEMORY_MEM0", "0")
 os.environ.setdefault("MOOD_CITY", "")
 os.environ.setdefault("SEARCH_ENABLED", "0")
 

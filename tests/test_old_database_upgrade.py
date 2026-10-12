@@ -17,7 +17,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_legacy.sql"
 
 
 def _target_version() -> int:
-    """跟随代码的当前 schema 版本（v45 引入声纹表，v46 追加 manager_memories），
+    """跟随代码的当前 schema 版本（v45 引入声纹表），
     升级链 v40 → 当前版本每次 bump 自动适用。"""
     from backend.core.userdb import _SCHEMA_VERSION
 
@@ -50,7 +50,6 @@ def _run_import(
     env.update({
         "TZTUZHAN_DATA_DIR": str(data_root),
         "MEMORY_V2": "0",
-        "MEMORY_MEM0": "0",
         "MEMORY_EMBED_FORCE": "1",
     })
     proc = subprocess.run(

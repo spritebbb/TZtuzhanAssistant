@@ -52,7 +52,7 @@ def _memory_status() -> dict:
     """记忆引擎运行状态（向量库可用性/embedding 模式/条目数），失败静默。"""
     # 记忆明确关闭时，状态查询不得为了展示一个状态而初始化 Chroma 或触发模型加载。
     if not config.memory_v2:
-        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "disabled", "mem0": False}
+        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "disabled"}
     try:
         from ..core.memory import vector_store as vec
         from ..core.memory import embedding as emb
@@ -66,10 +66,9 @@ def _memory_status() -> dict:
                 f"model:{emb.current_model()}" if emb.is_loaded()
                 else ("hash" if config.memory_embed_force else "warming")
             ),
-            "mem0": bool(config.memory_mem0),
         }
     except Exception:
-        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "unknown", "mem0": False}
+        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "unknown"}
 
 
 @router.get("/meta")

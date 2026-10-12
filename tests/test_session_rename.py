@@ -19,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # 测试环境收敛（与 test_http_endpoints 同款）：不下载模型、关后台与外部能力
 os.environ["MEMORY_EMBED_FORCE"] = "1"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"
