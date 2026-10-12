@@ -202,23 +202,6 @@ def _build_proactive_prompt(user_id: str, *, has_image: bool = False) -> list[di
     h = now.hour
     period = "上午" if h < 12 else "下午" if h < 18 else "晚上"
     narrative_hint = ""
-    last_chat = _last_chat_ts(user_id)
-    if last_chat is not None:
-        gap_hours = max(0.0, (time.time() - last_chat) / 3600)
-        try:
-            from .offline_narrative import collect_offline_context
-
-            narrative = collect_offline_context(user_id, gap_hours, now=now)
-            if narrative.mode == "dream" and stage_of(affection_val) in {"初识", "熟悉"}:
-                narrative = type(narrative)(
-                    mode="research",
-                    gap_hours=narrative.gap_hours,
-                    recent_lines=narrative.recent_lines,
-                    triple_lines=narrative.triple_lines,
-                )
-            narrative_hint = "\n\n" + narrative.prompt_hint(stage_of(affection_val))
-        except Exception as e:
-            logger.warning("[主动性] 离线叙事素材整理失败: {}", e)
     image_hint = (
         "\n\n你已经随手做了一张自己的图片准备一起发给对方。"
         "正文只要自然提一句让对方看看，别说提示词、模型、路径或生成过程，也别逐项描述图片。"
@@ -292,8 +275,6 @@ def _mark_proactive_variant_used(user_id: str) -> None:
 
 async def generate_proactive_message(user_id: str) -> str | None:
     """为某用户生成一条主动消息。返回文本或 None（失败静默）。"""
-    # _build_proactive_prompt 内部含同步 Chroma 检索（collect_offline_context），
-    # 放线程池执行，避免慢查询阻塞事件循环
     msgs = await asyncio.to_thread(_build_proactive_prompt, user_id)
     if not msgs:
         return None
@@ -346,7 +327,6 @@ async def _generate_proactive_image(user_id: str) -> str | None:
 async def generate_proactive_content(user_id: str) -> ProactiveMessage | None:
     """生成一条完整主动消息；图片失败时自动退化为纯文字。"""
     image = await _generate_proactive_image(user_id)
-    # _build_proactive_prompt 内部含同步 Chroma 检索，放线程池避免阻塞事件循环
     msgs = await asyncio.to_thread(_build_proactive_prompt, user_id, has_image=bool(image))
     if not msgs:
         return None
