@@ -503,13 +503,6 @@ def create_app() -> FastAPI:
             _spawn_bg(_startup_recap())
         except Exception:
             logger.exception("[离线补算] 启动预生成任务创建失败")
-        # 38项#22 兴趣源：每小时检查到期授权源拉新素材（无源零动作）
-        try:
-            from .core.interest_feed import feed_loop as _feed_loop
-
-            _spawn_bg(_feed_loop())
-        except Exception:
-            logger.exception("[兴趣源] 后台循环启动失败")
 
     _bg_tasks: set = set()
 

@@ -862,119 +862,6 @@ async def _arbitrate_secondary(user_id: str) -> bool:
     通用闲聊式主动仍走 _eligible_users 兜底，
     与次级源共享同一份每日额度——额度用尽后自然全部静默。
     """
-    async def _maybe_interest_share(uid: str) -> str | None:
-        """38项#22 兴趣源分享：授权源拉到的新鲜素材 → 说一句（走统一仲裁）。
-
-        necessity 门槛用次级源里偏高的 0.42（外部分享是低频点缀，不与心事/
-        约定抢额度优先级）；出牌后 mark_feed_item_used；无素材零动作。
-        """
-        from .features import flag
-        from .interest_feed import PULL_INTERVAL_HOURS  # noqa: F401（契约引用）
-        from .userdb import db
-
-        if not flag("interest_feeds_enabled"):
-            return None
-        try:
-            items = db.unused_feed_items(uid, limit=1)
-        except Exception:
-            logger.exception("[兴趣源] 素材查询失败（跳过本轮）")
-            return None
-        if not items:
-            return None
-        item = items[0]
-        item_id, content = int(item["id"]), str(item["content"])
-
-        from .expression_policy import score_necessity
-
-        # 低必要性是设计：外部分享 relevance/relationship_value 都只给中低分，
-        # 让统一仲裁的 NECESSITY_THRESHOLD 自然把它排在心事/约定之后。
-        necessity = score_necessity(
-            relevance=0.5, novelty=0.8, relationship_value=0.2, interruption_cost=0.2,
-        )
-
-        async def produce() -> str:
-            return content
-
-        return await _arbited_proactive(
-            uid,
-            source="initiative:interest_share",
-            idle_minutes=240,
-            done_today=lambda: False,
-            produce=produce,
-            necessity=necessity,
-            on_delivered=lambda: db.mark_feed_item_used(uid, item_id),
-        )
-
-    async def _maybe_activity_invite(uid: str) -> str | None:
-        """38项#28 玩法发起权：兴趣源有新鲜素材时，她主动发起「要不要一起」。
-
-        7 天一次（kv activity_invite:last）；邀请文案走小 LLM（batch_other，
-        失败静默本轮放弃）；用户口头应下后由既有 activity_drafts 的邀请识别
-        自然接住（_INVITE_RE 匹配「一起/要不要」类回应），零前端改动。
-        """
-        import time as _time
-
-        from .features import flag
-        from .userdb import kv_get, kv_set
-        from .userdb import db
-
-        if not flag("interest_feeds_enabled"):
-            return None
-        try:
-            last = kv_get(uid, "activity_invite:last") or ""
-            if last and (_time.time() - float(last)) < 7 * 86400:
-                return None
-            items = db.unused_feed_items(uid, limit=1)
-        except Exception:
-            logger.exception("[玩法发起] 前置检查失败（跳过本轮）")
-            return None
-        if not items:
-            return None
-        material = str(items[0]["content"])
-        topic_kw = str(items[0]["keywords"])
-
-        async def produce() -> str | None:
-            from .llm import chat
-
-            try:
-                return await chat(
-                    [
-                        {"role": "system", "content": (
-                            "用菟菚的口吻（干脆、不黏、无句号、句尾无语气词、一到两截短消息）"
-                            "把一条外部资讯变成对网友的玩法邀请：提到素材里最值得一起搞的点，"
-                            "以「要不要一起」式收尾，≤50字。只输出消息本身。"
-                        )},
-                        {"role": "user", "content": f"兴趣源：{topic_kw}\n素材：{material}"},
-                    ],
-                    temperature=0.7,
-                    max_tokens=80,
-                    task="batch_other",
-                    thinking=False,
-                )
-            except Exception:
-                return None
-
-        def _mark() -> None:
-            try:
-                kv_set(uid, "activity_invite:last", str(_time.time()))
-            except Exception:
-                logger.exception("[玩法发起] 去重键写入失败（可能下次重复发起）")
-
-        from .expression_policy import score_necessity
-
-        necessity = score_necessity(
-            relevance=0.5, novelty=0.8, relationship_value=0.3, interruption_cost=0.25,
-        )
-        return await _arbited_proactive(
-            uid,
-            source="initiative:activity_invite",
-            idle_minutes=300,
-            done_today=lambda: False,
-            produce=produce,
-            necessity=necessity,
-            on_delivered=_mark,
-        )
-
     async def _maybe_surprise(uid: str) -> str | None:
         from .surprise import maybe_orchestrate_surprise
 
@@ -1048,8 +935,6 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         _maybe_outing_note,
         _maybe_watch_change,
         _maybe_companion_request,
-        _maybe_interest_share,   # 38项#22：排惊喜前（新素材分享让位给惊喜的仪式感）
-        _maybe_activity_invite,  # 38项#28：玩法发起（7 天一次，比分享更高关系价值）
         _maybe_surprise,
     ):
         text = await proposer(user_id)

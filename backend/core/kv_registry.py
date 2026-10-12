@@ -41,7 +41,6 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("initiative:promise_followup:{day}", "initiative", "约定跟进每日一次去重", "daily"),
     KvKeySpec("surprise:last", "surprise", "上次惊喜日期（低频间隔门控）", "runtime"),
     KvKeySpec("surprise:last_artifact", "surprise", "上次惊喜使用的产物 id（素材轮换）", "runtime"),
-    KvKeySpec("activity_invite:last", "initiative", "38项#28 上次她发起玩法邀请的时间（7 天去重）", "runtime"),
     KvKeySpec("web_last_seen", "greeting", "久别问候的上次访问时间", "runtime"),
     KvKeySpec("web_greet_pending", "greeting", "问候生成中占位", "transient"),
     KvKeySpec("rhythm:followups", "conversation_rhythm", "有期限追发实例（只存来源摘要）", "runtime"),
