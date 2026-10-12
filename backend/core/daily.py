@@ -40,11 +40,6 @@ DIARY_PROMPT = """你是菟菚，在当天聊天结束后写一小段只给自�
 根据对话，只输出 JSON：{"content":"日记正文","mood":"心情标签"}
 要求：第一人称，90-220 个汉字；写出嘴上克制或毒舌、心里真实在意的轻微反差；最多自然提一件对话中的具体小事；不编造没发生的经历、论文或现实接触；不写系统、模型、提示词；不要把对话逐条总结。"""
 
-RESEARCH_PROMPT = """你是研究员菟菚，课题名《观察人类：以你为样本》。
-根据最近七篇私人日记写一份阶段研究记录，只输出 JSON：
-{"title":"简短标题","content":"正文"}
-正文 180-420 个汉字，包含一个观察、一个仍不确定的假设、一个接下来想留意的小问题。语气聪明、有一点腹黑，但尊重对方；只使用材料中确有依据的内容，不做心理诊断，不编造事实。"""
-
 PROMISE_PROMPT = """你是约定记录员。根据对话，找出「双方明确许下的约定、承诺或计划中要做的事」，只输出 JSON：
 {"promises": [{"content": "一句短话概括约定（如：用户答应周五把新游戏 demo 发给菟菚看）", "follow_up": "YYYY-MM-DD 或空字符串", "owner": "user 或 assistant", "due_at": "YYYY-MM-DD 或空字符串"}]}
 规则：
@@ -239,7 +234,6 @@ async def run_daily_batch(user_id: str, day: date) -> None:
         close_after_daily(user_id, day)
     except Exception:
         logger.exception("[每日总结] 重逢日记收束失败（不影响批次）")
-    await maybe_write_research_report(user_id)
     # D9 局势档案：确定性全量重编译（零 LLM 不过成本闸；压缩段由 turn 增量路径再生）
     try:
         from .situation import recompile
@@ -355,56 +349,6 @@ def _link_diary_sources(user_id: str, diary_id: int, day: date) -> int:
                        version=str(row["updated_at"] or "")):
             count += 1
     return count
-
-
-async def maybe_write_research_report(user_id: str) -> dict | None:
-    """每累计七篇新日记产出一份阶段研究记录，失败留到下次继续尝试。"""
-    from .userdb import list_diaries, list_research_reports, save_research_report
-
-    diaries = list_diaries(user_id, limit=365)
-    reports = list_research_reports(user_id, limit=100)
-    if len(diaries) < (len(reports) + 1) * 7:
-        return None
-    batch = list(reversed(diaries[:7]))
-    period = f"{batch[0]['date']}~{batch[-1]['date']}"
-    transcript = "\n\n".join(f"{d['date']}（{d['mood']}）：{d['content']}" for d in batch)
-    try:
-        from .persona_profiles import persona_name_for_user_id
-
-        persona_name = persona_name_for_user_id(user_id)
-        resp = await chat(
-            [
-                {"role": "system", "content": RESEARCH_PROMPT.replace("菟菚", persona_name)},
-                {"role": "user", "content": transcript},
-            ],
-            temperature=0.55,
-            max_tokens=800,
-            task="batch_diary",
-        )
-        data = _parse_json(resp)
-        title = str(data.get("title") or "").strip()
-        content = str(data.get("content") or "").strip()
-        if not content:
-            return None
-        from .output_hygiene import HygieneContext, protect_visible_text
-
-        content = protect_visible_text(
-            content,
-            context=HygieneContext(kind="research_report", source_namespace="daily"),
-            fallback="这阶段的材料还不够稳妥，我先把结论留到下一次记录。",
-        ).text
-        title = protect_visible_text(
-            title,
-            context=HygieneContext(kind="research_title", source_namespace="daily"),
-            fallback="阶段观察",
-        ).text
-        if not content:
-            return None
-        report_id = save_research_report(user_id, period, title, content)
-        return {"id": report_id, "period": period, "title": title, "content": content}
-    except Exception:
-        logger.warning("[研究课题] {} 阶段报告生成失败，保留到下次重试", user_id)
-        return None
 
 
 async def extract_promises(user_id: str, day: date, transcript: str) -> int:

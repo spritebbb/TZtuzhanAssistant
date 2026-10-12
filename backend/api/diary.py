@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""菟菚私人日记与《观察人类》阶段研究记录，只读浏览接口。"""
+"""菟菚私人日记，只读浏览接口。"""
 from __future__ import annotations
 
 import re
@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from .chat import _user_id
-from ..core.userdb import get_diary, list_diaries, list_research_reports
+from ..core.userdb import get_diary, list_diaries
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api", tags=["diary"])
@@ -30,9 +30,3 @@ async def api_diary(day: str, session_id: str = ""):
     if not item:
         return JSONResponse({"ok": False, "error": "这一天还没有日记"}, status_code=404)
     return {"ok": True, "diary": item}
-
-
-@router.get("/research-reports")
-async def api_research_reports(session_id: str = "", limit: int = Query(24, ge=1, le=100)):
-    uid = _user_id(session_id) if session_id else active_user_id()
-    return {"ok": True, "reports": list_research_reports(uid, limit)}
