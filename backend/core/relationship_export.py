@@ -50,7 +50,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
         "activity_lists", "list_items",
     ),
-    "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
+    "events": ("relationship_events", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot", "event_chains",
                "relationship_dimension_ledger", "humor_usage"),
     "knowledge": ("kb_documents", "kb_chunks", "document_segments", "knowledge_opinions", "knowledge_opinion_sources",
@@ -144,7 +144,6 @@ _REFERENCE_RULES = (
     _rule_static("list_items", "activity_id", "activity_lists"),
     _rule_static("relationship_dimension_ledger", "event_id", "relationship_events"),
     _rule_static("event_chains", "source_event_id", "relationship_events"),
-    _rule_static("event_chains", "result_id", "pending_thoughts"),
     _rule_static("humor_usage", "term_id", "user_terms"),
     _rule_static("document_segments", "document_id", "kb_documents"),
     _rule_static("facts", "conflicts_with_fact_id", "facts", frozenset()),
@@ -160,7 +159,6 @@ _REFERENCE_RULES = (
     _rule_dynamic("artifacts", "source_id", "source_type"),
     _rule_dynamic("source_links", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
-    _rule_dynamic("pending_thoughts", "source_id", "source_type"),
 )
 
 

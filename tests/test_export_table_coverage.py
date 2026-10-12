@@ -107,15 +107,9 @@ def _seed(uid: str) -> dict:
             "INSERT INTO relationship_dimension_ledger (user_id, event_id, rule_id, trust_delta, intimacy_delta, occurred_at) "
             "VALUES (?, ?, 'r1', 2, 1, ?)", (uid, ids["event"], TS))
         c.execute(
-            "INSERT INTO pending_thoughts (user_id, kind, source_type, source_id, content, earliest_at, expires_at, priority, created_at) "
-            "VALUES (?, 'goal_checkin', 'activity', ?, '惦记', ?, ?, 5, ?)",
-            (uid, ids["activity"], TS, "2026-10-06T10:00:00", TS))
-        ids["thought"] = int(c.execute(
-            "SELECT id FROM pending_thoughts WHERE user_id=?", (uid,)).fetchone()["id"])
-        c.execute(
             "INSERT INTO event_chains (user_id, source_event_id, rule_id, rule_version, node, status, due_at, attempt, result_id, created_at, updated_at) "
-            "VALUES (?, ?, 'promise_aftermath', 1, 'aftermath', 'done', ?, 1, ?, ?, ?)",
-            (uid, ids["event"], TS, ids["thought"], TS, TS))
+            "VALUES (?, ?, 'promise_aftermath', 1, 'aftermath', 'done', ?, 1, NULL, ?, ?)",
+            (uid, ids["event"], TS, TS, TS))
         c.execute(
             "INSERT INTO humor_usage (user_id, term_id, source_turn_id, reaction, status, created_at) "
             "VALUES (?, ?, 987654, 'positive', 'approved', ?)", (uid, ids["term"], TS))
@@ -143,7 +137,6 @@ def test_roundtrip_and_kv_gate() -> int:
         "term": db.conn.execute("SELECT id FROM user_terms WHERE user_id=?", (dst_uid,)).fetchone()["id"],
         "activity": db.conn.execute("SELECT id FROM activities WHERE user_id=? AND title='共同目标A'", (dst_uid,)).fetchone()["id"],
         "event": db.conn.execute("SELECT id FROM relationship_events WHERE user_id=?", (dst_uid,)).fetchone()["id"],
-        "thought": db.conn.execute("SELECT id FROM pending_thoughts WHERE user_id=?", (dst_uid,)).fetchone()["id"],
         "doc": db.conn.execute("SELECT id FROM kb_documents WHERE user_id=?", (dst_uid,)).fetchone()["id"],
     }
     q = lambda sql: db.conn.execute(sql, (dst_uid,)).fetchone()
@@ -153,8 +146,8 @@ def test_roundtrip_and_kv_gate() -> int:
     assert row["activity_id"] == new["activity"], "list_items 引用必须对齐新 activities id"
     row = q("SELECT event_id FROM relationship_dimension_ledger WHERE user_id=?")
     assert row["event_id"] == new["event"], "ledger 引用必须对齐新事件 id"
-    row = q("SELECT source_event_id, result_id FROM event_chains WHERE user_id=?")
-    assert (row["source_event_id"], row["result_id"]) == (new["event"], new["thought"])
+    row = q("SELECT source_event_id FROM event_chains WHERE user_id=?")
+    assert row["source_event_id"] == new["event"]
     row = q("SELECT term_id, source_turn_id FROM humor_usage WHERE user_id=?")
     assert row["term_id"] == new["term"] and row["source_turn_id"] is None, "包外轮次引用应清空"
     row = q("SELECT document_id FROM document_segments WHERE user_id=?")

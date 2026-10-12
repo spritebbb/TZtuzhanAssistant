@@ -62,7 +62,7 @@ _TABLES = (
     "user_preferences", "event_chains",
     "reunion_arcs",
     "knowledge_opinion_sources", "knowledge_opinions",
-    "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
+    "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions", "greeting_variant_usage",
     "thought_context_receipts", "humor_usage", "source_links",
     "wrapup_outbox", "reading_segments", "reading_bookmarks",

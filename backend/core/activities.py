@@ -804,13 +804,6 @@ def forget_activity_data(user_id: str, activity_id: int) -> None:
         (user_id, activity_id),
     )
     invalidate_for_source(user_id, "activity", activity_id, commit=False)
-    try:
-        from .pending_thoughts import forget_thoughts_for_source
-
-        # 本函数契约是「只做数据不提交」：心事作废同样并入外层事务（DF-9）
-        forget_thoughts_for_source(user_id, "activity", activity_id, commit=False)
-    except Exception:
-        logger.warning("[共同活动] 心事级联清理失败：activity_id={}", activity_id)
 
 
 def _finished_reading_context_locked(user_id: str) -> str:

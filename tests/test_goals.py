@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_test_goals_"))
 os.environ.setdefault("MEMORY_V2", "0")
 
-from backend.core import goals, pending_thoughts  # noqa: E402
+from backend.core import goals  # noqa: E402
 from backend.core.activities import ActivityError  # noqa: E402
 from backend.core.userdb import db  # noqa: E402
 
@@ -91,16 +91,8 @@ def _test_reminder_once_and_optional_artifact() -> None:
             ((datetime.now() - timedelta(minutes=1)).isoformat(timespec="seconds"), reminder["id"]),
         )
         db.conn.commit()
-    assert pending_thoughts.sync_pending_thoughts(UID) == 1
-    assert pending_thoughts.sync_pending_thoughts(UID) == 0
-    thoughts = [item for item in pending_thoughts.due_thoughts(UID, 10) if item["kind"] == "goal_checkin"]
-    assert len(thoughts) == 1, "同一目标只能产生一次轻提醒，不连续催促"
-
     done = goals.complete_goal(UID, reminder["id"], create_artifact=False)
     assert done["review"] == ""
-    assert not any(
-        item["kind"] == "goal_checkin" for item in pending_thoughts.due_thoughts(UID, 10)
-    ), "完成目标后提醒心事应作废"
 
     cancelled = goals.start_goal(UID, "试一周早起", "看看感受", "明早提前十分钟起床")
     assert goals.cancel_goal(UID, cancelled["id"])["status"] == "cancelled"
