@@ -131,8 +131,8 @@ def test_roundtrip_and_kv_gate() -> int:
     old = _seed(src_uid)
     bundle = rex.export_bundle(src_uid)
     assert bundle["data"].get("user_preferences"), "补表后必须出现在导出包里"
-    # kv 闸门：登记键（surprise:last）恢复；未登记的伪造键拒绝
-    bundle["kv"]["exported"]["surprise:last"] = "2026-09-29"
+    # kv 闸门：登记键（chat:regen_last_at）恢复；未登记的伪造键拒绝
+    bundle["kv"]["exported"]["chat:regen_last_at"] = "2026-09-29"
     bundle["kv"]["exported"]["hacker:arbitrary"] = '{"hacked": true}'
     preview = rex.preview_restore(bundle, dst_uid)
     assert preview["ok"], preview["errors"]
@@ -162,7 +162,7 @@ def test_roundtrip_and_kv_gate() -> int:
     row = q("SELECT source_message_id FROM user_preferences WHERE user_id=?")
     assert row["source_message_id"] is None, "包外消息引用应清空"
     kv = db.conn.execute(
-        "SELECT value FROM kv_store WHERE user_id=? AND key='surprise:last'", (dst_uid,)).fetchone()
+        "SELECT value FROM kv_store WHERE user_id=? AND key='chat:regen_last_at'", (dst_uid,)).fetchone()
     assert kv and kv["value"] == "2026-09-29"
     evil = db.conn.execute(
         "SELECT 1 FROM kv_store WHERE user_id=? AND key='hacker:arbitrary'", (dst_uid,)).fetchone()
