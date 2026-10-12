@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 55  # v55: 删除 G03 open_questions 表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 56  # v56: 删除 M5 pending_thoughts 表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -567,7 +567,7 @@ CREATE TABLE IF NOT EXISTS future_letters (
 CREATE INDEX IF NOT EXISTS idx_future_letters_user
     ON future_letters(user_id, status, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
--- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
+-- 后续事件类型按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      TEXT NOT NULL,
@@ -638,26 +638,6 @@ CREATE TABLE IF NOT EXISTS relationship_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_relationship_versions_user
     ON relationship_versions(user_id, captured_at, id);
--- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
-CREATE TABLE IF NOT EXISTS pending_thoughts (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id        TEXT NOT NULL,
-    kind           TEXT NOT NULL,     -- resume_reading / confirm_memory
-    source_type    TEXT NOT NULL,     -- activity / fact
-    source_id      INTEGER NOT NULL,
-    content        TEXT NOT NULL,     -- 叙事素材（她惦记的事，自然语言）
-    earliest_at    TEXT NOT NULL,     -- 最早可表达时间（Narrative Planner 门控）
-    expires_at     TEXT,              -- 过期即放弃
-    priority       INTEGER NOT NULL DEFAULT 5,  -- 1-9，小=优先
-    max_attempts   INTEGER NOT NULL DEFAULT 2,
-    attempts       INTEGER NOT NULL DEFAULT 0,
-    last_attempt_at TEXT,
-    status         TEXT NOT NULL DEFAULT 'pending',  -- pending / expressed / dismissed
-    created_at     TEXT NOT NULL,
-    UNIQUE(user_id, kind, source_id)
-);
-CREATE INDEX IF NOT EXISTS idx_pending_thoughts_user
-    ON pending_thoughts(user_id, status, earliest_at);
 -- M2 前置最小版：可保存的共同产物（首批：共读共同书摘）。
 CREATE TABLE IF NOT EXISTS artifacts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2410,7 +2390,7 @@ class UserDB:
                 "domain_trust_events", "domain_trust_snapshot",
                 "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
-                "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
+                "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
                 "tavern_sessions",

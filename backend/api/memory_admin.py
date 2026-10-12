@@ -21,7 +21,6 @@ from ..core.fact_lifecycle import (
 )
 from ..core.her_profile import her_profile
 from ..core.log import logger
-from ..core import pending_thoughts
 from ..core import aesthetic_preferences as aesthetics
 from ..core import user_preferences as _prefs
 from ..core.userdb import (
@@ -116,30 +115,6 @@ async def api_delete_style_entry(style_id: int):
     if not await asyncio.to_thread(db.del_style_map, uid, style_id):
         return JSONResponse({"ok": False, "error": "这条表达观察不存在"}, status_code=404)
     logger.info("[记忆管理] 删除场景化表达观察 #{}", style_id)
-    return {"ok": True}
-
-
-@router.get("/pending-thoughts")
-async def api_pending_thoughts():
-    """她的未完成心事：用户可见可放下（M5 用户主权 + 可观测统计）。"""
-    uid = active_user_id()
-    listing = await asyncio.to_thread(_list_thoughts, uid)
-    stats = await asyncio.to_thread(pending_thoughts.stats, uid)
-    return {"ok": True, "thoughts": listing, "stats": stats}
-
-
-def _list_thoughts(uid: str) -> list[dict]:
-    from ..core.pending_thoughts import due_thoughts
-
-    return due_thoughts(uid, limit=10)
-
-
-@router.post("/pending-thoughts/{thought_id}/dismiss")
-async def api_dismiss_thought(thought_id: int):
-    uid = active_user_id()
-    if not await asyncio.to_thread(pending_thoughts.dismiss_thought, uid, thought_id):
-        return JSONResponse({"ok": False, "error": "这条心事不存在或已处理"}, status_code=404)
-    logger.info("[记忆管理] 用户放下了心事 #{}", thought_id)
     return {"ok": True}
 
 

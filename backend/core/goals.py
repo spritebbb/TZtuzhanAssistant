@@ -257,9 +257,6 @@ def resume_goal(user_id: str, activity_id: int) -> dict:
 
 def cancel_goal(user_id: str, activity_id: int) -> dict:
     result = _change_status(user_id, activity_id, "cancelled")
-    from .pending_thoughts import forget_thoughts_for_source
-
-    forget_thoughts_for_source(user_id, "activity", activity_id)
     return result
 
 
@@ -320,9 +317,6 @@ def complete_goal(user_id: str, activity_id: int, *, create_artifact: bool = Tru
             from .relationship_events import register_event_hooks
 
             register_event_hooks(user_id, event_id, "goal_completed", occurred_at=now)
-    from .pending_thoughts import forget_thoughts_for_source
-
-    forget_thoughts_for_source(user_id, "activity", activity_id)
     return get_goal(user_id, activity_id)  # type: ignore[return-value]
 
 

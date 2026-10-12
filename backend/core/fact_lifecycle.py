@@ -67,12 +67,6 @@ def delete_fact_everywhere(user_id: str, fact_id: int) -> bool:
             logger.exception(
                 "[记忆生命周期] 事件作废失败（事实已删，事件残留）：fact_id={}", deleted_id
             )
-        try:
-            from .pending_thoughts import forget_thoughts_for_source
-
-            forget_thoughts_for_source(user_id, "fact", deleted_id)
-        except Exception:
-            logger.warning("[记忆生命周期] 心事级联清理失败：fact_id={}", deleted_id)
     _delete_vectors(user_id, deleted_ids)
     return True
 

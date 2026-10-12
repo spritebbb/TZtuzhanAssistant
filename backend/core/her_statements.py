@@ -142,8 +142,8 @@ def active_by_topic(user_id: str, topics: set[str]) -> list[dict]:
 
 
 def pending_conflict_hint(user_id: str, text: str) -> str | None:
-    """注入查询：用户消息与某未交付矛盾组话题相关（bigram 交集 ≥2，取
-    pending_thoughts._RELEVANCE_MIN=1 的同法再收紧一档——1 会命中单个偶共现
+    """注入查询：用户消息与某未交付矛盾组话题相关（bigram 交集 ≥2，
+    比一般话题匹配再收紧一档——1 会命中单个偶共现
     字，矛盾提示比心事注入更敏感、误触发成本更高）→ 返回演绎提示；同时把
     该组标 resolved（一次交付，绝不反复盘问——重复提示同一矛盾=机械感）。"""
     from .userdb import _bigrams, db

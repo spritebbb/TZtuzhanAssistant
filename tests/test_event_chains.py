@@ -30,11 +30,7 @@ def test_create_once_and_due() -> int:
     due = ec.due_chains(uid, now=NOW + timedelta(minutes=21))
     assert len(due) == 1 and due[0]["node"] == "aftermath" and due[0]["attempt"] == 0
 
-    # 心事通道注册了 chain_aftermath（复用既有队列/仲裁，不建第二套计时）
-    from backend.core.pending_thoughts import _THOUGHT_KINDS
-
-    assert "chain_aftermath" in _THOUGHT_KINDS
-    print("[OK] 建链幂等 + 20 分钟延迟到点 + 复用心事通道")
+    print("[OK] 建链幂等 + 20 分钟延迟到点")
     return 0
 
 

@@ -588,8 +588,8 @@ def expiring_soon_candidates(user_id: str, *, within_days: int = 3,
     """可见遗忘的到期前候选（非敏感元数据，不含原文）。
 
     返回即将到期（既有硬期限或 policy 自动期限）且未固定的 active 事实的
-    id/到期时刻；提醒与否由表达层决定（走 pending_thoughts 候选 + 既有
-    主动仲裁），本函数只做确定性查询。到期后绝不靠墓碑复原原文。
+    id/到期时刻；提醒与否由表达层决定，本函数只做确定性查询。
+    到期后绝不靠墓碑复原原文。
     """
     from .features import flag
     from .userdb import db

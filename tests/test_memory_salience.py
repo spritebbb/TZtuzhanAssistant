@@ -386,12 +386,7 @@ def test_lifecycle_display_and_fading() -> int:
     ids = {c["fact_id"] for c in candidates}
     assert dated in ids and pinned not in ids and secret not in ids
     assert all("content" not in c for c in candidates), "候选不含原文"
-    from backend.core.pending_thoughts import due_thoughts, sync_pending_thoughts
-
-    assert sync_pending_thoughts(uid) >= 1
-    fading = [t for t in due_thoughts(uid, 10) if t["kind"] == "memory_fading"]
-    assert fading and dated in {t["source_id"] for t in fading}, fading
-    print("[OK] 可见遗忘到期前候选（不含原文）+ 到期心事")
+    print("[OK] 可见遗忘到期前候选（不含原文）")
     return 0
 
 
