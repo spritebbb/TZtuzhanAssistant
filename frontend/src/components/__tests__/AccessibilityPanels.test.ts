@@ -12,7 +12,6 @@ vi.mock('../../api/diary', () => ({
   getDiaries: vi.fn(async () => []),
   getResearchReports: vi.fn(async () => []),
 }))
-vi.mock('../../api/unlocks', () => ({ getUnlocks: vi.fn(async () => []) }))
 vi.mock('../../api/relationship', () => ({
   getRelationshipStyle: vi.fn(async () => ({
     style_ids: ['companion'], style_labels: ['默契陪伴'], forming: false,

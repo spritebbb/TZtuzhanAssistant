@@ -22,7 +22,6 @@ from .api import (
     observations,
     config_api,
     confirm,
-    dashboard,
     diary,
     encryption,
     dual_perspectives,
@@ -51,7 +50,6 @@ from .api import (
     sealing,
     remote,
     sessions,
-    unlocks,
     tts,
     usage,
     user_reset,
@@ -270,7 +268,6 @@ def create_app() -> FastAPI:
     app.include_router(confirm.router)
     app.include_router(activities.router)
     app.include_router(artifacts.router)
-    app.include_router(dashboard.router)
     app.include_router(diary.router)
     app.include_router(future_letters.router)
     app.include_router(writings.router)
@@ -288,7 +285,6 @@ def create_app() -> FastAPI:
     app.include_router(observations.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)
-    app.include_router(unlocks.router)
     app.include_router(usage.router)
     app.include_router(agent.router)
     app.include_router(vision.router)

@@ -73,9 +73,6 @@ async def api_config_get():
             "memory_semantic": config.memory_semantic,
             "proactive_new_user_days": config.proactive_new_user_days,
             "proactive_new_user_idle_hours": config.proactive_new_user_idle_hours,
-            "proactive_surprise_min_gap_days": config.proactive_surprise_min_gap_days,
-            "proactive_surprise_chance_percent": config.proactive_surprise_chance_percent,
-            "proactive_surprise_idle_minutes": config.proactive_surprise_idle_minutes,
         },
     }
 
@@ -101,9 +98,6 @@ async def api_config_set(request: Request):
         "mood_city": False, "memory_semantic": False,
         "proactive_new_user_days": False,
         "proactive_new_user_idle_hours": False,
-        "proactive_surprise_min_gap_days": False,
-        "proactive_surprise_chance_percent": False,
-        "proactive_surprise_idle_minutes": False,
     }
     clear_fields = body.get("clear_fields", [])
     clear_fields = set(clear_fields) if isinstance(clear_fields, list) else set()
@@ -144,9 +138,6 @@ async def api_config_set(request: Request):
         integer_ranges = {
             "PROACTIVE_NEW_USER_DAYS": (1, 30),
             "PROACTIVE_NEW_USER_IDLE_HOURS": (1, 24),
-            "PROACTIVE_SURPRISE_MIN_GAP_DAYS": (1, 365),
-            "PROACTIVE_SURPRISE_CHANCE_PERCENT": (0, 100),
-            "PROACTIVE_SURPRISE_IDLE_MINUTES": (15, 10080),
         }
         for name, (minimum, maximum) in integer_ranges.items():
             if name not in updates:

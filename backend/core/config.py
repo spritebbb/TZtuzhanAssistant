@@ -174,9 +174,6 @@ class Config:
         self.kb_max_file_mb: int = max(1, _env_int("KB_MAX_FILE_MB", 20))
         self.kb_max_documents: int = max(1, _env_int("KB_MAX_DOCUMENTS", 50))
 
-        # C4 好感度玩法闭环：解锁时刻
-        # 连续陪伴多少天触发「连续陪伴」彩蛋
-        self.unlock_streak_days: int = max(2, _env_int("UNLOCK_STREAK_DAYS", 7))
         # M8 写给未来的我们：未来信件（feature flag，0 关闭）
         self.future_letters_enabled: bool = os.getenv("FUTURE_LETTERS_ENABLED", "1") != "0"
         # M8 关系快照：30/100/365 天纪念页（feature flag，0 关闭）

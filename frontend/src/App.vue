@@ -15,7 +15,6 @@ import TourPanel from './components/TourPanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
 import TavernPanel from './components/TavernPanel.vue'
-import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
 import CornerPanel from './components/CornerPanel.vue'
 import PersonaSwitcher from './components/PersonaSwitcher.vue'
@@ -35,7 +34,6 @@ const memoryOpen = ref(false)
 const cornerOpen = ref(false)
 const usageOpen = ref(false)
 const tavernOpen = ref(false)
-const dashboardOpen = ref(false)
 const activityOpen = ref(false)
 const sidebarOpen = ref(false)
 const personaOpen = ref(false)
@@ -164,7 +162,7 @@ watch(theme, (t) => applyTheme(t, false), { immediate: false })
 // === 键盘快捷键 ===
 const dialogFlags = () => [
   settingsOpen.value, agentOpen.value, diaryOpen.value, knowledgeOpen.value,
-  memoryOpen.value, cornerOpen.value, usageOpen.value, dashboardOpen.value,
+  memoryOpen.value, cornerOpen.value, usageOpen.value,
   activityOpen.value, personaOpen.value, moreOpen.value, tourOpen.value,
   resetOpen.value,
 ]
@@ -194,7 +192,6 @@ function closeDialogs() {
   diaryOpen.value = false
   memoryOpen.value = false
   usageOpen.value = false
-  dashboardOpen.value = false
   activityOpen.value = false
   cornerOpen.value = false
   knowledgeOpen.value = false
@@ -236,7 +233,7 @@ function openBookshelfFromActivity() {
 }
 
 const moreTools = [
-  { id: 'dashboard', label: '成长总览' }, { id: 'diary', label: '日记' },
+  { id: 'diary', label: '日记' },
   { id: 'memory', label: '记忆与了解她' }, { id: 'corner', label: '我们的角落' },
   { id: 'usage', label: '用量账本' }, { id: 'knowledge', label: '书架' },
   { id: 'agent', label: '任务代理' }, { id: 'archive', label: '归档当前对话' },
@@ -263,8 +260,7 @@ function useMoreTool(id: string) {
   rememberTool(id)
   moreOpen.value = false
   moreQuery.value = ''
-  if (id === 'dashboard') dashboardOpen.value = true
-  else if (id === 'diary') diaryOpen.value = true
+  if (id === 'diary') diaryOpen.value = true
   else if (id === 'memory') memoryOpen.value = true
   else if (id === 'corner') cornerOpen.value = true
   else if (id === 'usage') usageOpen.value = true
@@ -304,7 +300,7 @@ function onPersonaSwitched(profile: PersonaProfile) {
 function onAppLocked(): void {
   lockScreenOpen.value = true
   for (const key of [settingsOpen, agentOpen, diaryOpen, knowledgeOpen, memoryOpen,
-    cornerOpen, usageOpen, dashboardOpen, activityOpen, personaOpen, tourOpen]) {
+    cornerOpen, usageOpen, activityOpen, personaOpen, tourOpen]) {
     key.value = false
   }
   moreOpen.value = false
@@ -425,11 +421,6 @@ onUnmounted(() => {
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>
             </svg>
           </button>
-          <button class="icon-btn" title="成长总览" @click="dashboardOpen = true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m4 8 6-5 6 8 5-5"/>
-            </svg>
-          </button>
           <button class="icon-btn" :title="'查看' + activePersona.name + '的日记'" @click="diaryOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -533,7 +524,6 @@ onUnmounted(() => {
     <CornerPanel :show="cornerOpen" :persona-name="activePersona.name" @close="cornerOpen = false" />
     <UsagePanel :show="usageOpen" :persona-name="activePersona.name" @close="usageOpen = false" />
     <TavernPanel :show="tavernOpen" :persona-name="activePersona.name" @close="tavernOpen = false" />
-    <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
     <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
     <PersonaSwitcher :show="personaOpen" :disabled="generating" @close="personaOpen = false" @switched="onPersonaSwitched" />
 

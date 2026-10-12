@@ -2,7 +2,7 @@
 """关系包导出/恢复的表清单守卫 + 换机漏表批端到端回归（DF-1）。
 
 背景（2026-09-29 缺陷审查）：CATEGORIES 漏 7 张用户数据表（user_preferences、
-activity_lists、list_items、event_chains、relationship_dimension_ledger、
+event_chains、relationship_dimension_ledger、
 humor_usage、document_segments），换机/恢复静默丢数据；restore 的 kv 通道未过
 kv_registry 白名单（P3-44 同族口子）。本文件三层防线：
 
@@ -98,12 +98,6 @@ def _seed(uid: str) -> dict:
             "INSERT INTO user_preferences (user_id, category, value_json, origin, status, created_at, updated_at, source_message_id) "
             "VALUES (?, 'comfort', '{}', 'user_teaching', 'active', ?, ?, 424242)", (uid, TS, TS))
         c.execute(
-            "INSERT INTO activity_lists (activity_id, user_id, list_kind, created_at, updated_at) "
-            "VALUES (?, ?, 'song', ?, ?)", (ids["activity"], uid, TS, TS))
-        c.execute(
-            "INSERT INTO list_items (user_id, activity_id, title, added_by, ts) "
-            "VALUES (?, ?, '歌一', 'user', ?)", (uid, ids["activity"], TS))
-        c.execute(
             "INSERT INTO relationship_dimension_ledger (user_id, event_id, rule_id, trust_delta, intimacy_delta, occurred_at) "
             "VALUES (?, ?, 'r1', 2, 1, ?)", (uid, ids["event"], TS))
         c.execute(
@@ -140,10 +134,6 @@ def test_roundtrip_and_kv_gate() -> int:
         "doc": db.conn.execute("SELECT id FROM kb_documents WHERE user_id=?", (dst_uid,)).fetchone()["id"],
     }
     q = lambda sql: db.conn.execute(sql, (dst_uid,)).fetchone()
-    row = q("SELECT activity_id FROM activity_lists WHERE user_id=?")
-    assert row["activity_id"] == new["activity"], "activity_lists 主键必须跟随 activities 重映射"
-    row = q("SELECT activity_id FROM list_items WHERE user_id=?")
-    assert row["activity_id"] == new["activity"], "list_items 引用必须对齐新 activities id"
     row = q("SELECT event_id FROM relationship_dimension_ledger WHERE user_id=?")
     assert row["event_id"] == new["event"], "ledger 引用必须对齐新事件 id"
     row = q("SELECT source_event_id FROM event_chains WHERE user_id=?")

@@ -72,7 +72,7 @@ _TABLES = (
     "shared_resources", "resource_grants",
     "persona_evolution_log", "experience_metrics",
     "learning_candidates",
-    "kb_documents", "kb_chunks", "unlocks",
+    "kb_documents", "kb_chunks",
     "manager_memories",
     "tavern_sessions",
     "situation_files",

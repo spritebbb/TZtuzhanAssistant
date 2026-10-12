@@ -39,7 +39,6 @@ from .turn_prompt import (
     inject_memory_block,
     inject_memory_correction,
     inject_night_boundary,
-    inject_pending_unlock,
     inject_preference_constraints,
     inject_presence,
     inject_search_context,
@@ -872,13 +871,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 本轮副作用台账：所有「不影响回复的旁路动作」统一登记，失败不再静默。
     ledger = EffectLedger("turn")
 
-    # 1.0.0) C4 解锁时刻检测 + 1.0.1) 拟人核心层：语义感知丢后台执行，消除
-    # 「每条消息首字前死等感知 LLM」的串行瓶颈；显式状态交互必须同步落账。
+    # 1.0.1) 拟人核心层：语义感知丢后台执行，消除「每条消息首字前死等感知
+    # LLM」的串行瓶颈；显式状态交互必须同步落账。
     if not ephemeral:
-        from . import unlock as _unlock_mod
-
-        ledger.run("解锁检测", _unlock_mod.check_and_enqueue, user_id)
-
         from .state import handle_state_interaction
 
         ledger.run("显式状态交互", handle_state_interaction, user_id, text)
@@ -1122,7 +1117,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         list_ctx=list_ctx,
         event_recall_result=event_recall_result,
     )
-    pending_unlock = inject_pending_unlock(messages, user_id, ephemeral=ephemeral)
 
     # 4.2 / 4.2b / 杂项：对对方的了解、硬约束、行程、唤醒、搜索求证
     inject_understanding(messages, user_id, is_chitchat=is_chitchat)
@@ -1409,15 +1403,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             note_reply_usage(user_id, reply, turn_id or None)
         except Exception:
             logger.exception("[pipeline] 幽默记忆使用登记失败（不影响回复）")
-
-    # 5.10.1) C4 解锁落账：回复已定稿，把「她说出口的话」摘要存进收集页
-    if not ephemeral and pending_unlock is not None:
-        try:
-            from . import unlock as _unlock_mod
-
-            _unlock_mod.mark_delivered(user_id, pending_unlock["key"], reply[:300])
-        except Exception:
-            logger.exception("[pipeline] 解锁落账失败（不影响回复）")
 
     # 6) 临时对话只把回复交给当前客户端，任何会话/记忆/关系状态都不落盘。
     if ephemeral:
