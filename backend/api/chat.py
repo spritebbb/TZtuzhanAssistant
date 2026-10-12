@@ -79,35 +79,6 @@ async def api_chat(
 
     ephemeral = is_ephemeral_request(text, explicit=ephemeral)
     uid = _user_id(session_id)
-    from ..core.persona_profiles import active_id
-    from ..core.telemetry import TraceContext, bind_trace, duration_bucket, record_event
-
-    trace_request_id = str(getattr(request.state, "request_id", ""))
-    logical_message_id = request_id or trace_request_id
-    trace = TraceContext(
-        user_id=uid,
-        request_id=trace_request_id,
-        logical_message_id=logical_message_id,
-        persona_id=active_id(),
-        ephemeral=ephemeral or mock,
-    )
-
-    def _observe(event_name: str, **fields: object) -> None:
-        try:
-            record_event(
-                uid,
-                {
-                    "event_name": event_name,
-                    "request_id": trace_request_id,
-                    "logical_message_id": logical_message_id,
-                    "persona_id": trace.persona_id,
-                    **fields,
-                },
-                ephemeral=trace.ephemeral,
-            )
-        except Exception:
-            # 可观测性不能影响聊天主链，也不能把用户正文带进错误日志。
-            logger.warning("[telemetry] event={} 记录失败", event_name)
     from ..core.reset import ResetSuperseded, reset_epoch, reset_in_progress, user_write_guard
     if reset_in_progress():
         return JSONResponse({"ok": False, "error": "正在重置，请稍后再试"}, status_code=409)
@@ -166,7 +137,6 @@ async def api_chat(
 
             _lg.warning("[chat] 用户消息持久化失败（会话 {} 可能已不存在）", session_id)
             return JSONResponse({"ok": False, "error": "会话不存在或已删除，请刷新页面"}, status_code=410)
-        _observe("session_persisted", source_ids=["session:user"], outcome="success")
 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
@@ -196,20 +166,10 @@ async def api_chat(
         name = str(event.get("name") or "")
         if kind == "tool" and name:
             _tool_started_at.setdefault(name, []).append(time.monotonic())
-            _observe("tool_started", source_ids=[f"tool:{name}"], outcome="started")
         elif kind == "tool_done" and name:
             starts = _tool_started_at.get(name) or []
             started = starts.pop() if starts else None
             elapsed_ms = (time.monotonic() - started) * 1000 if started is not None else None
-            _observe(
-                "tool_finished",
-                source_ids=[f"tool:{name}"],
-                duration_bucket=duration_bucket(elapsed_ms),
-                outcome=("success" if event.get("ok") is True else (
-                    "failure" if event.get("ok") is False else ""
-                )),
-                error_code=str(event.get("error_code") or ""),
-            )
         await q.put(("__tool__", event))
 
     async def _draft_cb(draft: dict) -> None:
@@ -239,18 +199,14 @@ async def api_chat(
                 await q.put(("__error__", "请求因重置而取消"))
                 return
             _t0 = time.monotonic()
-            _observe("chat_started", outcome="started")
-            with bind_trace(trace):
-                reply = await asyncio.wait_for(
-                    process(
-                        uid, text, mock=mock, ephemeral=ephemeral, stream_cb=_cb,
-                        image_cb=_image_cb, progress_cb=_progress_cb,
-                        draft_cb=_draft_cb,
-                    ),
-                    timeout=_PROCESS_TOTAL_TIMEOUT,
-                )
-            # 延迟档位由 telemetry 统一记录（chat_completed.duration_bucket），
-            # 此处不再经 experience_metrics 双记（2026-09-30 观测账本合并）。
+            reply = await asyncio.wait_for(
+                process(
+                    uid, text, mock=mock, ephemeral=ephemeral, stream_cb=_cb,
+                    image_cb=_image_cb, progress_cb=_progress_cb,
+                    draft_cb=_draft_cb,
+                ),
+                timeout=_PROCESS_TOTAL_TIMEOUT,
+            )
             if not epoch_is_current(request_epoch):
                 await q.put(("__error__", "请求因重置而取消"))
                 return
@@ -263,17 +219,10 @@ async def api_chat(
                     bot_msg["draft"] = _state["draft"]
                 async with user_write_guard(request_epoch):
                     await append_messages(session_id, [bot_msg])
-                _observe("session_persisted", source_ids=["session:assistant"], outcome="success")
-            _observe(
-                "chat_completed",
-                duration_bucket=duration_bucket((time.monotonic() - _t0) * 1000),
-                outcome="success" if reply else "silent",
-            )
             await q.put(("__done__", reply))
         except ResetSuperseded:
             # reset 可在 epoch 检查和落库之间开始。无论发生在哪个写入点，
             # SSE 都必须有终止帧，不能让前端永久等待 q.get()。
-            _observe("chat_failed", outcome="cancelled", error_code="reset_superseded")
             await q.put(("__error__", "请求因重置而取消"))
         except asyncio.CancelledError:
             from ..core.reset import epoch_is_current
@@ -287,10 +236,8 @@ async def api_chat(
                         await q.put(("__error__", "请求因重置而取消"))
                         raise
                 await q.put(("__error__", note))
-            _observe("chat_failed", outcome="cancelled", error_code="user_cancelled")
             raise
         except asyncio.TimeoutError:
-            _observe("chat_failed", outcome="timeout", error_code="process_timeout")
             if ephemeral:
                 logger.warning(
                     "[chat] 临时对话处理超时（{}s），会话 {} 已中止；本轮未持久化",
@@ -313,7 +260,6 @@ async def api_chat(
                     return
             await q.put(("__error__", note))
         except Exception as e:
-            _observe("chat_failed", outcome="failure", error_code="pipeline_exception")
             logger.exception("[chat] 处理用户消息失败（会话 {}）", session_id)
             # 流式中途失败：把已流式输出、但 process 未成功返回完整回复的「部分文本」
             # 落库，保证刷新/归档后这段已生成的回复不丢失；内部异常细节只写日志、不外泄。

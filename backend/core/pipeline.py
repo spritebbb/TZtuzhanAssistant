@@ -1273,13 +1273,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             if recent and any(_too_similar(reply, r) for r in recent):
                 logger.info("[pipeline] 检测到重复回复，重写一次")
                 rewrite_used = True
-                # P3-05B 统计：重复率（只记命中窗口大小，不记正文）
-                try:
-                    from .experience_metrics import record as _metric
-
-                    _metric(user_id, "repetition", f"recent{len(recent)}")
-                except Exception:
-                    logger.debug("[pipeline] 重复率统计写入失败（不影响回复）")
                 messages.append(
                     {
                         "role": "system",
@@ -1320,26 +1313,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
 
         assert hygiene_ctx is not None
         checked = inspect_reply(reply, context=hygiene_ctx)
-        try:
-            from .telemetry import record_current
-
-            record_current(
-                "output_checked",
-                source_ids=[f"rule:{rule}" for rule in checked.rule_ids[:3]],
-                rule_version=RULE_VERSION,
-                outcome=checked.action,
-            )
-        except Exception:
-            logger.warning("[telemetry] output_checked 记录失败")
-        if checked.action == "rewrite":
-            # P3-05B 统计：规则失败计数（只记规则名，不记正文）
-            try:
-                from .experience_metrics import record as _metric
-
-                for rule in (checked.rule_ids or [])[:3]:
-                    _metric(user_id, "rule_failure", str(rule)[:60])
-            except Exception:
-                logger.debug("[pipeline] 规则失败计数写入失败（不影响回复）")
         if checked.action == "accept":
             reply = checked.text
         elif checked.action == "rewrite" and not rewrite_used:

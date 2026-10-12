@@ -33,7 +33,7 @@ from backend.core.userdb import db
 EXEMPT = {
     # 运行态/派生态：可再生产，不属于「关系本体」
     "activity_draft_receipts", "context_lifecycle", "thought_context_receipts",
-    "experience_metrics", "greeting_variant_usage", "usage_log", "wrapup_outbox",
+    "greeting_variant_usage", "usage_log", "wrapup_outbox",
     "document_import_jobs", "situation_files",
     # 后台任务认领/租约记录（pending/running/lease，无 user_id 列）
     "job_runs",

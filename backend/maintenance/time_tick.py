@@ -63,11 +63,6 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
-def _job_run_id(period: str) -> str:
-    """生成符合遥测标识符白名单的稳定周期 id。"""
-    return f"{JOB_KEY}:{period.replace('+00:00', 'Z')}"
-
-
 def _claim(conn, scope_key: str, period: str, owner: str, now: datetime) -> bool:
     """CAS 认领：pending/到期重试/租约过期的 running 可抢，否则让位。"""
     conn.execute(
@@ -193,29 +188,12 @@ def run(argv: list[str] | None = None) -> int:
                    "succeeded": 0, "skipped": 0, "failed": 0, "events": 0}
         owner = f"tick-{os.getpid()}-{int(now.timestamp())}"
 
-        def _observe(event_name: str, period: str, *, outcome: str,
-                     error_code: str = "") -> None:
-            try:
-                from backend.core.telemetry import record_event
-
-                record_event(user_id, {
-                    "event_name": event_name,
-                    "persona_id": persona_id,
-                    "source_ids": ["job:time_tick"],
-                    "job_run_id": _job_run_id(period),
-                    "outcome": outcome,
-                    "error_code": error_code,
-                })
-            except Exception:
-                pass
-
         for period in periods:
             period_dt = datetime.fromisoformat(period)
             if not _claim(db.conn, scope_key, period, owner, now):
                 summary["skipped"] += 1
                 continue
             summary["attempted"] += 1
-            _observe("job_started", period, outcome="started")
             try:
                 result = advance_schedule(user_id, min(period_dt + timedelta(hours=1), until))
                 summary["events"] += int(result.get("events", 0))
@@ -226,10 +204,8 @@ def run(argv: list[str] | None = None) -> int:
                 attempt = int(row["attempt"]) if row else 1
                 if _finish(db.conn, scope_key, period, owner, True, now, attempt):
                     summary["succeeded"] += 1
-                    _observe("job_finished", period, outcome="success")
                 else:
                     summary["failed"] += 1
-                    _observe("job_finished", period, outcome="failure", error_code="permission")
             except Exception:
                 # advance_schedule 失败时不得让未提交事务泄漏给失败状态更新。
                 db.conn.rollback()
@@ -239,7 +215,6 @@ def run(argv: list[str] | None = None) -> int:
                 ).fetchone()
                 attempt = int(row["attempt"]) if row else 1
                 _finish(db.conn, scope_key, period, owner, False, now, attempt)
-                _observe("job_finished", period, outcome="failure", error_code="pipeline_exception")
                 summary["failed"] += 1
 
     if args.json:

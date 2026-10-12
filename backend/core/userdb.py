@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 61  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 62  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -347,17 +347,6 @@ CREATE TABLE IF NOT EXISTS learning_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_learning_user_status
     ON learning_candidates(user_id, status, id);
--- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
-CREATE TABLE IF NOT EXISTS experience_metrics (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    TEXT NOT NULL,
-    kind       TEXT NOT NULL,   -- rule_failure / repetition / source_pick（延迟与事件流归 telemetry）
-    value      TEXT NOT NULL,   -- 档位或对象名（≤120 字，不含聊天正文）
-    count      INTEGER NOT NULL DEFAULT 1,
-    day        TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (user_id, kind, value, day)
-);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2109,7 +2098,7 @@ class UserDB:
                 "activity_writings", "writing_turns",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
-                "persona_evolution_log", "experience_metrics",
+                "persona_evolution_log",
                 "profile_evolution_log", "her_statements",
                 "learning_candidates",
                 "character_life_events", "job_runs",

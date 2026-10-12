@@ -97,14 +97,6 @@ async def gather_list_context(
             turn_id=turn_id,
             state={"ephemeral": ephemeral},
         )
-        if not ephemeral:
-            try:
-                from .experience_metrics import record as _metric
-
-                for item in selection.explain()[:5]:
-                    _metric(user_id, "source_pick", str(item.get("id", ""))[:60])
-            except Exception:  # noqa: BLE001 —— 统计失败不影响语境
-                pass
         return {"text": selection.assemble(), "selection": selection}, None
     except Exception as exc:  # noqa: BLE001
         return {"text": "", "selection": None}, ("语境注册表", exc)

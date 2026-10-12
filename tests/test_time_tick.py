@@ -161,17 +161,6 @@ def test_subprocess_race_single_claim() -> int:
     back = _spawn_tick(data_root, AT + timedelta(minutes=15), args)
     assert back.get("succeeded", 0) == 0, back
 
-    telemetry = sqlite3.connect(data_root / "telemetry.db")
-    rows = telemetry.execute(
-        "SELECT event_name,job_run_id,outcome FROM telemetry_events "
-        "WHERE event_name IN ('job_started','job_finished') ORDER BY id"
-    ).fetchall()
-    telemetry.close()
-    expected_id = f"time_tick:{AT.isoformat().replace('+00:00', 'Z')}"
-    assert rows == [
-        ("job_started", expected_id, "started"),
-        ("job_finished", expected_id, "success"),
-    ], rows
     print("[OK] 真实双子进程竞争恰好认领一次 / 重复与回拨零增量")
     return 0
 
