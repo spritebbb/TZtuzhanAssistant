@@ -41,11 +41,11 @@ def test_skill_triggers_and_names_tools() -> int:
     referenced = skills_reference_tools([skill], [
         "agent_fanout", "agent_run", "web_search", "write_file", "read_file",
         "memory_add", "todo_create", "browser_navigate", "query-docs",
-        "run_python", "currency_convert", "watch_add",
+        "run_python", "currency_convert",
     ])
     for expected in (
         "agent_fanout", "web_search", "write_file", "memory_add", "todo_create",
-        "run_python", "currency_convert", "watch_add",
+        "run_python", "currency_convert",
     ):
         assert expected in referenced, (expected, referenced)
     print("[OK] 教程技能可被触发，且点名了所需工具（含新增步骤）")

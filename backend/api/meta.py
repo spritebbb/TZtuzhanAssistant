@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["meta"])
 
 def _negative_mood(user_id: str) -> dict:
     """哄好玩法：负面情绪摘要。kind 是人话级标签（委屈/生气/不安），
-    strength 只到档位（low/mid/high）——数值细节留在可解释面板。"""
+    strength 只到档位（low/mid/high）——只给档位，不吐具体数值。"""
     try:
         from ..core.emotion_state import active_emotions_map
 

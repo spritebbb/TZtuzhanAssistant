@@ -153,16 +153,6 @@ TOUR_STEPS: tuple[dict, ...] = (
         "needs": "需要 context7 MCP 服务器已连接",
     },
     {
-        "id": "watch",
-        "group": "Agent 主秀",
-        "kind": "chat",
-        "title": "监控 Agent（盯着页面）",
-        "shows": "让她替你盯着某个网页，变了主动告诉你",
-        "prompt": "帮我盯着 https://example.com 这个页面，有变化告诉我。",
-        "tools": ["watch_add", "watch_list"],
-        "check": "watch_list 里出现该地址；页面变化后她会主动开口",
-    },
-    {
         "id": "schedule",
         "group": "Agent 主秀",
         "kind": "chat",
