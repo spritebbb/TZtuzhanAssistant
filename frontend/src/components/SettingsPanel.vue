@@ -324,7 +324,7 @@ function closeSource() {
 
 // 拥有写/命令类工具的插件，禁用时二次确认
 function hasRiskyTools(p: PluginInfo): boolean {
-  return p.tools.some(t => /^(write_file|edit|run_python|run_command|kill_process|activate_window|open_app|clipboard_set|browser_open|codex_run|dsh_run|agent_run|agent_fanout)/.test(t))
+  return p.tools.some(t => /^(write_file|edit|run_python|run_command|kill_process|activate_window|open_app|clipboard_set|browser_open|agent_run|agent_fanout)/.test(t))
 }
 
 function pluginStatus(p: PluginInfo): { label: string; cls: string } {
