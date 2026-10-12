@@ -1309,7 +1309,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     reply = _apply_reply_plugins(reply, ephemeral=ephemeral)
 
     if hygiene_enabled:
-        from .output_hygiene import RULE_VERSION, inspect_reply
+        from .output_hygiene import inspect_reply
 
         assert hygiene_ctx is not None
         checked = inspect_reply(reply, context=hygiene_ctx)
