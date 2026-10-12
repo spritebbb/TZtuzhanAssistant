@@ -47,7 +47,6 @@ from .api import (
     relationship,
     relationship_snapshots,
     relationship_versions,
-    sealing,
     remote,
     sessions,
     tts,
@@ -275,7 +274,6 @@ def create_app() -> FastAPI:
     app.include_router(relationship_snapshots.router)
     app.include_router(relationship_versions.router)
     app.include_router(dual_perspectives.router)
-    app.include_router(sealing.router)
     app.include_router(possibilities.router)
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
