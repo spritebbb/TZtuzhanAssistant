@@ -1,7 +1,7 @@
 import { computed, readonly, ref } from 'vue'
 import { apiFetch } from '../api'
 
-export type Presence = 'home' | 'mobile' | 'announced_offline' | 'rest' | 'focus'
+export type Presence = 'home' | 'mobile' | 'announced_offline' | 'rest'
 export interface VisualState {
   persona_id: string
   revision: number
@@ -28,7 +28,7 @@ function valid(value: unknown): value is VisualState {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<VisualState>
   return typeof v.persona_id === 'string' && Number.isFinite(v.revision)
-    && ['home', 'mobile', 'announced_offline', 'rest', 'focus'].includes(String(v.presence))
+    && ['home', 'mobile', 'announced_offline', 'rest'].includes(String(v.presence))
 }
 
 export function refreshVisualState(persona = ''): Promise<void> {

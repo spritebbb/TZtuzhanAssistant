@@ -44,7 +44,7 @@ def _seed_artifact(title: str) -> int:
     with db._lock:
         activity = db.conn.execute(
             "INSERT INTO activities (user_id, kind, document_id, title, status, position, "
-            "created_at, updated_at) VALUES (?, 'focus', 0, ?, 'completed', 0, "
+            "created_at, updated_at) VALUES (?, 'writing', 0, ?, 'completed', 0, "
             "'2026-09-06T09:00:00', '2026-09-06T10:00:00')",
             (UID, f"{title}的来源活动"),
         )

@@ -5,7 +5,6 @@ from datetime import datetime
 
 from . import schedule
 from .affection import bond_level_dimensions, dimensions_of, dimensions_stage
-from .focus import focus_in_progress
 from .persona_profiles import active_id, active_profile
 from .state import load_state
 
@@ -19,8 +18,6 @@ def _energy_band(value: int) -> str:
 
 
 def _presence(user_id: str, activity: dict, state, *, now: datetime) -> str:
-    if focus_in_progress(user_id):
-        return "focus"
     if state.resting or activity.get("activity") == "sleeping":
         return "rest"
     try:
@@ -85,8 +82,8 @@ def visual_state(user_id: str, *, now: datetime | None = None,
         "bond_label": bond or stage,
         "energy_band": _energy_band(int(state.energy)),
         "activity_kind": str(activity.get("activity") or "unknown"),
-        "presence": presence if presence in {"home", "mobile", "announced_offline", "rest", "focus"} else "home",
-        "quiet": presence == "focus" or not motion_enabled,
+        "presence": presence if presence in {"home", "mobile", "announced_offline", "rest"} else "home",
+        "quiet": not motion_enabled,
         "reduced_motion": not motion_enabled,
         "source_time": instant.isoformat(timespec="seconds"),
     }

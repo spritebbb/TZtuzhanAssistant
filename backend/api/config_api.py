@@ -26,7 +26,6 @@ _FLAG_LABELS = {
     "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",
     "humor_memory_enabled": "幽默记忆：只有你明确认可的梗她才会反复玩（不认可的立刻收起来）",
-    "focus_wrapup_enabled": "专注收尾：结束专注时她按真实情况说一句收尾（不评分）",
     "activity_drafts_enabled": "意图预填：你说想一起做什么时，她先给一张可确认的草稿",
     "telemetry_enabled": "本地诊断：记录无正文的事件链（7天）与日聚合（30天）",
     "style_map_enabled": "表达习惯观察：她记住你在不同场合的说话调子，回应更合拍（可在记忆管理删除）",

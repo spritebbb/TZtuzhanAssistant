@@ -45,9 +45,8 @@ FLAG_DEFAULTS = {
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。
     "output_hygiene_enabled": True,
-    # P1-02：语境注册表接管共同清单语境（首期唯一 provider）。实现与测试
-    # 已稳定（test_context_registry.py），设置页有开关入口，默认开启；
-    # 关闭时走 colists.list_context 旧路径；两条路径互斥，不会双注入。
+    # P1-02：语境注册表统一管理注入对话的语境来源（知识观点/项目上下文）。
+    # 实现与测试已稳定，设置页有开关入口，默认开启；关闭时本轮不注入语境。
     "context_registry_enabled": True,
     # L06：低频生活模板池（她低频出门/换活动）。用户拍板（2026-09-08）：
     # 接主动候选源、概率 0.25、用户意见可取消、出门可沉默但事件/状态行
@@ -62,9 +61,6 @@ FLAG_DEFAULTS = {
     # L04：幽默记忆（梗的授权/冷却/退役）。关闭后不再选梗注入，既有共同
     # 语言注入行为不变；反馈与退役仍可登记（不影响用户主权操作）。
     "humor_memory_enabled": True,
-    # F04：专注收尾人格化与可重试投递。关闭后完成专注不再入箱，原计时与
-    # 完成流程不变（退回原文案语义）。
-    "focus_wrapup_enabled": True,
     # F06：聊天意图自动预填草稿。关闭后不再产草稿，原手动创建入口保留。
     "activity_drafts_enabled": True,
     # P3-05B：本地质量统计（延迟/失败规则/重复率/来源选择/明确反馈计数）。

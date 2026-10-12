@@ -17,7 +17,7 @@ os.environ.setdefault("MEMORY_V2", "0")
 # 这组契约验证「额度为 1 时一次主动」。不能继承开发机 .env 的个性化上限。
 os.environ["PROACTIVE_DAILY_MAX"] = "1"
 
-from backend.core import focus, initiative, proactive_policy as policy  # noqa: E402
+from backend.core import initiative, proactive_policy as policy  # noqa: E402
 
 from backend.core.userdb import db, get_due_promises, save_promise  # noqa: E402
 
@@ -78,23 +78,6 @@ async def _test_failure_cooldown() -> None:
     print("[OK] 失败冷却：生成失败留冷却标记且不落账，冷却期内不重试")
 
 
-async def _test_focus_quiet_mode() -> None:
-    uid = "arbiter-user-4"
-    _make_user(uid)
-    _due_promise(uid, "用户说周末去爬山")
-    session = focus.start_focus(uid, 25)
-    try:
-        async def fine_chat(messages, **kwargs):
-            return "爬山怎样了"
-
-        with patch("backend.core.initiative.chat", new=fine_chat):
-            assert await initiative.maybe_follow_up_promise(uid) is None, "专注进行中必须静默"
-        assert get_due_promises(uid, date.today()), "静默不能消耗约定"
-    finally:
-        focus.cancel_focus(uid, session["id"])
-    print("[OK] 安静模式：专注进行中主动源静默，不消耗任何条件")
-
-
 async def _test_arbitrate_secondary_empty() -> None:
     uid = "arbiter-chain"
     _make_user(uid)
@@ -106,7 +89,6 @@ async def _test_arbitrate_secondary_empty() -> None:
 async def main() -> None:
     await _test_daily_quota()
     await _test_failure_cooldown()
-    await _test_focus_quiet_mode()
     await _test_arbitrate_secondary_empty()
     print("主动引擎测试通过")
 

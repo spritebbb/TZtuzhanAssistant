@@ -24,12 +24,8 @@ import { ensureBaseUrl, apiFetch } from './api'
 import { getLockStatus, lockNow, type LockStatus } from './api/lock'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
-import { useFocusMode } from './utils/focusMode'
 import { refreshVisualState, startVisualState, stopVisualState, switchVisualPersona, visualRecentEvents, visualState, visualQuiet } from './state/visualState'
 import { activeDialog, focusFirst, trapDialogTab } from './utils/dialogFocus'
-
-// M3.2 专注陪伴：全局计时与安静模式（body.focus-mode），应用存活期内持续对表
-const focusMode = useFocusMode()
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
@@ -134,16 +130,6 @@ function onNotify(e: Event) {
 
 const theme = ref<'dark' | 'light'>('dark')
 const themeStorageKey = 'tztuzhan-theme'
-
-// 专注计时徽章（mm:ss；暂停时显示暂停态）
-const focusClockText = computed(() => {
-  const session = focusMode.current.value
-  if (!session) return ''
-  const total = focusMode.remainingSec.value
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return focusMode.paused.value ? `已暂停 ${mm}:${ss}` : `${mm}:${ss}`
-})
 
 // === 主题切换（暗色/亮色；未手动选择时按昼夜自动：7-19 点亮色温室，夜晚暗色月光） ===
 function loadTheme() {
@@ -383,14 +369,12 @@ onMounted(async () => {
     wizardOpen.value = shouldShowFirstRun(localStorage.getItem(FIRST_RUN_FLAG), cfg)
   } catch { /* 后端未就绪时不打扰 */ }
   startVisualState(() => activePersona.value.id)
-  focusMode.start()   // 专注陪伴：恢复未结束的计时并对表
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener(NOTIFY_EVENT, onNotify)
   window.removeEventListener('tztuzhan:app-locked', onAppLocked)
-  focusMode.stop()
   stopVisualState()
 })
 </script>
@@ -435,9 +419,6 @@ onUnmounted(() => {
           <span class="presence-dot"></span>
           {{ presenceLabel || '陪伴中' }}
         </div>
-        <button v-if="focusMode.current.value" class="presence focus-chip" title="专注陪伴中，点击查看" @click="activityOpen = true">
-          ⏱ {{ focusClockText }}
-        </button>
         <div v-if="!compactUi" class="header-right">
           <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

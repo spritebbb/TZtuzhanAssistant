@@ -21,21 +21,7 @@ import {
   type ViewpointRole,
 } from '../api/activities'
 import { listKnowledgeDocuments, type KnowledgeDocument } from '../api/knowledge'
-import {
-  addGoalProgress,
-  cancelGoal,
-  completeGoal,
-  exportGoalUrl,
-  listGoals,
-  pauseGoal,
-  resumeGoal,
-  startGoal,
-  type GoalSupportMode,
-  type SharedGoal,
-} from '../api/goals'
-import { exportFocusUrl } from '../api/focus'
 import ViewpointBlock from './ViewpointBlock.vue'
-import { useFocusMode } from '../utils/focusMode'
 import {
   addWritingTurn,
   cancelWriting,
@@ -59,20 +45,6 @@ import {
   startObservation,
   type Observation,
 } from '../api/observations'
-import {
-  addListItem,
-  cancelList,
-  completeList,
-  exportListUrl,
-  listLists,
-  pauseList,
-  removeListItem,
-  resumeList,
-  startList,
-  type ListKind,
-  type SharedList,
-} from '../api/lists'
-
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{
   (e: 'close'): void
@@ -80,30 +52,9 @@ const emit = defineEmits<{
   (e: 'discuss', draft: string): void
 }>()
 
-// M3.2 专注陪伴：状态由全局单例维护，面板关闭后计时与安静模式仍在
-const focusMode = useFocusMode()
-const focusCountdown = computed(() => {
-  const total = focusMode.remainingSec.value
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-})
-
 const activities = ref<ReadingActivity[]>([])
 const documents = ref<KnowledgeDocument[]>([])
 const current = ref<ReadingActivity | null>(null)
-const goals = ref<SharedGoal[]>([])
-const currentGoal = ref<SharedGoal | null>(null)
-const showGoalForm = ref(false)
-const goalTitle = ref('')
-const goalMotivation = ref('')
-const goalNextStep = ref('')
-const goalSupport = ref<GoalSupportMode>('companion')
-const goalReminderAt = ref('')
-const progressDraft = ref('')
-const progressPercent = ref<number | null>(null)
-const progressNextStep = ref('')
-const keepGoalReview = ref(true)
 const writings = ref<CoWriting[]>([])
 const currentWriting = ref<CoWriting | null>(null)
 const showWritingForm = ref(false)
@@ -121,14 +72,6 @@ const observations = ref<Observation[]>([])
 const observationTitle = ref('')
 const observationEntry = ref('')
 const currentObservation = ref<Observation | null>(null)
-const lists = ref<SharedList[]>([])
-const currentList = ref<SharedList | null>(null)
-const showListForm = ref(false)
-const listTitle = ref('')
-const listKind = ref<ListKind>('song')
-const itemTitle = ref('')
-const itemCreator = ref('')
-const itemNote = ref('')
 const noteDraft = ref('')
 const viewpointDrafts = ref<Record<ViewpointRole, string>>({ user: '', tuzhan: '', shared: '' })
 const loading = ref(false)
@@ -151,12 +94,8 @@ const unfinished = computed(() => activities.value.filter(
 const completed = computed(() => activities.value.filter(
   item => item.status === 'completed' || item.status === 'cancelled',
 ).slice(0, 4))
-const openGoals = computed(() => goals.value.filter(item => item.status === 'active' || item.status === 'paused'))
-const completedGoals = computed(() => goals.value.filter(item => item.status === 'completed').slice(0, 4))
 const openWritings = computed(() => writings.value.filter(item => item.status === 'active' || item.status === 'paused'))
 const completedWritings = computed(() => writings.value.filter(item => item.status === 'completed').slice(0, 4))
-const openLists = computed(() => lists.value.filter(item => item.status === 'active' || item.status === 'paused'))
-const completedLists = computed(() => lists.value.filter(item => item.status === 'completed').slice(0, 4))
 
 function serverViewpoint(role: ViewpointRole): string {
   if (!current.value) return ''
@@ -195,19 +134,15 @@ async function load() {
   error.value = ''
   notice.value = ''
   try {
-    const [activityRows, documentRows, goalRows, writingRows, listRows] = await Promise.all([
+    const [activityRows, documentRows, writingRows] = await Promise.all([
       listReadingActivities(),
       listKnowledgeDocuments(),
-      listGoals(),
       listWritings(),
-      listLists(),
     ])
     activities.value = activityRows
     documents.value = documentRows
-    goals.value = goalRows
     writings.value = writingRows
     observations.value = await listObservations()
-    lists.value = listRows
     const active = activityRows.find(item => item.status === 'active') ?? null
     current.value = active
     noteDraft.value = active?.note ?? ''
@@ -216,93 +151,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function applyGoal(value: SharedGoal) {
-  currentGoal.value = value
-  goals.value = [value, ...goals.value.filter(item => item.id !== value.id)]
-  progressNextStep.value = value.next_step
-}
-
-async function runGoal(action: () => Promise<SharedGoal>, success = '') {
-  if (busy.value) return
-  busy.value = true
-  error.value = ''
-  notice.value = ''
-  try {
-    applyGoal(await action())
-    notice.value = success
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
-  } finally {
-    busy.value = false
-  }
-}
-
-async function createGoal() {
-  await runGoal(() => startGoal({
-    title: goalTitle.value,
-    motivation: goalMotivation.value,
-    next_step: goalNextStep.value,
-    support_mode: goalSupport.value,
-    reminder_at: goalSupport.value === 'reminder' ? goalReminderAt.value || null : null,
-  }), '目标放在这里了，先走眼前这一小步')
-  if (!error.value) {
-    showGoalForm.value = false
-    goalTitle.value = ''
-    goalMotivation.value = ''
-    goalNextStep.value = ''
-    goalReminderAt.value = ''
-  }
-}
-
-function openGoal(item: SharedGoal) {
-  currentGoal.value = item
-  progressNextStep.value = item.next_step
-  progressDraft.value = ''
-  progressPercent.value = null
-  notice.value = ''
-  error.value = ''
-}
-
-async function saveProgress() {
-  if (!currentGoal.value) return
-  await runGoal(() => addGoalProgress(currentGoal.value!.id, {
-    content: progressDraft.value,
-    percent: progressPercent.value,
-    next_step: progressNextStep.value,
-  }), '这一步确实发生过，记下了')
-  if (!error.value) {
-    progressDraft.value = ''
-    progressPercent.value = null
-  }
-}
-
-function leaveGoal() {
-  currentGoal.value = null
-  progressDraft.value = ''
-  notice.value = ''
-  error.value = ''
-}
-
-function pauseCurrentGoal() {
-  const item = currentGoal.value
-  if (item) void runGoal(() => pauseGoal(item.id), '先放在这里，回来还能继续')
-}
-
-function resumeCurrentGoal() {
-  const item = currentGoal.value
-  if (item) void runGoal(() => resumeGoal(item.id), '继续走这一步')
-}
-
-function finishCurrentGoal() {
-  const item = currentGoal.value
-  if (item) void runGoal(() => completeGoal(item.id, keepGoalReview.value), '做成了，过程也如实收好了')
-}
-
-function cancelCurrentGoal() {
-  const item = currentGoal.value
-  if (item) void runGoal(() => cancelGoal(item.id), '这个目标已经放下')
 }
 
 async function run(action: () => Promise<ReadingActivity>, success = '') {
@@ -561,92 +409,6 @@ async function askTuzhanTurn() {
   }
 }
 
-function applyList(value: SharedList) {
-  currentList.value = value
-  lists.value = [value, ...lists.value.filter(item => item.id !== value.id)]
-}
-
-async function runList(action: () => Promise<SharedList>, success = '') {
-  if (busy.value) return
-  busy.value = true
-  error.value = ''
-  notice.value = ''
-  try {
-    applyList(await action())
-    notice.value = success
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '这次没有记上，再试一次'
-  } finally {
-    busy.value = false
-  }
-}
-
-async function createList() {
-  await runList(() => startList(listTitle.value, listKind.value), '清单开好了，先加第一个')
-  if (!error.value) {
-    showListForm.value = false
-    listTitle.value = ''
-  }
-}
-
-function openList(item: SharedList) {
-  currentList.value = item
-  itemTitle.value = ''
-  itemCreator.value = ''
-  itemNote.value = ''
-  notice.value = ''
-  error.value = ''
-}
-
-// P2-18：同 submitTurn——await 后按结果决定是否清空三个输入
-async function submitItem() {
-  if (!currentList.value || busy.value || !itemTitle.value.trim()) return
-  const title = itemTitle.value
-  const creator = itemCreator.value
-  const note = itemNote.value
-  await runList(() => addListItem(currentList.value!.id, {
-    title,
-    creator,
-    note,
-  }), '加进清单了')
-  if (!error.value) {
-    itemTitle.value = ''
-    itemCreator.value = ''
-    itemNote.value = ''
-  }
-}
-
-function dropItem(item: { id: number }) {
-  if (!currentList.value) return
-  void runList(() => removeListItem(currentList.value!.id, item.id), '从清单里拿掉了')
-}
-
-function leaveList() {
-  currentList.value = null
-  notice.value = ''
-  error.value = ''
-}
-
-function pauseCurrentList() {
-  const item = currentList.value
-  if (item) void runList(() => pauseList(item.id), '先放在这里')
-}
-
-function resumeCurrentList() {
-  const item = currentList.value
-  if (item) void runList(() => resumeList(item.id), '继续攒')
-}
-
-function finishCurrentList() {
-  const item = currentList.value
-  if (item) void runList(() => completeList(item.id), '收列完成，收进了共同角落')
-}
-
-function cancelCurrentList() {
-  const item = currentList.value
-  if (item) void runList(() => cancelList(item.id), '这份清单先不攒了')
-}
-
 function leaveWriting() {
   currentWriting.value = null
   writingTurnDraft.value = ''
@@ -748,56 +510,7 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
 
       <div class="body">
         <p v-if="loading" class="empty">正在找上次夹的书签…</p>
-        <p v-else-if="error && !current && !currentGoal && !currentWriting && !currentList" class="empty error">{{ error }}</p>
-
-        <template v-else-if="currentGoal">
-          <button class="back" @click="leaveGoal">← 所有活动</button>
-          <div class="goal-head">
-            <div>
-              <span class="status" :class="currentGoal.status">
-                {{ currentGoal.status === 'completed' ? '已完成' : currentGoal.status === 'paused' ? '暂放一下' : currentGoal.status === 'cancelled' ? '已放下' : '一起进行中' }}
-              </span>
-              <h3>{{ currentGoal.title }}</h3>
-              <p v-if="currentGoal.motivation">为什么想做：{{ currentGoal.motivation }}</p>
-            </div>
-          </div>
-          <article class="next-step-card">
-            <span>NEXT SMALL STEP</span>
-            <strong>{{ currentGoal.next_step }}</strong>
-            <small>{{ currentGoal.support_mode === 'companion' ? '陪做模式 · 你提起时她才跟进' : `轻提醒一次${currentGoal.reminder_at ? ` · ${currentGoal.reminder_at.slice(0, 16).replace('T', ' ')}` : ''}` }}</small>
-          </article>
-
-          <template v-if="currentGoal.status === 'active' || currentGoal.status === 'paused'">
-            <div class="goal-progress-form">
-              <label><span>这次实际做了什么</span><textarea v-model="progressDraft" rows="3" maxlength="1000" placeholder="只记真实发生的进展，不用写得漂亮"></textarea></label>
-              <div class="goal-progress-row">
-                <label><span>大约进度（可选）</span><input v-model.number="progressPercent" type="number" min="0" max="100" placeholder="%"></label>
-                <label><span>接下来最小一步</span><input v-model="progressNextStep" maxlength="500"></label>
-              </div>
-              <button class="talk" :disabled="busy || !progressDraft.trim()" @click="saveProgress">记下这次进展</button>
-            </div>
-            <div class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
-            <div class="goal-actions">
-              <button v-if="currentGoal.status === 'active'" :disabled="busy" @click="pauseCurrentGoal">暂停</button>
-              <button v-else :disabled="busy" @click="resumeCurrentGoal">继续</button>
-              <label class="keepsake-choice"><input v-model="keepGoalReview" type="checkbox">完成后留下过程回顾</label>
-              <button class="finish" :disabled="busy" @click="finishCurrentGoal">完成目标</button>
-              <button class="plain-action" :disabled="busy" @click="cancelCurrentGoal">放下目标</button>
-            </div>
-          </template>
-
-          <section v-if="currentGoal.progress_entries.length" class="goal-timeline">
-            <div class="section-title"><span>REAL PROGRESS</span><h3>实际进展</h3></div>
-            <article v-for="entry in [...currentGoal.progress_entries].reverse()" :key="entry.id">
-              <span>{{ entry.ts.slice(0, 10) }}<template v-if="entry.percent !== null"> · {{ entry.percent }}%</template></span>
-              <p>{{ entry.content }}</p>
-              <small v-if="entry.next_step">下一步：{{ entry.next_step }}</small>
-            </article>
-          </section>
-          <article v-if="currentGoal.review" class="summary-box"><span>过程回顾</span><p>{{ currentGoal.review }}</p></article>
-          <a class="goal-export" :href="exportGoalUrl(currentGoal.id)" download>导出 Markdown</a>
-          <ViewpointBlock :activity-id="currentGoal.id" :persona-name="personaName" />
-        </template>
+        <p v-else-if="error && !current && !currentWriting" class="empty error">{{ error }}</p>
 
         <template v-else-if="currentWriting">
           <button class="back" @click="leaveWriting">← 所有活动</button>
@@ -855,55 +568,6 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
           <a class="goal-export" :href="exportWritingUrl(currentWriting.id)" download>导出 Markdown</a>
           <p class="fiction-note">这是一段你们共同虚构的创作；故事只留在故事里，不会变成你们现实记忆的一部分。</p>
           <ViewpointBlock :activity-id="currentWriting.id" :persona-name="personaName" />
-        </template>
-
-        <template v-else-if="currentList">
-          <button class="back" @click="leaveList">← 所有活动</button>
-          <div class="goal-head">
-            <div>
-              <span class="status" :class="currentList.status">
-                {{ currentList.status === 'completed' ? '已收列' : currentList.status === 'paused' ? '暂放一下' : currentList.status === 'cancelled' ? '已放下' : '一起攒着' }}
-              </span>
-              <h3>{{ currentList.title }}</h3>
-              <p>共同{{ currentList.kind_label }} · {{ currentList.items.length }} 条</p>
-            </div>
-          </div>
-
-          <div class="story-turns">
-            <article v-for="item in currentList.items" :key="item.id" :class="item.added_by">
-              <span>{{ item.added_by === 'user' ? '我' : props.personaName || '她' }}推荐</span>
-              <p><strong>{{ item.title }}</strong><template v-if="item.creator"> · {{ item.creator }}</template><template v-if="item.note"><br><small>{{ item.note }}</small></template></p>
-              <button
-                v-if="currentList.status === 'active' || currentList.status === 'paused'"
-                class="term-del item-del" :disabled="busy" @click="dropItem(item)"
-              >拿掉</button>
-            </article>
-            <p v-if="!currentList.items.length" class="empty small">清单还空着，先加最想分享的那一个</p>
-          </div>
-
-          <template v-if="currentList.status === 'active' || currentList.status === 'paused'">
-            <label class="writing-turn-form">
-              <span>加一条</span>
-              <input v-model="itemTitle" maxlength="200" placeholder="歌名 / 书名">
-              <input v-model="itemCreator" maxlength="200" placeholder="歌手 / 作者（可选）">
-              <textarea v-model="itemNote" rows="2" maxlength="500" placeholder="为什么想分享（可选）"></textarea>
-            </label>
-            <div class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
-            <div class="goal-actions writing-actions">
-              <button :disabled="busy || !itemTitle.trim()" @click="submitItem">加进清单</button>
-            </div>
-            <div class="goal-actions">
-              <button v-if="currentList.status === 'active'" :disabled="busy" @click="pauseCurrentList">暂停</button>
-              <button v-else :disabled="busy" @click="resumeCurrentList">继续</button>
-              <button class="finish" :disabled="busy" @click="finishCurrentList">收列完成</button>
-              <button class="plain-action" :disabled="busy" @click="cancelCurrentList">放下清单</button>
-            </div>
-          </template>
-          <div v-else class="notice-line"><span :class="{ error: !!error }">{{ error || notice }}</span></div>
-
-          <article v-if="currentList.compiled" class="summary-box"><span>共同清单</span><p>{{ currentList.compiled }}</p></article>
-          <a class="goal-export" :href="exportListUrl(currentList.id)" download>导出 Markdown</a>
-          <ViewpointBlock :activity-id="currentList.id" :persona-name="personaName" />
         </template>
 
         <template v-else-if="current">
@@ -1003,31 +667,6 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
         </template>
 
         <template v-else>
-          <section class="shelf-section goal-section">
-            <div class="section-title"><span>SHARED GOALS</span><h3>共同目标</h3></div>
-            <p class="focus-hint">把动机和下一小步放清楚；她可以陪你做，也可以只轻轻提醒一次</p>
-            <button v-if="!showGoalForm" class="open-bookshelf" @click="showGoalForm = true">立一个共同目标</button>
-            <div v-else class="goal-create">
-              <label><span>想做成什么</span><input v-model="goalTitle" maxlength="120" placeholder="例如：整理出第一版作品集"></label>
-              <label><span>为什么想做（可选）</span><textarea v-model="goalMotivation" rows="2" maxlength="1000"></textarea></label>
-              <label><span>现在能走的最小一步</span><input v-model="goalNextStep" maxlength="500" placeholder="例如：先挑出 3 个项目"></label>
-              <div class="support-choice">
-                <label><input v-model="goalSupport" type="radio" value="companion">我提起时陪我做</label>
-                <label><input v-model="goalSupport" type="radio" value="reminder">到点轻提醒一次</label>
-              </div>
-              <label v-if="goalSupport === 'reminder'"><span>提醒时间（留空默认 3 天后）</span><input v-model="goalReminderAt" type="datetime-local"></label>
-              <div class="goal-create-actions"><button class="plain-action" @click="showGoalForm = false">取消</button><button class="talk" :disabled="busy || !goalTitle.trim() || !goalNextStep.trim()" @click="createGoal">开始</button></div>
-            </div>
-            <div v-if="openGoals.length" class="activity-list goal-list">
-              <button v-for="item in openGoals" :key="item.id" @click="openGoal(item)">
-                <span class="format">GOAL</span><span><strong>{{ item.title }}</strong><small>下一步：{{ item.next_step }}</small></span><em>{{ item.status === 'paused' ? '继续' : '查看' }}</em>
-              </button>
-            </div>
-            <div v-if="completedGoals.length" class="activity-list goal-list completed-goals">
-              <button v-for="item in completedGoals" :key="item.id" @click="openGoal(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.progress_entries.length }} 条真实进展</small></span><em>回看</em></button>
-            </div>
-          </section>
-
           <section class="shelf-section goal-section writing-section">
             <div class="section-title"><span>STORY RELAY</span><h3>共同创作</h3></div>
             <p class="focus-hint">轮流各写一段，把一个虚构故事接着讲下去；故事只是故事，不会变成你们的记忆</p>
@@ -1089,53 +728,6 @@ watch(() => props.show, show => { if (show) void load() }, { immediate: true })
                 </div>
               </template>
               <pre v-else-if="currentObservation.log" class="observation-log">{{ currentObservation.log }}</pre>
-            </div>
-          </section>
-
-          <section class="shelf-section goal-section writing-section list-section">
-            <div class="section-title"><span>SHARED LIST</span><h3>共同清单</h3></div>
-            <p class="focus-hint">一起攒一份歌单或书单，想分享给对方的东西都留在这里</p>
-            <button v-if="!showListForm" class="open-bookshelf" @click="showListForm = true">攒一份清单</button>
-            <div v-else class="goal-create">
-              <label><span>清单名</span><input v-model="listTitle" maxlength="120" placeholder="例如：换季歌单"></label>
-              <div class="support-choice">
-                <label><input v-model="listKind" type="radio" value="song">歌单</label>
-                <label><input v-model="listKind" type="radio" value="book">书单</label>
-              </div>
-              <div class="goal-create-actions"><button class="plain-action" @click="showListForm = false">取消</button><button class="talk" :disabled="busy || !listTitle.trim()" @click="createList">开始</button></div>
-            </div>
-            <div v-if="openLists.length" class="activity-list goal-list">
-              <button v-for="item in openLists" :key="item.id" @click="openList(item)">
-                <span class="format">LIST</span><span><strong>{{ item.title }}</strong><small>{{ item.kind_label }} · {{ item.items.length }} 条 · {{ item.status === 'paused' ? '暂放一下' : '一起攒着' }}</small></span><em>{{ item.status === 'paused' ? '继续' : '查看' }}</em>
-              </button>
-            </div>
-            <div v-if="completedLists.length" class="activity-list goal-list completed-goals">
-              <button v-for="item in completedLists" :key="item.id" @click="openList(item)"><span>✓</span><span><strong>{{ item.title }}</strong><small>{{ item.kind_label }} · {{ item.items.length }} 条</small></span><em>回看</em></button>
-            </div>
-          </section>
-
-          <section class="shelf-section focus-section">
-            <div class="section-title"><span>QUIET TIME</span><h3>专注陪伴</h3></div>
-            <div v-if="focusMode.current.value" class="focus-card">
-              <div class="focus-clock">
-                <strong>{{ focusCountdown }}</strong>
-                <span>{{ focusMode.current.value.title }} · {{ focusMode.paused.value ? '已暂停' : '安静陪伴中' }}</span>
-              </div>
-              <p class="focus-hint">这段时间她会安静一些，不主动打扰你</p>
-              <div class="focus-actions">
-                <button v-if="focusMode.active.value" :disabled="focusMode.busy.value" @click="focusMode.pauseSession()">暂停</button>
-                <button v-else :disabled="focusMode.busy.value" @click="focusMode.resumeSession()">继续</button>
-                <button :disabled="focusMode.busy.value" @click="focusMode.completeSession()">结束</button>
-                <button class="plain" :disabled="focusMode.busy.value" @click="focusMode.cancelSession()">中断</button>
-              </div>
-              <a class="goal-export" :href="exportFocusUrl(focusMode.current.value.id)" download>导出计时记录</a>
-            </div>
-            <div v-else class="focus-card">
-              <p class="focus-hint">定一段安静的时间，她陪你各做各的事，结束了她叫你</p>
-              <div class="focus-actions">
-                <button :disabled="focusMode.busy.value" @click="focusMode.startSession(25)">25 分钟</button>
-                <button :disabled="focusMode.busy.value" @click="focusMode.startSession(50)">50 分钟</button>
-              </div>
             </div>
           </section>
 

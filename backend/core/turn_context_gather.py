@@ -65,29 +65,6 @@ async def gather_reading(user_id: str, text: str) -> tuple[str, Failure]:
         return "", ("共读上下文", exc)
 
 
-async def gather_focus(user_id: str, text: str, *, ephemeral: bool) -> tuple[str, Failure]:
-    """M3.2 专注陪伴：只在谈到专注/计时时注入当前状态。"""
-    from .focus import focus_context
-
-    try:
-        return (
-            await _to_thread(focus_context, user_id, text, settle=not ephemeral),
-            None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return "", ("专注上下文", exc)
-
-
-async def gather_goal(user_id: str, text: str) -> tuple[str, Failure]:
-    """M3.3 共同目标：只在目标/计划相关话题下注入真实进展。"""
-    from .goals import goal_context
-
-    try:
-        return await _to_thread(goal_context, user_id, text), None
-    except Exception as exc:  # noqa: BLE001
-        return "", ("共同目标上下文", exc)
-
-
 async def gather_writing(user_id: str, text: str) -> tuple[str, Failure]:
     """M3.4 共同创作：只在创作/故事话题注入虚构素材（自带虚构声明）。"""
     from .cowriting import cowriting_context
@@ -111,40 +88,36 @@ async def gather_tavern(user_id: str, text: str) -> tuple[str, Failure]:
 async def gather_list_context(
     user_id: str, text: str, *, turn_id: int, ephemeral: bool
 ) -> tuple[dict, Failure]:
-    """M3.4 共同清单 + P1-02 语境注册表（两路互斥，不会双注入）。
+    """P1-02 语境注册表：统一收集本轮可注入的语境来源。
 
     返回 ``{"text": str, "selection": ContextSelection | None}``；``selection``
-    在注册表开启时非空，供调用方在回复提交后推进语境生命周期。
+    供调用方在回复提交后推进语境生命周期。
     """
     from .features import flag
 
     try:
-        if flag("context_registry_enabled"):
-            from .context_registry import collect_context
+        if not flag("context_registry_enabled"):
+            return {"text": "", "selection": None}, None
+        from .context_registry import collect_context
 
-            selection = await _to_thread(
-                collect_context,
-                user_id,
-                text,
-                turn_id=turn_id,
-                state={"ephemeral": ephemeral},
-            )
-            if not ephemeral:
-                # P3-05B 统计：语境来源选择计数（只记 entry id，不记内容）
-                try:
-                    from .experience_metrics import record as _metric
+        selection = await _to_thread(
+            collect_context,
+            user_id,
+            text,
+            turn_id=turn_id,
+            state={"ephemeral": ephemeral},
+        )
+        if not ephemeral:
+            try:
+                from .experience_metrics import record as _metric
 
-                    for item in selection.explain()[:5]:
-                        _metric(user_id, "source_pick", str(item.get("id", ""))[:60])
-                except Exception:  # noqa: BLE001 —— 统计失败不影响语境
-                    pass
-            return {"text": selection.assemble(), "selection": selection}, None
-
-        from .colists import list_context
-
-        return {"text": await _to_thread(list_context, user_id, text), "selection": None}, None
+                for item in selection.explain()[:5]:
+                    _metric(user_id, "source_pick", str(item.get("id", ""))[:60])
+            except Exception:  # noqa: BLE001 —— 统计失败不影响语境
+                pass
+        return {"text": selection.assemble(), "selection": selection}, None
     except Exception as exc:  # noqa: BLE001
-        return {"text": "", "selection": None}, ("共同清单上下文", exc)
+        return {"text": "", "selection": None}, ("语境注册表", exc)
 
 
 async def gather_event_recall(user_id: str, text: str) -> tuple[dict, Failure]:
@@ -247,8 +220,6 @@ async def gather_all(
         await gather_memories(user_id, text, mock=mock),
         await gather_knowledge(user_id, text, mock=mock),
         await gather_reading(user_id, text),
-        await gather_focus(user_id, text, ephemeral=ephemeral),
-        await gather_goal(user_id, text),
         await gather_writing(user_id, text),
         await gather_tavern(user_id, text),
         await gather_list_context(user_id, text, turn_id=turn_id, ephemeral=ephemeral),
@@ -260,8 +231,6 @@ async def gather_all(
         memories,
         knowledge,
         reading,
-        focus,
-        goal,
         writing,
         tavern,
         lists,
@@ -277,8 +246,6 @@ async def gather_all(
         "fact_id_map": memories[0]["fact_id_map"],
         "kb_hits": knowledge[0],
         "reading_context": reading[0],
-        "focus_ctx": focus[0],
-        "goal_ctx": goal[0],
         "writing_ctx": writing[0],
         "tavern_mem_ctx": tavern[0],
         "list_ctx": lists[0]["text"],

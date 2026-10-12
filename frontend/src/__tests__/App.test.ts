@@ -21,7 +21,6 @@ vi.mock('../api/personas', () => ({
   listPersonas: vi.fn().mockResolvedValue({ active: { id: 'default', name: '菟菚', subtitle: '助手', theme: 'dark', voice: '', active: true, created_at: 0, motion_enabled: true }, personas: [] }),
   updatePersona: vi.fn(),
 }))
-vi.mock('../utils/focusMode', () => ({ useFocusMode: () => ({ current: ref(null), remainingSec: ref(0), paused: ref(false), start: vi.fn(), stop: vi.fn() }) }))
 
 beforeEach(() => localStorage.clear())
 afterEach(() => { document.body.innerHTML = '' })

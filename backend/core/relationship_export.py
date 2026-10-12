@@ -29,11 +29,6 @@ from .userdb import db
 BUNDLE_KIND = "tuzhan-relationship-bundle"
 BUNDLE_VERSION = 1
 
-# 主键别名表：主键列不叫 id、且主键值就是别一张表的外键（activity_lists.
-# activity_id 即 activities.id）。preview 的引用校验与 restore 的 id_maps
-# 登记都按此表取行主键；通用循环只重命名 "id" 主键，这类表由此表兜住。
-_BUNDLE_PK: dict[str, str] = {"activity_lists": "activity_id"}
-
 # 类别 → 表清单（导出与恢复顺序无关；全部表都在 userdb.reset 双清单里）
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
@@ -45,10 +40,9 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
              "persona_evolution_log", "tavern_sessions", "her_statements"),
     "tasks": ("tasks", "promises"),
     "activities": (
-        "activities", "activity_notes", "activity_viewpoints", "activity_goals",
-        "goal_progress", "activity_writings", "writing_turns", "artifacts",
+        "activities", "activity_notes", "activity_viewpoints",
+        "activity_writings", "writing_turns", "artifacts",
         "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
-        "activity_lists", "list_items",
     ),
     "events": ("relationship_events", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot", "event_chains",
@@ -125,8 +119,6 @@ _REFERENCE_RULES = (
     _rule_static("observation_entries", "activity_id", "activities"),
     _rule_static("reading_bookmarks", "segment_id", "reading_segments"),
     _rule_static("activity_viewpoints", "activity_id", "activities"),
-    _rule_static("activity_goals", "activity_id", "activities"),
-    _rule_static("goal_progress", "activity_id", "activities"),
     _rule_static("activity_writings", "activity_id", "activities"),
     _rule_static("writing_turns", "activity_id", "activities"),
     _rule_static("kb_chunks", "doc_id", "kb_documents"),
@@ -138,10 +130,6 @@ _REFERENCE_RULES = (
     _rule_static("profile_evolution_log", "new_id", "user_profile", frozenset()),
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
-    # 换机漏表批（DF-1）：activity_lists 主键即 activities.id（rowid alias），
-    # 走通用引用重写后 id_maps 记录的新值与 activities 一致，list_items 再对齐。
-    _rule_static("activity_lists", "activity_id", "activities"),
-    _rule_static("list_items", "activity_id", "activity_lists"),
     _rule_static("relationship_dimension_ledger", "event_id", "relationship_events"),
     _rule_static("event_chains", "source_event_id", "relationship_events"),
     _rule_static("humor_usage", "term_id", "user_terms"),
@@ -251,7 +239,7 @@ def _validate_references(data: dict[str, list[dict]]) -> list[str]:
                 broken = True
                 break
             if not any(
-                int(candidate.get(_BUNDLE_PK.get(ref_table, "id")) or 0) == value
+                int(candidate.get("id") or 0) == value
                 for candidate in ref_rows
             ):
                 errors.append(f"引用断裂：{table} 的 {ref_table}.id={value} 在备份中不存在")
@@ -520,11 +508,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         id_maps[table][old_id] = (
                             new_text_id if new_text_id is not None else int(cur.lastrowid)
                         )
-                    elif table in _BUNDLE_PK and values.get(_BUNDLE_PK[table]) is not None:
-                        # 主键别名表：按别名登记映射（新值已由引用规则重写为
-                        # activities 的新 id），下游 list_items 据此解析。
-                        pk_name = _BUNDLE_PK[table]
-                        id_maps[table][int(row[pk_name])] = int(values[pk_name])
                 restored[table] = len(rows)
             # 二阶段：自引用回填（引用行与被引用行的新 id 都已确定）
             for table, column, ref_table, referencing_old_id, old_value in self_fixups:
