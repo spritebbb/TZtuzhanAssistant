@@ -503,14 +503,6 @@ def create_app() -> FastAPI:
             _spawn_bg(_startup_recap())
         except Exception:
             logger.exception("[离线补算] 启动预生成任务创建失败")
-        # 38项#23 事件感：每小时为当前人格补一条当日外部世界摘要（幂等、
-        # fail-soft），进问候素材池末位
-        try:
-            from .core.news_digest import news_loop as _news_loop
-
-            _spawn_bg(_news_loop())
-        except Exception:
-            logger.exception("[事件感] 后台新闻循环启动失败")
         # 38项#22 兴趣源：每小时检查到期授权源拉新素材（无源零动作）
         try:
             from .core.interest_feed import feed_loop as _feed_loop

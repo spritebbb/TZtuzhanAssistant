@@ -21,7 +21,6 @@ _FLAG_LABELS = {
     "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
     "expression_exemplars_enabled": "表达范文：用成对例句示范她的说话分寸（资源为空时不注入；范文在人格资源里维护）",
     "her_statements_enabled": "她的自述：记住她亲口说过的自己的事，前后矛盾时她自己决定怎么演（不重复提起）",
-    "news_digest_enabled": "事件感：每天知道一件外部世界的事，打招呼时能自然提起",
     "plain_moments_enabled": "平淡时刻：平淡但值得记的日常也会低权重记住（会随时间淡忘，不进情绪记忆）",
     "interest_feeds_enabled": "兴趣源：按你授权的话题定期看看外面有什么新东西，偶尔讲给你听",
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
