@@ -33,7 +33,7 @@ BUNDLE_VERSION = 1
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
-               "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
+               "memory_policy", "memory_annotations", "first_occurrences",
                "learning_candidates", "manager_memories", "user_preferences", "profile_evolution_log"),
     "milestones": ("affection_log", "mood_log", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "character_life_events", "reunion_arcs", "source_links",
@@ -42,7 +42,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "activities": (
         "activities", "activity_notes", "activity_viewpoints",
         "activity_writings", "writing_turns", "artifacts",
-        "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
+        "reading_segments", "reading_bookmarks", "observation_entries",
     ),
     "events": ("relationship_events", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot", "event_chains",
@@ -99,8 +99,6 @@ def _rule_dynamic(table: str, column: str, type_column: str):
 
 
 _REFERENCE_RULES = (
-    _rule_static("artifact_placements", "artifact_id", "artifacts", frozenset()),
-    _rule_dynamic("aesthetic_preferences", "source_id", "source_type"),
     _rule_static("resource_grants", "resource_id", "shared_resources", frozenset()),
     _rule_static("persona_evolution_log", "source_event_id", "relationship_events", frozenset()),
     _rule_static("activity_notes", "activity_id", "activities"),

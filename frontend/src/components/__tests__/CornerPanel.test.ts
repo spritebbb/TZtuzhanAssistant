@@ -5,7 +5,6 @@ import type { ArtifactItem } from '../../api/artifacts'
 import { listArtifacts } from '../../api/artifacts'
 import CornerPanel from '../CornerPanel.vue'
 
-vi.mock('../RoomPanel.vue', () => ({ default: { template: '<section aria-label="共同房间" />' } }))
 vi.mock('../../api/artifacts', () => ({ listArtifacts: vi.fn() }))
 
 const mockedArtifacts = vi.mocked(listArtifacts)

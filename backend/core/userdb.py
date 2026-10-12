@@ -26,19 +26,6 @@ from ..storage.connect import connect_database
 _SCHEMA_VERSION = 58  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS aesthetic_preferences (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
-    owner TEXT NOT NULL CHECK(owner IN ('user','assistant')),
-    category TEXT NOT NULL CHECK(category IN ('color','style','motif','layout')),
-    value TEXT NOT NULL, origin TEXT NOT NULL, source_type TEXT, source_id INTEGER,
-    status TEXT NOT NULL DEFAULT 'active', UNIQUE(user_id,owner,category)
-);
-CREATE TABLE IF NOT EXISTS artifact_placements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, artifact_id INTEGER NOT NULL,
-    slot TEXT NOT NULL DEFAULT 'room' CHECK(slot='room'), x REAL NOT NULL CHECK(x BETWEEN 0 AND 1),
-    y REAL NOT NULL CHECK(y BETWEEN 0 AND 1), theme_version INTEGER NOT NULL DEFAULT 1 CHECK(theme_version=1),
-    hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)), UNIQUE(user_id,artifact_id)
-);
 CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,
     affection       INTEGER NOT NULL DEFAULT 0,
@@ -910,22 +897,7 @@ def _locked(method):
 
 # P3-3：级联触发器单独成常量——UserDB.reset() 的「删文件重建」分支此前只跑
 # _SCHEMA 不跑本脚本，同进程 reset 后删产物/事件不再级联清理（重启才恢复）。
-_TRIGGERS_SQL = """
-CREATE TRIGGER IF NOT EXISTS room_artifact_deleted AFTER DELETE ON artifacts BEGIN
-  DELETE FROM artifact_placements WHERE user_id=OLD.user_id AND artifact_id=OLD.id;
-  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='artifact' AND source_id=OLD.id;
-END;
-CREATE TRIGGER IF NOT EXISTS room_event_deleted AFTER DELETE ON relationship_events BEGIN
-  DELETE FROM artifacts WHERE user_id=OLD.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=OLD.id;
-END;
-CREATE TRIGGER IF NOT EXISTS room_event_invalidated AFTER UPDATE OF status ON relationship_events
-WHEN NEW.status!='active' BEGIN
-  DELETE FROM artifacts WHERE user_id=NEW.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=NEW.id;
-END;
-CREATE TRIGGER IF NOT EXISTS aesthetic_opinion_deleted AFTER DELETE ON knowledge_opinions BEGIN
-  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='knowledge_opinion' AND source_id=OLD.id;
-END;
-"""
+_TRIGGERS_SQL = ""
 
 
 class UserDB:
@@ -2258,7 +2230,6 @@ class UserDB:
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
                 "domain_trust_events", "domain_trust_snapshot",
-                "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "kb_documents", "kb_chunks", "mood_log",
                 "tavern_sessions",

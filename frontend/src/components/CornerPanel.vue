@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import RoomPanel from './RoomPanel.vue'
 import { listArtifacts, type ArtifactItem } from '../api/artifacts'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
@@ -50,7 +49,6 @@ watch(() => props.show, (show) => { if (show) void load() }, { immediate: true }
         <p v-if="loading" class="empty">正在整理角落…</p>
         <p v-else-if="error" class="empty" role="alert">{{ error }}</p>
         <template v-else>
-          <RoomPanel />
           <section aria-label="一起做成的事">
             <div class="section-head">
               <h3>一起做成的事</h3>

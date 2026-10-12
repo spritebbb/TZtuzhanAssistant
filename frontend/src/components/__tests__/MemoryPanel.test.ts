@@ -20,7 +20,6 @@ import {
 } from '../../api/memory'
 import MemoryPanel from '../MemoryPanel.vue'
 
-vi.mock('../RoomPanel.vue', () => ({ default: { template: '<section aria-label="共同审美" />' } }))
 vi.mock('../../api/memory', () => ({
   getFacts: vi.fn(),
   updateFact: vi.fn(),
