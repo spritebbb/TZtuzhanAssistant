@@ -61,7 +61,6 @@ KV_KEY_SPECS: tuple[KvKeySpec, ...] = (
     KvKeySpec("state:emotion_memory", "state", "情绪记忆（跨天连续的心情素材）", "runtime", export=True),
     KvKeySpec("state:emotion_archive", "state", "情绪记忆归档（可回看的历史情绪）", "runtime", export=True),
     KvKeySpec("state:event_memory", "state", "事件记忆（她记着的最近互动信号）", "runtime", export=True),
-    KvKeySpec("attention:topics", "attention_state", "§17.1 注意力主题（≤5 个 topic id + 权重，无正文）", "runtime"),
     KvKeySpec("proactive:source_last:{source}", "expression_policy", "§17.1 各主动来源最近一次投递时间（重复惩罚输入）", "runtime"),
     KvKeySpec("cost:skipped_batch:{day}", "cost_guard", "D10 daily 批处理被熔断跳过的 journal 记录", "runtime"),
     KvKeySpec("chat:regen_last_at", "chat", "DF-8 重发 60s 节流窗口锚点", "runtime"),
