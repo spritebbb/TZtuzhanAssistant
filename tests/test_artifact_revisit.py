@@ -24,7 +24,6 @@ os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_rev
 os.environ.setdefault("MEMORY_V2", "0")
 
 from backend.core import pending_thoughts as pt  # noqa: E402
-from backend.core import surprise  # noqa: E402
 from backend.core.userdb import db  # noqa: E402
 
 NOW = datetime.datetime.now().replace(microsecond=0)
@@ -108,30 +107,10 @@ def test_source_alive_and_stage_gate() -> int:
     return 0
 
 
-def test_surprise_material_exclusion() -> int:
-    uid = "revisit-surprise"
-    db.ensure_user(uid)
-    fresh_id = _insert_artifact(uid, "新的共同故事", "co_story", created_days_ago=1)
-    visited_id = _insert_artifact(uid, "已回访过的共同故事", "co_story", created_days_ago=1)
-
-    # 已挂 artifact_revisit 心事的产物（不论 pending/expressed）不再当惊喜素材
-    assert pt._add(uid, "artifact_revisit", "artifact", visited_id, "已回访过的心事") is not None
-    picked = surprise._pick_material(uid)
-    assert picked is not None and int(picked["id"]) == fresh_id, \
-        f"惊喜素材应避开已回访产物，实际选中 #{picked and picked['id']}"
-
-    # 全部挂过 → 无素材（宁可不出牌，不撞车）
-    assert pt._add(uid, "artifact_revisit", "artifact", fresh_id, "也回访过了") is not None
-    assert surprise._pick_material(uid) is None, "全部产物已回访时应返回 None"
-    print("[OK] surprise 互斥：已回访产物不当惊喜素材；全挂过则无素材")
-    return 0
-
-
 def main() -> int:
     failed = (
         test_sync_window_and_idempotency()
         + test_source_alive_and_stage_gate()
-        + test_surprise_material_exclusion()
     )
     if failed:
         print(f"\n=== 产物回访（38项#29）：{failed} 项失败 ===")

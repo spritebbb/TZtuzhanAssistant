@@ -6,7 +6,7 @@
 - 档位按**当月全站实测开销**（usage_log 聚合，与账本同口径定价）：
   ok <70% / soft ≥70% / hard ≥100% / extreme ≥130%（预算默认 ¥30/月）；
 - soft：非紧急主动 necessity 阈值 +0.15；
-- hard：自主 LLM 工作（initiative/daily/offline/surprise/watch）全部暂停，
+- hard：自主 LLM 工作（initiative/daily/situation）全部暂停，
   journal 记原因不产半成品；**用户主动聊天任何档位都不受影响**；
 - extreme：hard 之上，感知/批处理文本路由降级到廉价模型；
 - 本模块自身零 LLM 调用；月度聚合带 60s 缓存，热路径无额外 SQL。
@@ -24,7 +24,7 @@ from .log import logger
 
 TIERS = ("ok", "soft", "hard", "extreme")
 # 自主消费方：hard/extreme 档暂停；chat 与未知模块永远放行（不误伤既有调用方）
-_AUTONOMOUS_MODULES = {"initiative", "daily", "offline", "surprise", "watch", "situation", "news", "feed"}
+_AUTONOMOUS_MODULES = {"initiative", "daily", "situation"}
 # extreme 档降级的文本路由：用户对话（chat_*/tool/vision）不降，保住交互质量
 _DOWNGRADE_TASKS = {"batch_diary", "batch_other", "extract", "judge"}
 

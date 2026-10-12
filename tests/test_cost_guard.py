@@ -80,7 +80,7 @@ def test_check_module_matrix() -> None:
         with patch.object(cost_guard, "tier", return_value=blocked):
             assert check("initiative") is False
             assert check("daily") is False
-            assert check("offline") is False and check("surprise") is False
+            assert check("situation") is False
     print("[OK] check：chat/未知永放行；自主模块 hard/extreme 暂停")
 
 
