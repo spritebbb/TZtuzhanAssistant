@@ -2566,6 +2566,7 @@ class UserDB:
                 "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
                 "kb_documents", "kb_chunks", "unlocks", "mood_log",
+                "manager_memories",
                 "tavern_sessions",
                 "situation_files",
                 "interest_feeds", "interest_feed_items",
