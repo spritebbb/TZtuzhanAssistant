@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-"""D10 叙事化成本熔断回归（docs/D9-D12-DESIGN-2026-09-21.md §2，2026-09-21 拍板）。
+"""D10 成本熔断回归（docs/D9-D12-DESIGN-2026-09-21.md §2，2026-09-21 拍板）。
 
-覆盖七件事：
+覆盖六件事：
 1. 档位换算：¥30 预算下 70%/100%/130% 三档边界；
 2. month_spend 聚合当月全站 usage_log（含缓存与跨月重算）；
 3. check()：chat/未知模块永远放行；自主模块 hard/extreme 暂停、ok/soft 放行；
 4. necessity_bump：soft 档 +0.15，其余 0；
-5. cost_lines：提示每日一次（kv 门控）、extreme 常驻简短约束、文案无数字无系统词；
-6. 模型降级：extreme + COST_DOWNGRADE_MODEL 时 batch/extract/judge 降、chat 不降；
-7. 仲裁与批处理接线：hard 档 _arbited_proactive/_tick_once 静默、daily 不产半成品
+5. 模型降级：extreme + COST_DOWNGRADE_MODEL 时 batch/extract/judge 降、chat 不降；
+6. 仲裁与批处理接线：hard 档 _arbited_proactive/_tick_once 静默、daily 不产半成品
    且不推进 last_batch_date、journal 留痕。
 """
 from __future__ import annotations
@@ -29,7 +28,7 @@ os.environ["PROACTIVE_DAILY_MAX"] = "2"
 
 from backend.core import cost_guard, initiative  # noqa: E402
 from backend.core.config import config  # noqa: E402
-from backend.core.cost_guard import check, cost_lines, necessity_bump, tier  # noqa: E402
+from backend.core.cost_guard import check, necessity_bump, tier  # noqa: E402
 from backend.core.kv_registry import match_spec  # noqa: E402
 from backend.core.userdb import db, kv_get  # noqa: E402
 
@@ -85,36 +84,14 @@ def test_check_module_matrix() -> None:
     print("[OK] check：chat/未知永放行；自主模块 hard/extreme 暂停")
 
 
-def test_necessity_bump_and_cost_lines() -> None:
-    from backend.core.userdb import kv_set
-
-    db.ensure_user(UID)
-
-    def _reset_hint() -> None:
-        kv_set(UID, "cost:hint_day", "")  # 提示的每日一次跨档共享，场景间重置
-
+def test_necessity_bump() -> None:
     with patch.object(cost_guard, "tier", return_value="ok"):
         assert necessity_bump() == 0.0
-        assert cost_lines(UID) == ("", ""), "ok 档不应有任何注入"
     with patch.object(cost_guard, "tier", return_value="soft"):
         assert necessity_bump() == 0.15
-        hint, standing = cost_lines(UID)
-        assert hint and not standing, "soft 档只有一次性提示"
-        assert "¥" not in hint and "%" not in hint and "预算" not in hint and "系统" not in hint
-        # 同日第二次：提示不再发
-        hint2, _ = cost_lines(UID)
-        assert hint2 == "", "叙事提示每日至多一次"
-    _reset_hint()
     with patch.object(cost_guard, "tier", return_value="hard"):
-        hint4, standing4 = cost_lines(UID)
-        assert hint4 and not standing4, "hard 档提示（搁着）无常驻质地约束"
-        assert "搁" in hint4 and "¥" not in hint4
-    with patch.object(cost_guard, "tier", return_value="extreme"):
-        hint3, standing3 = cost_lines(UID)
-        assert standing3, "extreme 档常驻简短约束每轮生效"
-        assert "更短" in standing3 or "简短" in standing3 or "省" in standing3
-        assert "¥" not in standing3 and "预算" not in standing3
-    print("[OK] necessity_bump 与 cost_lines：提示每日一次、extreme 常驻、文案无数字系统词")
+        assert necessity_bump() == 0.0
+    print("[OK] necessity_bump：soft 档 +0.15，其余档 0")
 
 
 def test_downgrade_model_routing() -> None:
@@ -198,10 +175,9 @@ def test_daily_batch_skipped_without_half_products() -> None:
 
 
 def test_kv_registered() -> None:
-    for key in ("cost:hint_day", "cost:skipped_batch:2026-09-21"):
-        spec = match_spec(key)
-        assert spec is not None and spec.module == "cost_guard", f"kv 未登记: {key}"
-    print("[OK] kv 登记：cost:hint_day 与 cost:skipped_batch:{day}")
+    spec = match_spec("cost:skipped_batch:2026-09-21")
+    assert spec is not None and spec.module == "cost_guard", "kv 未登记: cost:skipped_batch"
+    print("[OK] kv 登记：cost:skipped_batch:{day}")
 
 
 def main() -> None:
@@ -209,7 +185,7 @@ def main() -> None:
     test_tier_boundaries()
     test_month_spend_aggregates_all_users()
     test_check_module_matrix()
-    test_necessity_bump_and_cost_lines()
+    test_necessity_bump()
     test_downgrade_model_routing()
     test_arbiter_gated_at_hard()
     test_daily_batch_skipped_without_half_products()
