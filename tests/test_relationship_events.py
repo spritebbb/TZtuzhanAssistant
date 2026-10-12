@@ -171,20 +171,7 @@ async def _test_pipeline_wiring() -> None:
     assert any("周五发 demo" in item for item in systems)
     assert captured["messages"][-1]["role"] == "user"
 
-    # 解释快照：事件来源可回答「因为哪件真实发生的事」
-    from backend.core.explainability import build_reply_explanation
-    from backend.core.state import AgentState
-
-    snapshot = build_reply_explanation(
-        AgentState(),
-        type("Frame", (), {
-            "mood_line": "", "stage_line": "", "initiative": "", "reaction_line": "",
-            "rest_line": "", "tension_line": "", "archive_line": "", "event_line": "",
-        })(),
-        memory_rows=[("事件来源", "约定事件：用户答应周五发 demo")],
-    )
-    assert any(item["kind"] == "事件来源" for item in snapshot["memories"])
-    print("[OK] pipeline：事件回忆注入 user 仍在最后；解释快照展示事件来源")
+    print("[OK] pipeline：事件回忆注入 user 仍在最后")
 
 
 async def main() -> None:

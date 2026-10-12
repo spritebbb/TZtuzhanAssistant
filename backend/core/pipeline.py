@@ -786,7 +786,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, draft_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -803,9 +803,6 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
 
     ephemeral=True 表示这一轮只在当前界面暂时展示，不写会话、记忆、画像、关系
     状态或主动回访素材；仍可读取既有背景，以正常完成陪伴回复。
-
-    explain_cb：可选的异步回调 async (snapshot: dict) -> None，返回这一轮实际
-    注入的状态、行为帧、记忆与工具快照；不包含 system prompt 或模型思考链。
     """
     from .privacy import is_ephemeral_request
 
@@ -823,12 +820,11 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
         return await _process_locked(
             user_id, text, mock=mock, merged_msg=merged_msg, ephemeral=ephemeral,
             stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
-            explain_cb=explain_cb,
             draft_cb=draft_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, draft_cb=None) -> str:
     from .persona_profiles import persona_name_for_user_id
     from .privacy import ephemeral_prompt, is_ephemeral_request
 
@@ -1426,57 +1422,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             _unlock_mod.mark_delivered(user_id, pending_unlock["key"], reply[:300])
         except Exception:
             logger.exception("[pipeline] 解锁落账失败（不影响回复）")
-
-    # 5.11) 可解释性快照：只公开可验证的状态/行为/记忆来源，不公开隐藏思考。
-    if explain_cb is not None and reply_state is not None and reply_frame is not None:
-        try:
-            from .explainability import build_reply_explanation
-
-            memory_rows: list[tuple] = []
-            memory_rows.extend(("相关对话", value) for value in remembered[:2])
-            fact_ids_used: list[int] = []
-            for value in facts[:2]:
-                fact_id = fact_id_map.get(str(value).strip())
-                memory_rows.append(("长期事实", value, fact_id))
-                if fact_id:
-                    fact_ids_used.append(fact_id)
-            memory_rows.extend(
-                ("知识库", f"《{h['filename']}》相关段落" if h.get("filename") else "相关段落")
-                for h in kb_hits[:2]
-            )
-            if pending_unlock is not None:
-                memory_rows.append(("解锁时刻", f"她说出了心里话：{pending_unlock['title']}"))
-            memory_rows.extend(
-                ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
-                for item in triples[:2]
-                if len(item) >= 4
-            )
-            memory_rows.extend(
-                ("事件来源", source) for source in event_recall_result.get("sources", [])[:2]
-            )
-            if reply_season:
-                memory_rows.append(
-                    ("关系季节", f"{reply_season['label']}（{reply_season['reason']}）")
-                )
-            snapshot = build_reply_explanation(
-                reply_state,
-                reply_frame,
-                memory_rows=memory_rows,
-                search_used=bool(search_hits),
-                media=(
-                    "generated_image"
-                    if drawn_image_path
-                    else "sticker" if sticker_path else "none"
-                ),
-                contexts=(
-                    context_selection.explain() if context_selection is not None else ()
-                ),
-                fact_ids=fact_ids_used,
-                user_id=user_id,
-            )
-            await explain_cb(snapshot)
-        except Exception:
-            logger.exception("[pipeline] 回复解释快照失败（不影响回复）")
 
     # 6) 临时对话只把回复交给当前客户端，任何会话/记忆/关系状态都不落盘。
     if ephemeral:

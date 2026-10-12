@@ -193,16 +193,6 @@ TOUR_STEPS: tuple[dict, ...] = (
         "check": "回答里带她当前的心情与关系阶段，而不是泛泛而谈",
     },
     {
-        "id": "explain",
-        "group": "长期陪伴",
-        "kind": "ui",
-        "title": "可解释性（她为什么这么说）",
-        "shows": "每条回复都能展开看她依据了哪些记忆与状态",
-        "prompt": "点她回复气泡下方的「为什么」按钮。",
-        "tools": ["explanation"],
-        "check": "弹出依据面板，列出本轮参考的记忆/状态来源",
-    },
-    {
         "id": "ephemeral",
         "group": "长期陪伴",
         "kind": "ui",

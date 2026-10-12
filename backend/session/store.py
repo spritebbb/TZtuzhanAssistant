@@ -94,12 +94,8 @@ def _init() -> None:
             "CREATE TABLE IF NOT EXISTS messages ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "session_id TEXT NOT NULL, role TEXT NOT NULL,"
-            "content TEXT NOT NULL DEFAULT '', image TEXT, explanation_json TEXT, ts REAL NOT NULL)"
+            "content TEXT NOT NULL DEFAULT '', image TEXT, ts REAL NOT NULL)"
         )
-        try:
-            conn.execute("ALTER TABLE messages ADD COLUMN explanation_json TEXT")
-        except OPERATIONAL_ERRORS:
-            pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
         )
@@ -141,19 +137,15 @@ def _get_messages_sync(session_id: str) -> list[dict] | None:
         if exists is None:
             return None
         rows = conn.execute(
-            "SELECT role, content, image, explanation_json, ts FROM messages"
+            "SELECT role, content, image, ts FROM messages"
             " WHERE session_id=? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
         result = []
         for r in rows:
-            try:
-                explanation = json.loads(r["explanation_json"]) if r["explanation_json"] else None
-            except (json.JSONDecodeError, TypeError):
-                explanation = None
             result.append({
                 "role": r["role"], "content": r["content"], "image": r["image"],
-                "explanation": explanation, "ts": r["ts"],
+                "ts": r["ts"],
             })
         return result
     finally:
@@ -185,10 +177,9 @@ def _append_sync(session_id: str, messages: list[dict]) -> bool:
             return False
         for m in messages:
             conn.execute(
-                "INSERT INTO messages (session_id, role, content, image, explanation_json, ts) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO messages (session_id, role, content, image, ts) VALUES (?,?,?,?,?)",
                 (
                     session_id, m.get("role", ""), m.get("content", ""), m.get("image"),
-                    json.dumps(m["explanation"], ensure_ascii=False) if m.get("explanation") else None,
                     m.get("ts", time.time()),
                 ),
             )
@@ -285,7 +276,7 @@ def _archive_current_sync() -> dict | None:
     try:
         _ensure_session(conn, session_id)
         rows = conn.execute(
-            "SELECT role, content, image, explanation_json, ts FROM messages"
+            "SELECT role, content, image, ts FROM messages"
             " WHERE session_id=? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
@@ -293,13 +284,9 @@ def _archive_current_sync() -> dict | None:
             return None
         msgs = []
         for r in rows:
-            try:
-                explanation = json.loads(r["explanation_json"]) if r["explanation_json"] else None
-            except (json.JSONDecodeError, TypeError):
-                explanation = None
             msgs.append({
                 "role": r["role"], "content": r["content"], "image": r["image"],
-                "explanation": explanation, "ts": r["ts"],
+                "ts": r["ts"],
             })
         # 归档标题：取第一条用户消息前 20 字
         title = "归档"
