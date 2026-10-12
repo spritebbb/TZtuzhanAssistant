@@ -898,34 +898,6 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         """G04 她的求助：门槛达标时请对方帮个小忙，投递成功才置 offered。"""
         return await _produce_companion_request(uid)
 
-    async def _maybe_watch_change(uid: str) -> str | None:
-        """监控 Agent：盯着的页面有变化 → 说一句（消耗共享主动额度）。"""
-        try:
-            from .watchers import acknowledge_changes, check_due_watches
-
-            changes = await asyncio.to_thread(check_due_watches, uid)
-        except Exception:
-            logger.exception("[主动仲裁] 监视检查失败")
-            return None
-        if not changes:
-            return None
-        names = "、".join((c.get("label") or c["url"]) for c in changes[:2])
-        tail = f"等 {len(changes)} 处" if len(changes) > 2 else ""
-        candidate = f"我盯着的「{names}」{tail}有更新了，要我去看看吗？"
-        watch_ids = [int(c["watch_id"]) for c in changes]
-
-        async def produce() -> str:
-            return candidate
-
-        return await _arbited_proactive(
-            uid,
-            source="initiative:watch_change",
-            idle_minutes=0,
-            done_today=lambda: False,
-            produce=produce,
-            on_delivered=lambda: acknowledge_changes(uid, watch_ids),
-        )
-
     for proposer in (
         _maybe_rhythm_followup,
         maybe_prepare_then_remind,
@@ -933,7 +905,6 @@ async def _arbitrate_secondary(user_id: str) -> bool:
         maybe_express_pending_thoughts,
         maybe_suggest_archive,
         _maybe_outing_note,
-        _maybe_watch_change,
         _maybe_companion_request,
         _maybe_surprise,
     ):

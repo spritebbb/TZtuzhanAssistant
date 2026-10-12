@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 52  # v52: 删除 38项#22 兴趣源两表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 53  # v53: 删除监控 Agent 的 watches 表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -380,23 +380,6 @@ CREATE TABLE IF NOT EXISTS learning_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_learning_user_status
     ON learning_candidates(user_id, status, id);
--- 监控 Agent：网页/订阅变化监视（只存 URL 与内容哈希，不存网页正文）。
-CREATE TABLE IF NOT EXISTS watches (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         TEXT NOT NULL,
-    url             TEXT NOT NULL,
-    label           TEXT NOT NULL DEFAULT '',
-    interval_minutes INTEGER NOT NULL DEFAULT 360,
-    last_checked_at TEXT,
-    last_hash       TEXT NOT NULL DEFAULT '',
-    last_notified_hash TEXT NOT NULL DEFAULT '',
-    last_changed_at TEXT,
-    status          TEXT NOT NULL DEFAULT 'active',   -- active / paused
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    UNIQUE (user_id, url)
-);
-CREATE INDEX IF NOT EXISTS idx_watches_user ON watches(user_id, status);
 -- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
 CREATE TABLE IF NOT EXISTS experience_metrics (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1241,16 +1224,6 @@ class UserDB:
         ):
             if column not in policy_columns:
                 self.conn.execute(f"ALTER TABLE memory_policy ADD COLUMN {column} {definition}")
-        # v41：页面变化与“已通知”分离。旧库已有 last_hash 视为已建立且已通知的
-        # 基线，避免升级后把历史页面误报为一次新变化。
-        watch_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(watches)")}
-        if "last_notified_hash" not in watch_columns:
-            self.conn.execute(
-                "ALTER TABLE watches ADD COLUMN last_notified_hash TEXT NOT NULL DEFAULT ''"
-            )
-            self.conn.execute(
-                "UPDATE watches SET last_notified_hash=last_hash WHERE last_hash<>''"
-            )
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")
@@ -2461,7 +2434,7 @@ class UserDB:
                 "shared_resources", "resource_grants",
                 "persona_evolution_log", "experience_metrics",
                 "profile_evolution_log", "her_statements",
-                "learning_candidates", "watches",
+                "learning_candidates",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
