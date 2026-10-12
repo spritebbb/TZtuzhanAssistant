@@ -143,9 +143,6 @@ def record(
             )
         else:
             return None
-        from .aesthetic_preferences import create_relationship_object
-
-        create_relationship_object(user_id, event_id, commit=False)
         if commit:
             db.conn.commit()
 
