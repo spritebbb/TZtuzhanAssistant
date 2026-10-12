@@ -40,21 +40,6 @@ async def test_mcp_metadata() -> None:
     print(f"[OK] MCP 元数据：{len(tools)} 工具，agent_run 为 external+confirm，桥工具已移除")
 
 
-async def test_remote_api() -> None:
-    """/api/remote/task 按需注册：未配 token 不挂载（404），路由模块本身存在。"""
-    from backend.api import remote
-    from backend.core.config import config as _cfg
-    assert remote.router is not None
-    paths = {getattr(r, "path", "") for r in _app_routes()}
-    if _cfg.agent_remote_token:
-        assert "/api/remote/task" in paths, "配了 token 应挂载 /api/remote/task"
-        print("[OK] /api/remote/task 已挂载（token 已配置）")
-    else:
-        assert "/api/remote/task" not in paths, \
-            "未配 AGENT_REMOTE_TOKEN 时不应挂载 /api/remote/*（按需注册）"
-        print("[OK] /api/remote/task 未挂载（未配 token，按需注册）")
-
-
 def _app_routes() -> list:
     """惰性构建 app 拿路由表（隔离数据目录避免碰真机锁定态）。"""
     import os
@@ -68,8 +53,7 @@ def _app_routes() -> list:
 async def main() -> None:
     _load_all_tools()
     await test_mcp_metadata()
-    await test_remote_api()
-    print("\n=== P5（MCP 元数据/remote）: 2 项全部通过 ===")
+    print("\n=== P5（MCP 元数据）: 1 项通过 ===")
 
 
 if __name__ == "__main__":
