@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 53  # v53: 删除监控 Agent 的 watches 表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 54  # v54: 删除 G04 companion_requests 表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -830,23 +830,6 @@ CREATE TABLE IF NOT EXISTS open_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_open_questions_user
     ON open_questions(user_id, status, next_check_at);
--- G04 她的求助/愿望：亲密与信任双门槛达标时，她偶尔请对方帮个小忙
--- （挑歌/挑书）。候选经主动仲裁投递，24h 未回应过期不再问；接受只写
--- 角色虚构产物，与现实承诺账分离。
-CREATE TABLE IF NOT EXISTS companion_requests (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id             TEXT NOT NULL,
-    life_event_id       INTEGER,
-    kind                TEXT NOT NULL,           -- song_choice / book_choice
-    status              TEXT NOT NULL DEFAULT 'candidate',  -- candidate/offered/accepted/declined/expired
-    offered_at          TEXT,
-    expires_at          TEXT,
-    response_message_id INTEGER,
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_companion_requests_user
-    ON companion_requests(user_id, status);
 -- F03 心事注入回执（runtime，不导出）：记录某轮把哪条心事作为语境选中
 -- （selected）或确认被采用（committed）；唯一三元组，不存模型全文。
 CREATE TABLE IF NOT EXISTS thought_context_receipts (
@@ -2439,7 +2422,7 @@ class UserDB:
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
-                "greeting_variant_usage", "open_questions", "companion_requests",
+                "greeting_variant_usage", "open_questions",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
                 "domain_trust_events", "domain_trust_snapshot",

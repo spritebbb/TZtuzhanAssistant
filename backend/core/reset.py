@@ -64,7 +64,7 @@ _TABLES = (
     "knowledge_opinion_sources", "knowledge_opinions",
     "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
     "relationship_versions", "greeting_variant_usage", "open_questions",
-    "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
+    "thought_context_receipts", "humor_usage", "source_links",
     "wrapup_outbox", "reading_segments", "reading_bookmarks",
     "activity_draft_receipts", "document_segments", "document_import_jobs", "observation_entries",
     "domain_trust_events", "domain_trust_snapshot",

@@ -5,7 +5,7 @@
 之后、「组装 prompt」之前，特征是**确定性、有则记、失败不得影响回复**：
 
 - 关系与状态入账：重逢推进、注意力漂移、开放问题登记、幽默记忆反馈；
-- 用户教学入账：偏好教学、学习候选、活动草稿、求助回应、会话节奏；
+- 用户教学入账：偏好教学、学习候选、活动草稿、会话节奏；
 - 即时奖励：用称呼交流 / 引用共同回忆的关键词加分；
 - 惰性提炼调度：事实 / 画像 / 话题 / 结构化五元组（后台，不阻塞回复）；
 - 聊天派活：明确要求「分几步做」时创建 Agent 任务并回注一条系统提示。
@@ -100,15 +100,6 @@ def _run_humor_feedback(user_id: str, text: str, turn_id: int) -> None:
     from .humor_memory import record_feedback_from_reply
 
     record_feedback_from_reply(user_id, text, turn_id=turn_id or None)
-
-
-def _run_companion_response(user_id: str, text: str, turn_id: int) -> None:
-    """G04：她 24h 内发过求助，用户这句若接受/拒绝就走同一 respond；猜不到不打扰。"""
-    from .companion_requests import respond_to_reply
-
-    responded = respond_to_reply(user_id, text, message_id=turn_id or None)
-    if responded:
-        logger.info("[pipeline] 求助回应已入账：{}", responded.get("status"))
 
 
 def _run_rhythm(user_id: str, text: str, turn_id: int) -> None:
@@ -219,7 +210,6 @@ async def run_turn_effects(
         turn_id=turn_id,
         draft_cb=draft_cb,
     )
-    ledger.run("求助回应", _run_companion_response, user_id, text, turn_id)
     ledger.run("会话节奏", _run_rhythm, user_id, text, turn_id)
     ledger.run("偏好教学", _run_preference_teaching, user_id, text, turn_id)
     ledger.run("学习候选", _run_learning_candidate, user_id, text, turn_id)
