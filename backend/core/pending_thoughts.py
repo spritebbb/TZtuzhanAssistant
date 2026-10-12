@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from .log import logger
 from .userdb import db
 
-_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading", "open_question_result", "artifact_revisit")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选；open_question_result=G03 待查有结果；artifact_revisit=38项#29 共同产物回访
+_THOUGHT_KINDS = ("resume_reading", "confirm_memory", "goal_checkin", "chain_aftermath", "memory_fading", "artifact_revisit")  # chain_aftermath=P2-04 链式回望（event_chains 产出）；memory_fading=G01 可见遗忘到期前候选；artifact_revisit=38项#29 共同产物回访
 _PAUSED_READING_DAYS = 3
 _CONFIRM_MEMORY_HOURS = 2
 _THOUGHT_TTL_DAYS = 7
@@ -269,7 +269,7 @@ def _source_alive(user_id: str, thought: dict) -> bool:
                 (user_id, int(source_id)),
             ).fetchone()
         return row is not None
-    table = {"activity": "activities", "fact": "facts", "open_question": "open_questions"}.get(source_type)
+    table = {"activity": "activities", "fact": "facts"}.get(source_type)
     if table is None:
         return False
     with db._lock:

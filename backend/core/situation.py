@@ -78,19 +78,6 @@ def _open_promises(user_id: str) -> list[str]:
     return lines
 
 
-def _open_question_lines(user_id: str) -> list[str]:
-    from .open_questions import list_questions
-
-    lines = []
-    for q in list_questions(user_id, limit=10):
-        if str(q.get("status") or "") not in ("open", "researching"):
-            continue
-        topic = str(q.get("topic") or "").strip()
-        if topic:
-            lines.append(f"- {topic}（还没答案）")
-    return lines[:4]
-
-
 def _recent_events(user_id: str, *, limit: int = RECENT_EVENT_WINDOW) -> list[dict]:
     """最近 N 条有效关系事件（新→旧）。payload 只取 title/summary 类短字段。"""
     from .userdb import db
@@ -189,7 +176,6 @@ def rebuild_sections(user_id: str) -> dict:
     return {
         "goals": _active_goals(user_id),
         "promises": _open_promises(user_id),
-        "questions": _open_question_lines(user_id),
         "events_recent": _recent_events(user_id),
         "older_event_count": _older_event_count(user_id),
         "life": _life_line(user_id),
