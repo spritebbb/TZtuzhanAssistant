@@ -41,9 +41,6 @@ vi.mock('../../api/relationship', () => ({
   exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
   previewRestore: vi.fn(),
   restoreRelationship: vi.fn(),
-  previewSeal: vi.fn(),
-  sealMemories: vi.fn(),
-  sealFileName: vi.fn((at: string) => `sealing-${(at || '').slice(0, 10) || 'bundle'}.json`),
 }))
 
 const fact: FactItem = {
