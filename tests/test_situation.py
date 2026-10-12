@@ -35,17 +35,12 @@ def _seed() -> None:
     """造真实数据：一个进行中目标、一条开着的约定、一个悬念、几条关系事件。"""
     db.ensure_user(UID)
     from backend.core.goals import start_goal
-    from backend.core.open_questions import track_question
 
     try:
         start_goal(UID, "把酒馆同玩打磨顺手", "想让剧情回忆更自然", "补一次真机对局")
     except Exception:
         pass  # 已存在（幂等种子）
     save_promise(UID, "周末把那本书的最后一章读完")
-    try:
-        track_question(UID, "他上次说的项目验收到底过没过", source_message_id=None)
-    except Exception:
-        pass
     for i, payload in enumerate([
         {"title": "一起读完《灯塔》并留下书摘"},
         {"title": "他纠正了一条记错的事实"},
@@ -65,12 +60,11 @@ def test_rebuild_sections_maps_real_data() -> None:
     sections = situation.rebuild_sections(UID)
     assert any("酒馆同玩" in g for g in sections["goals"]), f"目标节应含进行中目标: {sections['goals']}"
     assert any("最后一章" in p for p in sections["promises"]), "约定节应含开着的约定"
-    assert any("项目验收" in q for q in sections["questions"]), "悬念节应含开放问题"
     titles = [e["text"] for e in sections["events_recent"]]
     assert any("灯塔" in t for t in titles), f"事件节应含真实事件: {titles}"
     assert sections["life"], "生活节应非空（在场状态）"
     assert sections["events_recent"], "事件节应非空"
-    print("[OK] 确定性重建：六节全部映射真实持久数据")
+    print("[OK] 确定性重建：各节全部映射真实持久数据")
 
 
 def test_injection_render_and_flag() -> None:

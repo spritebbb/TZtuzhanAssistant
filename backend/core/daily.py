@@ -135,15 +135,6 @@ async def run_daily_batch(user_id: str, day: date) -> None:
     except Exception:
         logger.exception("[每日总结] {} 的过期事实清理失败", user_id)
 
-    # G03：到点的开放问题做一次有限度复查（JOB-1 认领，最多 2 次、间隔 24h）；
-    # 无新证据不发假进展，有新证据只挂候选，表达仍走主动仲裁与共享额度。
-    try:
-        from .open_questions import research_due_questions
-
-        await asyncio.to_thread(research_due_questions, user_id)
-    except Exception:
-        logger.exception("[每日总结] {} 的开放问题复查失败", user_id)
-
     # §17.2 学习候选到期收敛：30 天未确认的候选自动过期（沉默不是同意）。
     try:
         from .learning_pipeline import expire_stale

@@ -43,7 +43,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
     "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "source_links",
              "persona_evolution_log", "tavern_sessions", "her_statements"),
-    "tasks": ("tasks", "promises", "open_questions"),
+    "tasks": ("tasks", "promises"),
     "activities": (
         "activities", "activity_notes", "activity_viewpoints", "activity_goals",
         "goal_progress", "activity_writings", "writing_turns", "artifacts",
@@ -157,8 +157,6 @@ _REFERENCE_RULES = (
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
     _rule_static("relationship_style_evidence", "event_id", "relationship_events", frozenset()),
     _rule_static("domain_trust_events", "event_id", "relationship_events", frozenset()),
-    # open_questions.source_message_id 指向 messages（不属于关系包）：按
-    # memory_policy.source_message_ids 先例不建引用规则，恢复时统一清空。
     _rule_dynamic("artifacts", "source_id", "source_type"),
     _rule_dynamic("source_links", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
@@ -461,9 +459,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         values["source_message_id"] = None
                         if values.get("status") == "active":
                             values["status"] = "candidate"
-                    if table == "open_questions":
-                        # 同上：源消息不在包内，清空编号避免指向目标库无关消息。
-                        values["source_message_id"] = None
                     if table == "user_preferences":
                         # 换机漏表批（DF-1）：教学偏好的来源消息不在包内，清空编号。
                         values["source_message_id"] = None

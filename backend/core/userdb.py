@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 54  # v54: 删除 G04 companion_requests 表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 55  # v55: 删除 G03 open_questions 表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS aesthetic_preferences (
@@ -812,24 +812,6 @@ CREATE TABLE IF NOT EXISTS greeting_variant_usage (
     last_source_id TEXT,
     PRIMARY KEY (user_id, variant_id)
 );
--- G03 悬念/开放问题：用户明确要求「有结果告诉我」的事；7 天到期、最多 2 次
--- 复查、间隔 24h；last_evidence_hash 只存证据条目规范化哈希，不存模型叙述。
-CREATE TABLE IF NOT EXISTS open_questions (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id            TEXT NOT NULL,
-    source_message_id  INTEGER,
-    topic              TEXT NOT NULL,
-    topic_key          TEXT NOT NULL,           -- 规范化主题（同主题幂等）
-    status             TEXT NOT NULL DEFAULT 'open',  -- open/researching/resolved/dismissed/expired
-    next_check_at      TEXT,
-    expires_at         TEXT NOT NULL,
-    attempts           INTEGER NOT NULL DEFAULT 0,
-    last_evidence_hash TEXT,
-    created_at         TEXT NOT NULL,
-    updated_at         TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_open_questions_user
-    ON open_questions(user_id, status, next_check_at);
 -- F03 心事注入回执（runtime，不导出）：记录某轮把哪条心事作为语境选中
 -- （selected）或确认被采用（committed）；唯一三元组，不存模型全文。
 CREATE TABLE IF NOT EXISTS thought_context_receipts (
@@ -2422,7 +2404,7 @@ class UserDB:
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
-                "greeting_variant_usage", "open_questions",
+                "greeting_variant_usage",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
                 "domain_trust_events", "domain_trust_snapshot",
