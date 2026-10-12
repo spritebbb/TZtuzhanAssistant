@@ -28,7 +28,7 @@ export function splitBotText(text: string): string[] | null {
 
 /**
  * 把一条 bot Message 拆成显示用消息数组：前面的行是续条（continuation: true，
- * 只带文本），最后一行落在原消息的浅拷贝上（保留 image/explanation/draft 等
+ * 只带文本），最后一行落在原消息的浅拷贝上（保留 image/draft 等
  * 原始字段——操作入口集中在回复末尾）。user 消息与不可拆文本原样返回。
  */
 export function splitMessageForDisplay(msg: Message): Message[] {

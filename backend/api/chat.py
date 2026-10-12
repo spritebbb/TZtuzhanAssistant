@@ -170,7 +170,7 @@ async def api_chat(
 
     q: asyncio.Queue = asyncio.Queue()
     # 共享状态：在 _runner（后台任务）和 SSE 生成器之间传递
-    _state: dict = {"pending_img": None, "explanation": None, "draft": None}
+    _state: dict = {"pending_img": None, "draft": None}
     # 累积流式已推送的文本片段（不含控制标记 \x00...\x00）：供 _cb 追加、_runner 在
     # 流式中途失败时落库「已生成的部分回复」，避免刷新/归档后这段内容丢失。
     _partial: list[str] = []
@@ -212,10 +212,6 @@ async def api_chat(
             )
         await q.put(("__tool__", event))
 
-    async def _explain_cb(snapshot: dict) -> None:
-        _state["explanation"] = snapshot
-        await q.put(("__explanation__", snapshot))
-
     async def _draft_cb(draft: dict) -> None:
         # F06：可确认的活动草稿，独立事件露出（不藏进回复正文）
         _state["draft"] = draft
@@ -248,7 +244,7 @@ async def api_chat(
                 reply = await asyncio.wait_for(
                     process(
                         uid, text, mock=mock, ephemeral=ephemeral, stream_cb=_cb,
-                        image_cb=_image_cb, progress_cb=_progress_cb, explain_cb=_explain_cb,
+                        image_cb=_image_cb, progress_cb=_progress_cb,
                         draft_cb=_draft_cb,
                     ),
                     timeout=_PROCESS_TOTAL_TIMEOUT,
@@ -263,8 +259,6 @@ async def api_chat(
                 bot_msg = {"role": "bot", "content": reply, "ts": time.time()}
                 if _state.get("pending_img"):
                     bot_msg["image"] = _state["pending_img"]
-                if _state.get("explanation"):
-                    bot_msg["explanation"] = _state["explanation"]
                 if _state.get("draft"):
                     bot_msg["draft"] = _state["draft"]
                 async with user_write_guard(request_epoch):
@@ -377,9 +371,6 @@ async def api_chat(
                 if isinstance(item, tuple) and item[0] == "__tool__":
                     # 工具循环进度事件：转发给前端展示「正在思考/调用 XX」
                     yield _sse({"tool": item[1]})
-                    continue
-                if isinstance(item, tuple) and item[0] == "__explanation__":
-                    yield _sse({"explanation": item[1]})
                     continue
                 if isinstance(item, tuple) and item[0] == "__draft__":
                     yield _sse({"draft": item[1]})

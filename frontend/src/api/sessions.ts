@@ -7,43 +7,11 @@ export interface Message {
   role: 'user' | 'bot'
   content: string
   image?: string | null
-  explanation?: MessageExplanation | null
   draft?: ActivityDraft | null
   ephemeral?: boolean
   ts: number
   /** 显示层拆行标记：本条是与前一条同属一条数据消息的续行（仅前端显示用，不参与 API 交互）。 */
   continuation?: boolean
-}
-
-export interface MessageExplanation {
-  version: number
-  state: {
-    affection: number
-    stage: string
-    mood: number
-    mood_label: string
-    energy: number
-    resting?: boolean
-    rest_until?: string | null
-    tension?: number
-  }
-  behavior: Array<{ label: string; text: string }>
-  memories: Array<{ kind: string; text: string; lifecycle?: MemoryLifecycle }>
-  tools: { search: boolean; media: 'none' | 'generated_image' | 'sticker' | string }
-}
-
-/** G01/F07 记忆生命周期露出：只含非敏感元数据，不含评分权重。 */
-export interface MemoryLifecycle {
-  fact_id: number
-  pinned: boolean
-  expires_at: string | null
-  tier: 'short' | 'long' | 'legacy' | null
-  retention: string
-  confidence: number
-  verified_at: string | null
-  user_confirmed: boolean
-  can_edit: boolean
-  version: string
 }
 
 export interface ProactiveMessage {

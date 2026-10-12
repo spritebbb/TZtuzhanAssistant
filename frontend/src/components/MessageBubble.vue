@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import type { Message } from '../api/sessions'
-import type { MemoryLifecycle } from '../api/sessions'
 import { resolveImageSrc } from '../utils/images'
 import { renderMarkdown } from '../utils/markdown'
 import { TTS_STATE_EVENT, playTts, stopTts, type TtsState, type TtsStatus } from '../utils/tts'
@@ -24,55 +23,7 @@ const props = defineProps<{
 // ---- 自包含状态：复制反馈 / 图片灯箱 ----
 const copied = ref(false)
 const ttsStatus = ref<TtsStatus>('idle')
-const whyOpen = ref(false)
 // F06 活动草稿：确认后调用权威创建接口
-// F07 记忆生命周期操作：版本化编辑，删除后本地立刻收起正文
-const lifecycleBusy = ref(false)
-const lifecycleGoneIds = ref<number[]>([])
-
-function lifecycleGone(item: { lifecycle?: { fact_id?: number } }) {
-  return !!item.lifecycle?.fact_id && lifecycleGoneIds.value.includes(item.lifecycle.fact_id)
-}
-
-async function togglePin(item: { lifecycle?: MemoryLifecycle }) {
-  const meta = item.lifecycle
-  if (!meta?.fact_id || lifecycleBusy.value) return
-  lifecycleBusy.value = true
-  try {
-    const { updateFactPinned } = await import('../api/memory')
-    await updateFactPinned(meta.fact_id, !meta.pinned)
-    meta.pinned = !meta.pinned
-    meta.retention = meta.pinned ? '长期保留' : (meta.expires_at ? `保留到 ${meta.expires_at.slice(0, 10)}` : meta.retention)
-  } finally {
-    lifecycleBusy.value = false
-  }
-}
-
-const lifecycleDeleteError = ref('')
-
-async function forgetFact(item: { lifecycle?: MemoryLifecycle; text?: string }) {
-  const meta = item.lifecycle
-  if (!meta?.fact_id || lifecycleBusy.value) return
-  lifecycleBusy.value = true
-  lifecycleDeleteError.value = ''
-  try {
-    const { deleteFact } = await import('../api/memory')
-    await deleteFact(meta.fact_id, meta.version)
-    lifecycleGoneIds.value = [...lifecycleGoneIds.value, meta.fact_id]
-  } catch (e) {
-    // 404/410：事实已不在，按「已删除」处理，不再展示正文
-    const message = e instanceof Error ? e.message : ''
-    if (message.includes('不存在') || message.includes('404')) {
-      lifecycleGoneIds.value = [...lifecycleGoneIds.value, meta.fact_id]
-    } else {
-      // P3-50：其余失败（网络/500）此前被静默吞掉，按钮像没反应
-      lifecycleDeleteError.value = message || '删除失败，请重试'
-    }
-  } finally {
-    lifecycleBusy.value = false
-  }
-}
-
 const draftBusy = ref(false)
 const draftNotice = ref('')
 
@@ -191,29 +142,12 @@ const canCopy = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
 const canSpeak = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast
-const canExplain = () =>
-  props.message.role === 'bot' && !!props.message.explanation && !props.isStreamingLast
 // 38项#32 整轮反馈只在数据消息（拆行组的组尾，非 continuation 续行）上露出：
 // 拆出的每行都带按钮会让「整轮评价」变成逐行评价，语义错位
 const canFeedback = () =>
   props.message.role === 'bot' && !!props.message.content && !props.isStreamingLast && !props.message.ephemeral && !props.message.continuation
 
 const imgSrc = computed(() => props.message.image ? resolveImageSrc(props.message.image) : '')
-const whyPanelId = computed(() => `why-${props.ttsKey.replace(/[^A-Za-z0-9_-]/g, '-')}`)
-const energyLabel = computed(() => {
-  const energy = Number(props.message.explanation?.state.energy ?? 50)
-  if (energy < 30) return '精力偏低'
-  if (energy < 70) return '精力平稳'
-  return '精力充足'
-})
-const whySummary = computed(() => {
-  const explanation = props.message.explanation
-  if (!explanation) return '原因与来源'
-  const details = [explanation.state.stage, explanation.state.mood_label]
-  if (explanation.memories.length) details.push(`参考 ${explanation.memories.length} 条记忆`)
-  else if (explanation.behavior.length) details.push('结合当时语境')
-  return `原因与来源 · ${details.slice(0, 3).join(' · ')}`
-})
 </script>
 
 <template>
@@ -256,18 +190,9 @@ const whySummary = computed(() => {
       >
         <img class="mdimg" :src="imgSrc" :alt="message.content ? message.content.slice(0, 40) : '图片'" />
       </button>
-      <div class="meta" :class="{ pinned: copied || whyOpen }">
+      <div class="meta" :class="{ pinned: copied }">
         <span class="time">{{ formatTime(message.ts) }}</span>
         <span v-if="message.ephemeral" class="ephemeral-mark" title="刷新后消失，不进入记忆或关系状态">不留痕</span>
-        <button
-          v-if="canExplain()"
-          class="whybtn"
-          :class="{ active: whyOpen }"
-          :aria-expanded="whyOpen"
-          :aria-controls="whyPanelId"
-          @click="whyOpen = !whyOpen"
-          :title="whySummary"
-        >{{ whySummary }}</button>
         <button
           v-if="canSpeak()"
           class="ttsbtn"
@@ -308,46 +233,6 @@ const whySummary = computed(() => {
         <strong>{{ message.draft.title }}</strong>
         <span v-if="draftNotice" class="draft-note">{{ draftNotice }}</span>
         <button v-else :disabled="draftBusy" @click="confirmDraft">就这样开始</button>
-      </div>
-      <div v-if="whyOpen && message.explanation" :id="whyPanelId" class="why-panel" role="region" aria-label="原因与来源详情">
-        <div class="why-title">她为什么这样说</div>
-        <div class="state-chips">
-          <span>关系阶段：{{ message.explanation.state.stage }}</span>
-          <span>心情：{{ message.explanation.state.mood_label }}</span>
-          <span>{{ energyLabel }}</span>
-          <span v-if="message.explanation.state.resting">休息中</span>
-          <span v-if="message.explanation.state.tension">相处中有些紧绷</span>
-        </div>
-        <div v-if="message.explanation.behavior.length" class="why-section">
-          <div class="why-label">当时的行为帧</div>
-          <div v-for="item in message.explanation.behavior" :key="item.label" class="why-row">
-            <b>{{ item.label }}</b><span>{{ item.text }}</span>
-          </div>
-        </div>
-        <div v-if="message.explanation.memories.length" class="why-section">
-          <div class="why-label">用到的记忆</div>
-          <div v-for="(item, i) in message.explanation.memories" :key="i" class="why-row">
-            <b>{{ item.kind }}</b><span v-if="!lifecycleGone(item)">{{ item.text }}</span><span v-else class="lc-gone-text">（这条已经删掉了）</span>
-            <span v-if="item.lifecycle" class="why-lifecycle">
-              {{ item.lifecycle.retention }}
-              <template v-if="item.lifecycle.user_confirmed"> · 你确认过</template>
-              <template v-if="item.lifecycle.can_edit && !lifecycleGone(item)">
-                <button class="lc-btn" :disabled="lifecycleBusy" @click="togglePin(item)">
-                  {{ item.lifecycle.pinned ? '取消固定' : '固定' }}
-                </button>
-                <button class="lc-btn danger" :disabled="lifecycleBusy" @click="forgetFact(item)">删掉</button>
-              </template>
-              <em v-if="lifecycleGone(item)" class="lc-gone">已删除</em>
-              <em v-if="lifecycleDeleteError" class="lc-gone" :title="lifecycleDeleteError">删除失败</em>
-            </span>
-          </div>
-        </div>
-        <div class="why-tools">
-          <span v-if="message.explanation.tools.search">联网搜索</span>
-          <span v-if="message.explanation.tools.media === 'generated_image'">生成图片</span>
-          <span v-if="message.explanation.tools.media === 'sticker'">附带贴纸</span>
-          <span v-if="!message.explanation.tools.search && message.explanation.tools.media === 'none'">未调用额外工具</span>
-        </div>
       </div>
     </div>
 
@@ -546,59 +431,9 @@ const whySummary = computed(() => {
 .fbbtn:hover:not(.sent) { color: var(--danger, #e08a6d); background: var(--primary-soft); }
 .fbbtn.sent { color: var(--text-faint); cursor: default; }
 .fbbtn.fail { color: var(--danger, #e08a6d); }
-.whybtn {
-  border: none;
-  background: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 0.69rem;
-  line-height: 1.35;
-}
-.whybtn:hover, .whybtn.active { color: var(--primary-text); background: var(--primary-soft); }
-.whybtn { max-width: min(360px, 62vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.why-panel {
-  width: min(520px, 72vw);
-  margin-top: 3px;
-  padding: 12px 13px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--edge-subtle);
-  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
-  box-shadow: var(--shadow-sm);
-  color: var(--text-dim);
-  font-size: 0.75rem;
-  line-height: 1.55;
-  backdrop-filter: blur(16px);
-  animation: fadeUp 0.18s ease both;
-}
-.why-title { color: var(--text); font-weight: 650; margin-bottom: 8px; }
-.state-chips, .why-tools { display: flex; flex-wrap: wrap; gap: 5px; }
-.state-chips span, .why-tools span {
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--primary-text);
-}
-.why-section { margin-top: 10px; }
-.why-label {
-  margin-bottom: 4px;
-  color: var(--text-faint);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
-}
-.why-row { display: grid; grid-template-columns: 66px 1fr; gap: 7px; margin-top: 4px; }
-.why-row b { color: var(--text); font-weight: 600; }
-.why-row span { min-width: 0; overflow-wrap: anywhere; }
-.why-lifecycle { grid-column: 2; color: var(--text-dim); font-size: 11px; }
 .draft-card { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 13px; }
-.lc-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; }
-.lc-btn.danger { color: var(--danger, #d9534f); }
-.lc-gone, .lc-gone-text { color: var(--text-dim); font-size: 11px; }
 .draft-tag { color: var(--text-muted); font-size: 11px; }
 .draft-note { color: var(--text-dim); font-size: 12px; }
-.why-tools { margin-top: 10px; }
-.why-tools span { background: var(--bg-hover); color: var(--text-dim); }
 .image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .mdimg {
   max-width: 340px;

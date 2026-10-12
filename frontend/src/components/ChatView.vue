@@ -397,10 +397,6 @@ async function runBotStream(text: string, opts: { ephemeral: boolean; regenerate
         b.image = url
         scrollToBottom()
       },
-      onExplanation: (value) => {
-        const b = bubble()
-        if (b) b.explanation = value
-      },
       onDraft: (value) => {
         const b = bubble()
         if (b) b.draft = value
@@ -602,10 +598,6 @@ async function handleImageFile(f: File | null) {
         const b = bubble()
         if (!b) return
         resetGroup()
-      },
-      onExplanation: (value) => {
-        const b = bubble()
-        if (b) b.explanation = value
       },
       onDraft: (value) => {
         const b = bubble()
