@@ -134,9 +134,6 @@ class Config:
         self.cost_soft_ratio: float = _env_float("COST_SOFT_RATIO", 0.70)
         self.cost_extreme_ratio: float = _env_float("COST_EXTREME_RATIO", 1.30)
         self.cost_downgrade_model: str = os.getenv("COST_DOWNGRADE_MODEL", "").strip()
-        # P3-03 本地 TTS（GPT-SoVITS；§21.2——adapter 只认协商到的能力，训练/素材留空位）
-        self.local_tts_endpoint: str = os.getenv("LOCAL_TTS_ENDPOINT", "http://127.0.0.1:9880").strip()
-        self.local_tts_timeout: float = _env_float("LOCAL_TTS_TIMEOUT", 60.0)
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))

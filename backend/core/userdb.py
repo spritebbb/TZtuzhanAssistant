@@ -23,7 +23,7 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 62  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
+_SCHEMA_VERSION = 63  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -424,27 +424,6 @@ CREATE TABLE IF NOT EXISTS situation_files (
 -- L12-L14 远程三层骨架已于 2026-09-30 归档删除（tag archive/remote-skeleton-l12-l14）。
 -- 老库中残存的 channel_bindings/channel_inbox/channel_outbox/devices/
 -- push_subscriptions/auth_sessions 表为无害孤儿，不再读写。
--- P3-03 本地声纹（GPT-SoVITS）：人格→模型绑定与素材清单。
--- 素材本体在加密工作区，voice_manifests 只存清单；两者均为运行资产不进关系导出。
-CREATE TABLE IF NOT EXISTS voice_manifests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    path         TEXT NOT NULL,               -- 加密工作区内的参考音频相对路径
-    text         TEXT NOT NULL DEFAULT '',    -- 参考音频的标注文本（prompt_text）
-    lang         TEXT NOT NULL DEFAULT 'zh',
-    sha256       TEXT NOT NULL DEFAULT '',
-    duration_sec REAL NOT NULL DEFAULT 0,
-    created_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS voice_profiles (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    persona_id            TEXT NOT NULL,
-    provider_version      TEXT NOT NULL,      -- 协商固定：实际安装 commit/版本
-    model_hash            TEXT NOT NULL DEFAULT '',
-    reference_manifest_id INTEGER,
-    enabled               INTEGER NOT NULL DEFAULT 1,
-    created_at            TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_voice_profiles_persona ON voice_profiles(persona_id, enabled);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
 -- 后续事件类型按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
@@ -2112,7 +2091,6 @@ class UserDB:
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "kb_documents", "kb_chunks", "mood_log",
                 "situation_files",
-                "voice_profiles", "voice_manifests",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
