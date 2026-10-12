@@ -138,27 +138,22 @@ def test_her_profile_gated() -> None:
 
 
 def test_canon_life_gated() -> None:
-    """菟菚的正典生活（离线补算/生活模板池/状态行）只对默认人格成立。"""
-    import asyncio
+    """菟菚的正典生活（生活模板池/状态行）只对默认人格成立。"""
 
     from backend.core.life_templates import load_templates
-    from backend.core.offline_recap import maybe_generate
 
-    # 默认人格：离线补算会走到窗口判断（功能开关开着时返回 None 或 pending，不抛错）
     default_pool = load_templates()
     assert any(t.output_kind != "rest" for t in default_pool)  # 内置池完整
 
     _switch_to_alt()
     try:
-        # 离线补算：非默认人格直接跳过（行程是菟菚的正典）
-        assert asyncio.run(maybe_generate(persona_profiles.active_user_id())) is None
         # 生活模板池：无定制文件时空池（只剩中性 rest 兜底），不回退菟菚内置池
         alt_pool = load_templates()
         assert all(t.output_kind == "rest" for t in alt_pool)
         assert len(alt_pool) == 1
     finally:
         _switch_back_to_default()
-    print("[OK] 正典生活（离线补算/模板池）仅默认人格")
+    print("[OK] 正典生活（模板池）仅默认人格")
 
 
 def main() -> None:

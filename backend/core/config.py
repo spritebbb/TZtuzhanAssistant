@@ -156,10 +156,6 @@ class Config:
         self.cost_soft_ratio: float = _env_float("COST_SOFT_RATIO", 0.70)
         self.cost_extreme_ratio: float = _env_float("COST_EXTREME_RATIO", 1.30)
         self.cost_downgrade_model: str = os.getenv("COST_DOWNGRADE_MODEL", "").strip()
-        # D11 离线补算（docs/D9-D12-DESIGN-2026-09-21.md §4：确定性重放+限额裁剪+逐条回放可跳过）
-        self.offline_recap_min_gap_hours: float = _env_float("OFFLINE_RECAP_MIN_GAP_HOURS", 8.0)
-        self.offline_recap_max_days: int = max(1, _env_int("OFFLINE_RECAP_MAX_DAYS", 14))
-        self.offline_recap_event_cap: int = max(1, _env_int("OFFLINE_RECAP_EVENT_CAP", 8))
         # P3-03 本地 TTS（GPT-SoVITS；§21.2——adapter 只认协商到的能力，训练/素材留空位）
         self.local_tts_endpoint: str = os.getenv("LOCAL_TTS_ENDPOINT", "http://127.0.0.1:9880").strip()
         self.local_tts_timeout: float = _env_float("LOCAL_TTS_TIMEOUT", 60.0)
