@@ -33,7 +33,7 @@ it('keeps four primary header entries and moves relationship numbers out of chat
   expect(wrapper.findAll('.compact-actions button')).toHaveLength(2)
   expect(wrapper.text()).not.toContain('好感度')
   await wrapper.get('[title="更多功能"]').trigger('click')
-  expect(wrapper.get('[aria-label="更多功能"]').text()).toContain('成长总览')
+  expect(wrapper.get('[aria-label="更多功能"]').text()).toContain('日记')
   expect(wrapper.get('[aria-label="更多功能"]').text()).toContain('设置')
   wrapper.unmount()
 })

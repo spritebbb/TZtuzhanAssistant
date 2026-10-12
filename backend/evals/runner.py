@@ -35,8 +35,7 @@ def config_snapshot(config: Any | None = None) -> dict[str, Any]:
     fields = (
         "llm_model", "llm_model_strong", "llm_temperature", "llm_max_tokens",
         "memory_semantic", "proactive_idle_hours", "proactive_new_user_days",
-        "proactive_new_user_idle_hours", "proactive_surprise_min_gap_days",
-        "proactive_surprise_chance_percent", "proactive_surprise_idle_minutes",
+        "proactive_new_user_idle_hours",
     )
     return {name: getattr(config, name, None) for name in fields}
 

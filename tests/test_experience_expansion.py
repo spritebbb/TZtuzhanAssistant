@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_batch13_"))
 
 from backend.core.config import Config
-from backend.core import greeting_material, initiative, relationship_snapshots, schedule, unlock
+from backend.core import greeting_material, initiative, relationship_snapshots, schedule
 from backend.core.userdb import db
 from backend.api.config_api import router as config_router
 
@@ -43,9 +43,6 @@ def test_approved_default_thresholds() -> None:
                 os.environ[name] = value
     assert cfg.proactive_new_user_days == 3
     assert cfg.proactive_new_user_idle_hours == 2
-    assert cfg.proactive_surprise_min_gap_days == 7
-    assert cfg.proactive_surprise_chance_percent == 50
-    assert cfg.proactive_surprise_idle_minutes == 120
     assert relationship_snapshots.MILESTONE_DAYS[0] == 30
 
 
@@ -79,12 +76,6 @@ def test_content_expansion_contracts() -> None:
     assert all(len(ids) >= 4 for ids in by_category.values())
     assert {"A4", "B4", "C4", "D4"}.issubset({v.id for v in variants})
 
-    substages = [item for item in unlock.UNLOCK_DEFS if item["kind"] == "substage"]
-    assert [item["rank"] for item in substages] == list(range(1, 9))
-    assert tuple(unlock._SUBSTAGE_CUTS) == (8, 17, 33, 42, 58, 67, 85, 95)
-    assert substages[0]["title"] == "你比看起来靠谱一点"
-    assert substages[-1]["title"] == "往后的日子也这样，慢慢过吧"
-
 
 def test_canon_material_bucket_mapping_is_complete_and_valid() -> None:
     mapping = schedule.load_canon_material_buckets()
@@ -109,13 +100,11 @@ def test_thresholds_are_visible_and_validated_in_settings_api() -> None:
         visible = response.json()["config"]
         assert visible["proactive_new_user_days"] >= 1
         assert visible["proactive_new_user_idle_hours"] >= 1
-        assert visible["proactive_surprise_chance_percent"] >= 0
-
         invalid = client.post(
-            "/api/config", json={"proactive_surprise_chance_percent": "101"}
+            "/api/config", json={"proactive_new_user_days": "101"}
         )
         assert invalid.status_code == 400
-        assert "PROACTIVE_SURPRISE_CHANCE_PERCENT" in invalid.json()["error"]
+        assert "PROACTIVE_NEW_USER_DAYS" in invalid.json()["error"]
 
 
 def main() -> int:

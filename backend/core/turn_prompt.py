@@ -412,40 +412,6 @@ def inject_activity_contexts(
         messages.append({"role": "system", "content": events["context"]})
 
 
-def inject_pending_unlock(
-    messages: list[dict], user_id: str, *, ephemeral: bool
-) -> dict | None:
-    """C4 解锁时刻：她有句心里话了到想说的时候（队列制，每轮最多一条）。"""
-    if ephemeral:
-        return None
-    try:
-        from . import unlock as _unlock_mod
-
-        pending_unlock = _unlock_mod.next_pending(user_id)
-        if pending_unlock is None:
-            return None
-        anchor_lines = "\n".join(f"- {a}" for a in pending_unlock["anchors"])
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "你心里有件事一直想对他说，今天你想自然地说出来"
-                    "（这不是任务，是你自己想讲）：\n"
-                    f"这件事是关于：{pending_unlock['title']}\n"
-                    "你心里盘旋的念头：\n"
-                    + anchor_lines
-                    + "\n用你自己的话、顺着眼下的聊天氛围带出来，可以先铺垫几句再说；"
-                    "说完就自然聊下去。不要念清单、不要「我要跟你说件事」式预告、"
-                    "不要提好感度/等级/解锁/系统这类词。"
-                ),
-            }
-        )
-        return pending_unlock
-    except Exception:  # noqa: BLE001
-        logger.exception("[pipeline] 解锁注入失败（不影响回复）")
-        return None
-
-
 # ---------------------------------------------------------------- 对对方的了解
 
 
@@ -795,7 +761,6 @@ __all__ = [
     "inject_memory_block",
     "inject_memory_correction",
     "inject_night_boundary",
-    "inject_pending_unlock",
     "inject_preference_constraints",
     "inject_presence",
     "inject_search_context",

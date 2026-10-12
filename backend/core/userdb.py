@@ -609,20 +609,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
     status        TEXT NOT NULL DEFAULT 'active',
     UNIQUE (user_id, artifact_type, source_id)
 );
--- C4 好感度玩法闭环：解锁时刻（阈值跨越/彩蛋）队列与收集
-CREATE TABLE IF NOT EXISTS unlocks (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      TEXT NOT NULL,
-    key          TEXT NOT NULL,     -- UNLOCK_DEFS.key（如 stage_lover / easter_streak7）
-    kind         TEXT NOT NULL,     -- stage / bond / easter
-    title        TEXT NOT NULL,
-    anchors      TEXT NOT NULL,     -- JSON 数组：内容锚点（注入 LLM 的要点）
-    enqueued_at  TEXT NOT NULL,
-    delivered_at TEXT,              -- NULL = 待说出口（pending）
-    content      TEXT,              -- 说出口那轮她说的话（摘要）
-    UNIQUE (user_id, key)           -- 同 key 一生只解锁一次
-);
-CREATE INDEX IF NOT EXISTS idx_unlocks_user ON unlocks(user_id, delivered_at);
 -- P1-02 语境注册表生命周期：按成功提交的 turn 记 sticky/cooldown（运行态，
 -- 不导出；user_id 已含人格 scope，天然按人格隔离）。
 CREATE TABLE IF NOT EXISTS context_lifecycle (
@@ -2348,7 +2334,7 @@ class UserDB:
                 "knowledge_opinion_sources", "knowledge_opinions",
                 "future_letters", "relationship_snapshots", "dual_perspectives",
                 "relationship_versions",
-                "kb_documents", "kb_chunks", "unlocks", "mood_log",
+                "kb_documents", "kb_chunks", "mood_log",
                 "tavern_sessions",
                 "situation_files",
                 "voice_profiles", "voice_manifests",
