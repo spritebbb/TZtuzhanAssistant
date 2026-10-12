@@ -71,9 +71,6 @@ FLAG_DEFAULTS = {
     # D9 局势档案：≤2.5k tokens 恒定世界快照常驻注入（目标/约定/悬念/近事件/
     # 生活/焦点），钩子不靠检索命中。派生态可随时重编译重建；关闭时整层退场。
     "situation_enabled": True,
-    # P3-03 本地语音（GPT-SoVITS）：当前人格有启用声纹且能力协商成功时优先
-    # 用本地合成，任何一步不满足显式回退 edge-tts。默认关，装好服务再开。
-    "local_tts_enabled": False,
 }
 
 

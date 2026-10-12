@@ -29,7 +29,6 @@ _FLAG_LABELS = {
     "style_map_enabled": "表达习惯观察：她记住你在不同场合的说话调子，回应更合拍（可在记忆管理删除）",
     "shared_resources_enabled": "跨角色共享：允许把你的文档或共同产物明确分享给另一个角色看（默认全部隔离）",
     "situation_enabled": "局势档案：一份常驻的世界快照让她随时记得你们正在做的事和没解开的疑问",
-    "local_tts_enabled": "本地语音：用她的专属音色在本地合成朗读（需装好 GPT-SoVITS 服务与声纹，失败自动回退在线语音）",
 }
 
 

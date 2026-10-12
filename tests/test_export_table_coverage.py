@@ -40,7 +40,6 @@ EXEMPT = {
     # kv_store 不走表通道（bundle["kv"] 按 kv_registry 白名单单列）
     "kv_store",
     # 声纹档案：表只是元数据，本体是音频/模型文件资产——待独立切片随文件一起走
-    "voice_profiles", "voice_manifests",
 }
 
 TS = "2026-09-29T10:00:00"
