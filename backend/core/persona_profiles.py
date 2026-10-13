@@ -25,11 +25,26 @@ _lock = threading.RLock()
 
 # active_id() 进程内缓存：chat 主链路每轮会经 active_user_id / scoped_user_id /
 # session_storage_id / persona_name_for_user_id 多次调用 active_id()，每次都
-# ensure_library（多次 stat）+ 读盘解析。用 _STATE 的 mtime 做失效——人格切换
-# （activate/update_profile 写 active.json）会让 mtime 变化，缓存随之自动刷新。
-# 无需显式清缓存，也避免缓存陈旧。
+# ensure_library（多次 stat）+ 读盘解析。用 _STATE 的 mtime 做跨进程失效。
+#
+# 但 mtime 不能作为**本进程自己写入**之后的唯一依据：Windows 会延迟更新文件的
+# 最后写入时间，两次快速切换可能落到同一个 mtime，缓存就会继续返回上一个人格。
+# 而 active_id() 决定 scoped_user_id()——返回旧 id 意味着记忆/会话写进上一个人格
+# 的命名空间。所以本进程的写入方（activate）必须显式失效缓存，见
+# _invalidate_active_cache()。
 _cached_active_id: str | None = None
 _cached_state_mtime = 0.0
+
+
+def _invalidate_active_cache() -> None:
+    """本进程写入 active.json 后显式失效缓存（调用方需持有 _lock）。
+
+    只清不重填：重填要 stat 刚写完的文件，而"刚写完的文件 mtime 是否已经更新"
+    正是这里不能依赖的东西。
+    """
+    global _cached_active_id, _cached_state_mtime
+    _cached_active_id = None
+    _cached_state_mtime = 0.0
 
 
 class PersonaProfileError(ValueError):
@@ -296,6 +311,8 @@ def activate(profile_id: str) -> dict:
     with _lock:
         profile = load_profile(profile_id)
         _write_json(_STATE, {"active_id": profile_id})
+        # 本进程刚改的，不能等 mtime 去告诉缓存（理由见文件头缓存说明）。
+        _invalidate_active_cache()
     profile["active"] = True
     return profile
 
