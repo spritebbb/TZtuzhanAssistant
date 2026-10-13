@@ -15,7 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 ROOT = Path(__file__).resolve().parents[1]
+# 仓库根的 .venv；git worktree 不会自带 .venv（虚拟环境不随 worktree 复制），
+# 那时退回当前解释器——否则整份测试会因为「目录不对」而红，红的还不是被测行为。
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
+if not PY.exists():
+    PY = Path(sys.executable)
 UTC = timezone.utc
 AT = datetime(2026, 9, 7, 13, 0, 0, tzinfo=UTC)  # 周一 13:00 UTC = 本地 21:00
 
@@ -124,7 +128,6 @@ def test_midnight_block_spanning() -> int:
 
 def _spawn_tick(data_root: Path, at: datetime, extra: list[str] | None = None) -> dict:
     env = os.environ.copy()
-    env["FEATURE_TELEMETRY_ENABLED"] = "1"
     proc = subprocess.run(
         [str(PY), "-X", "utf8", "-m", "backend.maintenance.time_tick",
          "--data-root", str(data_root), "--at", at.isoformat(), "--json",
