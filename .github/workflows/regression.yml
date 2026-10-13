@@ -32,12 +32,12 @@ jobs:
         # 其余都必须装齐，否则用例会在收集期就红：
         #   cryptography / sqlcipher3  → backend.storage.file_container、keyslots
         #   pywin32                    → Windows DPAPI 本机槽
-        #   pypdf / ddgs / chromadb / mem0ai → 知识库、搜索、记忆 v2 用例
+        #   pypdf / ddgs / chromadb → 知识库、搜索、记忆 v2 用例
         # 依据：2026-09-18 在本机以同构 venv 实跑 `pytest tests/ -q` → 175 passed。
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest pytest-asyncio fastapi uvicorn python-dotenv loguru httpx openai Pillow python-multipart
-          python -m pip install cryptography sqlcipher3 pywin32 pypdf ddgs chromadb mem0ai
+          python -m pip install cryptography sqlcipher3 pywin32 pypdf ddgs chromadb
 
       - name: Run backend regression
         env:
