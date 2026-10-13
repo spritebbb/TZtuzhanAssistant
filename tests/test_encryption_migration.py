@@ -229,7 +229,13 @@ def test_cleanup_relocates_stale_journal_path(root: Path) -> None:
     assert journal["state"] == "encrypted"
     assert not keep.exists(), "失效路径必须按目录名重定位后真删"
     assert not legacy.exists(), "加密目录里的明文快照必须一起清掉"
-    assert set(journal["removed_paths"]) == {str(keep), str(legacy)}
+    # 比路径前先归一化：finish_cleanup 内部对 data_root 做了 resolve()，而这里的
+    # keep/legacy 来自未归一化的 data（tempfile 在部分 runner 上会给出短名/软链
+    # 形式），直接比字符串会在 CI 上假红。断言要验的是「删了哪两个目录」，
+    # 不是路径的书写形式；失败时把两边都打出来，免得又只看到一行 AssertionError。
+    expected = {str(keep.resolve()), str(legacy.resolve())}
+    actual = {str(Path(p).resolve()) for p in journal["removed_paths"]}
+    assert actual == expected, f"removed_paths 不符：actual={sorted(actual)} expected={sorted(expected)}"
     shutil.rmtree(root, ignore_errors=True)
 
 
