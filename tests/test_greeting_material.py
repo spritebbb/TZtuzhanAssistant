@@ -218,11 +218,16 @@ def test_initiative_integration() -> int:
 
     uid = "f01-proactive"
     _ensure(uid)
+    # 这条活动的时间戳要用真实当前时刻，不能用模块常量 NOW。
+    # _build_proactive_prompt 没有可注入的时间基准，素材窗口就是墙上时钟的近 30 天；
+    # 写死成固定过去日期后，这条活动会落到窗口外，测试随真实日期漂移而失效
+    # （此前它一直被上一个失败断言挡在后面，没机会暴露）。
+    recent = datetime.now().isoformat(timespec="seconds")
     with db._lock:
         db.conn.execute(
             "INSERT INTO activities (user_id, kind, document_id, title, status, created_at, updated_at) "
             "VALUES (?, 'reading', 0, '深夜食堂', 'active', ?, ?)",
-            (uid, NOW.isoformat(), NOW.isoformat()),
+            (uid, recent, recent),
         )
         db.conn.commit()
     msgs = initiative._build_proactive_prompt(uid)

@@ -12,7 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+# git worktree 不带自己的 .venv（虚拟环境不随 worktree 复制），退回当前解释器，
+# 否则整份测试会因为「路径不存在」而红，红的原因还不是被测的旧库升级。
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+if not PYTHON.exists():
+    PYTHON = Path(sys.executable)
 FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_legacy.sql"
 
 

@@ -233,12 +233,18 @@ def _collect_activities(user_id: str, since: str, limit: int) -> list[SourceRef]
 
 
 def _collect_events(user_id: str, since: str, limit: int) -> list[SourceRef]:
-    """近 30 天完成类关系事件；隐私非 normal 与已过期的天然被查询排除。"""
+    """完成类关系事件；窗口用调用方给的 since（与 _collect_activities 同一基准）。
+
+    这里此前改用墙上时钟的 within_days，等于把入参 since 丢掉：调用方传进来的
+    时间基准被无视，用固定时间戳写的回归测试也就随真实日期漂移而失效。
+    """
     from .relationship_events import active_events
 
-    events = active_events(user_id, limit=max(1, int(limit)) * 3, within_days=MATERIAL_WINDOW_DAYS)
+    events = active_events(user_id, limit=max(1, int(limit)) * 3)
     out: list[SourceRef] = []
     for event in events:
+        if str(event.get("occurred_at") or "") < since:
+            continue  # 窗口外：按调用方给的时间基准判，不按墙上时钟
         if str(event.get("privacy") or "normal") != "normal":
             continue  # 敏感事件不进问候素材
         line = _event_line(str(event["event_type"]), event.get("payload") or {},
