@@ -7,43 +7,11 @@ export interface Message {
   role: 'user' | 'bot'
   content: string
   image?: string | null
-  explanation?: MessageExplanation | null
   draft?: ActivityDraft | null
   ephemeral?: boolean
   ts: number
   /** 显示层拆行标记：本条是与前一条同属一条数据消息的续行（仅前端显示用，不参与 API 交互）。 */
   continuation?: boolean
-}
-
-export interface MessageExplanation {
-  version: number
-  state: {
-    affection: number
-    stage: string
-    mood: number
-    mood_label: string
-    energy: number
-    resting?: boolean
-    rest_until?: string | null
-    tension?: number
-  }
-  behavior: Array<{ label: string; text: string }>
-  memories: Array<{ kind: string; text: string; lifecycle?: MemoryLifecycle }>
-  tools: { search: boolean; media: 'none' | 'generated_image' | 'sticker' | string }
-}
-
-/** G01/F07 记忆生命周期露出：只含非敏感元数据，不含评分权重。 */
-export interface MemoryLifecycle {
-  fact_id: number
-  pinned: boolean
-  expires_at: string | null
-  tier: 'short' | 'long' | 'legacy' | null
-  retention: string
-  confidence: number
-  verified_at: string | null
-  user_confirmed: boolean
-  can_edit: boolean
-  version: string
 }
 
 export interface ProactiveMessage {
@@ -86,7 +54,6 @@ export interface ArchiveSearchResult {
 export interface ResetStats {
   userdb_tables: number
   vector: number
-  mem0: number
   media: number
   archives: number
   backups: number
@@ -120,7 +87,7 @@ export async function resetUser(deep = false): Promise<ResetStats> {
   const r = await apiFetch(`/api/user/reset${deep ? '?deep=true' : ''}`, { method: 'POST' })
   const d = await r.json()
   if (!r.ok || !d.ok) throw new Error(d.error || '重置失败')
-  return d.reset ?? { userdb_tables: 0, vector: 0, mem0: 0, media: 0, archives: 0, backups: 0, tts_cache: 0, session_msgs: 0 }
+  return d.reset ?? { userdb_tables: 0, vector: 0, media: 0, archives: 0, backups: 0, tts_cache: 0, session_msgs: 0 }
 }
 
 /** 重命名（NP-03）：id='current' 改当前会话标题，否则改对应归档标题。 */

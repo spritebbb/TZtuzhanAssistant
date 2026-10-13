@@ -13,7 +13,6 @@ router = APIRouter(prefix="/api", tags=["config"])
 # 功能开关说明（设置页展示用）：键名 → 一句话用途。
 _FLAG_LABELS = {
     "compact_ui_enabled": "简洁界面：收纳工具入口，正常状态不显示工具灯",
-    "aesthetics_enabled": "共同审美：记录视觉偏好，在房间中摆放共同作品",
     "memory_lifecycle_enabled": "记忆保留：让短期状态随时间淡出，固定的记忆始终保留",
     "memory_salience_enabled": "记忆重要性：整理你明确重视和反复提及的记忆线索",
     "output_hygiene_enabled": "输出卫生：回复发送前统一安全检查（关闭时保持旧流式契约）",
@@ -21,25 +20,15 @@ _FLAG_LABELS = {
     "profile_enabled": "用户画像：从对话中提炼用户特征用于回复",
     "expression_exemplars_enabled": "表达范文：用成对例句示范她的说话分寸（资源为空时不注入；范文在人格资源里维护）",
     "her_statements_enabled": "她的自述：记住她亲口说过的自己的事，前后矛盾时她自己决定怎么演（不重复提起）",
-    "news_digest_enabled": "事件感：每天知道一件外部世界的事，打招呼时能自然提起",
     "plain_moments_enabled": "平淡时刻：平淡但值得记的日常也会低权重记住（会随时间淡忘，不进情绪记忆）",
-    "interest_feeds_enabled": "兴趣源：按你授权的话题定期看看外面有什么新东西，偶尔讲给你听",
     "life_templates_enabled": "生活模板：她会低频出门或换活动（精力有限选择，可在对话中喊停）",
     "relationship_style_enabled": "关系气质：由真实共同经历形成长期气质（可在了解她/我们之间查看与屏蔽）",
     "greeting_material_enabled": "问候变体：用你们真实的近况开口（关闭后回到固定兜底问候）",
-    "companion_requests_enabled": "她的请求：关系够近时她偶尔请你帮个小忙（挑歌/挑书）",
     "humor_memory_enabled": "幽默记忆：只有你明确认可的梗她才会反复玩（不认可的立刻收起来）",
-    "focus_wrapup_enabled": "专注收尾：结束专注时她按真实情况说一句收尾（不评分）",
     "activity_drafts_enabled": "意图预填：你说想一起做什么时，她先给一张可确认的草稿",
-    "telemetry_enabled": "本地诊断：记录无正文的事件链（7天）与日聚合（30天）",
     "style_map_enabled": "表达习惯观察：她记住你在不同场合的说话调子，回应更合拍（可在记忆管理删除）",
-    "experience_metrics_enabled": "质量统计：本地计数回复延迟、规则失败、重复与你的反馈（不记录正文，可清除）",
     "shared_resources_enabled": "跨角色共享：允许把你的文档或共同产物明确分享给另一个角色看（默认全部隔离）",
-    "tavern_enabled": "酒馆同玩：允许本机酒馆扩展点名她一起玩故事（关闭后相关接口一律拒绝）",
-    "willingness_enabled": "主动意愿：值得说的主动消息她还是会想想此刻想不想说（约定到点与你点名的必应不受影响）",
     "situation_enabled": "局势档案：一份常驻的世界快照让她随时记得你们正在做的事和没解开的疑问",
-    "offline_recap_enabled": "离线补算：你不在的这段时间她照常过日子，回来后逐条讲给你听（可跳过）",
-    "local_tts_enabled": "本地语音：用她的专属音色在本地合成朗读（需装好 GPT-SoVITS 服务与声纹，失败自动回退在线语音）",
 }
 
 
@@ -79,9 +68,6 @@ async def api_config_get():
             "memory_semantic": config.memory_semantic,
             "proactive_new_user_days": config.proactive_new_user_days,
             "proactive_new_user_idle_hours": config.proactive_new_user_idle_hours,
-            "proactive_surprise_min_gap_days": config.proactive_surprise_min_gap_days,
-            "proactive_surprise_chance_percent": config.proactive_surprise_chance_percent,
-            "proactive_surprise_idle_minutes": config.proactive_surprise_idle_minutes,
         },
     }
 
@@ -107,9 +93,6 @@ async def api_config_set(request: Request):
         "mood_city": False, "memory_semantic": False,
         "proactive_new_user_days": False,
         "proactive_new_user_idle_hours": False,
-        "proactive_surprise_min_gap_days": False,
-        "proactive_surprise_chance_percent": False,
-        "proactive_surprise_idle_minutes": False,
     }
     clear_fields = body.get("clear_fields", [])
     clear_fields = set(clear_fields) if isinstance(clear_fields, list) else set()
@@ -150,9 +133,6 @@ async def api_config_set(request: Request):
         integer_ranges = {
             "PROACTIVE_NEW_USER_DAYS": (1, 30),
             "PROACTIVE_NEW_USER_IDLE_HOURS": (1, 24),
-            "PROACTIVE_SURPRISE_MIN_GAP_DAYS": (1, 365),
-            "PROACTIVE_SURPRISE_CHANCE_PERCENT": (0, 100),
-            "PROACTIVE_SURPRISE_IDLE_MINUTES": (15, 10080),
         }
         for name, (minimum, maximum) in integer_ranges.items():
             if name not in updates:

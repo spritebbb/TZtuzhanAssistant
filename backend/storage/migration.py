@@ -17,7 +17,7 @@
 边界与纪律：
 - MK 只经 stdin 传给隔离子进程，不进命令行/环境变量/磁盘；
 - 明文目录的删除永远不在本引擎自动发生，必须显式调用 finish_cleanup；
-- chroma/日志/telemetry/tts_cache 等可重建产物不迁移，journal 记录 skip 理由；
+- chroma/日志/tts_cache 等可重建产物不迁移，journal 记录 skip 理由；
 - 本引擎是纯库：假定调用方已停应用（运行时接线片负责优雅停机与 persistence
   gate），对一次性数据目录运行；E 片不触碰真实 ``data/``。
 """
@@ -47,7 +47,7 @@ STATES = (
 )
 # 三个运行时库（与 maintenance/loop.py 的 checkpoint 集合一致）
 DATABASE_NAMES = ("bot.db", "sessions.db", "agent_tasks.db")
-# 资产目录 → C 片分域；可重建产物（chroma/tts_cache/日志/telemetry）不迁移
+# 资产目录 → C 片分域；可重建产物（chroma/tts_cache/日志）不迁移
 # personas 不在列：人格卡是文件直读（persona_profiles），加密会打断读取——
 # 改为明文随迁（CARRY_OVER），其加密化需先改造读取端，属后续切片。
 ASSET_DOMAINS: dict[str, str] = {
@@ -266,9 +266,7 @@ def migrate_data_root(
         "databases": list(DATABASE_NAMES), "asset_count": 0,
         "skipped": {
             "chroma": "可重建向量索引（C 片 vector_embeddings 接管）",
-            "chroma_mem0": "可重建向量索引",
             "tts_cache": "可重建语音缓存",
-            "telemetry.db": "可重建日聚合（Q3）",
             "backups": "历史明文备份留在明文目录；加密备份由 F 片接管",
             "*.log / tool_log.jsonl": "派生日志，不进加密集",
         },

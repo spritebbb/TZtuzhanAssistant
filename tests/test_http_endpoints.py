@@ -27,11 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 测试环境收敛：embedding 走哈希（不下载模型）、关 Mem0/画像后台、关搜索与天气。
+# 测试环境收敛：embedding 走哈希（不下载模型）、关画像后台、关搜索与天气。
 # 用显式赋值（而非 setdefault）确保覆盖父进程/CI 可能继承的同名变量，避免
 # "旧版检索"路径被错误短路。本脚本以独立子进程运行，环境变量不会泄漏到其它测试。
 os.environ["MEMORY_EMBED_FORCE"] = "1"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"
@@ -63,7 +62,6 @@ _initiative.initiative_loop = _disabled_initiative_loop
 config.mood_city = ""
 config.search_enabled = False
 config.memory_v2 = False
-config.memory_mem0 = False
 config.memory_embed_force = True
 
 # 把 DB/审计日志落地路径重定向到临时目录（这些模块级变量在 import 期已捕获路径，
@@ -126,7 +124,7 @@ def test_chat_sse_frame_contract() -> None:
     async def fake_process(user_id, text, *, mock=False, merged_msg=False,
                            ephemeral=False,
                            stream_cb=None, image_cb=None, progress_cb=None,
-                           explain_cb=None, draft_cb=None):
+                           draft_cb=None):
         assert ephemeral is False
         from backend.tools.confirm import current_sse_push
 
@@ -145,13 +143,6 @@ def test_chat_sse_frame_contract() -> None:
         await stream_cb("\x00RESET\x00")   # 重复回复重写：前端清空气泡
         await image_cb("data/imgs/x.png")  # 生图完成：前端渲染 <img>
         await stream_cb("好")
-        await explain_cb({
-            "version": 1,
-            "state": {"affection": 52, "stage": "亲密", "mood": 70, "mood_label": "开心", "energy": 66},
-            "behavior": [{"label": "关系分寸", "text": "可以更亲近一点"}],
-            "memories": [],
-            "tools": {"search": False, "media": "generated_image"},
-        })
         return "最终回复"
 
     chat_mod.process = fake_process
@@ -166,15 +157,14 @@ def test_chat_sse_frame_contract() -> None:
                 keys.extend(f.keys())
             # 真实帧序列（chat.py SSE 生成器实际产出，无 session_id 帧）
             assert keys == ["confirm_request", "tool", "piece", "reset",
-                            "image_url", "piece", "explanation", "done"], keys
+                            "image_url", "piece", "done"], keys
             assert frames[0]["confirm_request"]["request_id"] == "req-x"
             assert frames[1]["tool"]["tool"] == "agent_run"
             assert frames[2]["piece"] == "你"
             assert frames[3] == {"reset": True}
             assert frames[4]["image_url"] == "/api/images/x.png"
             assert frames[5]["piece"] == "好"
-            assert frames[6]["explanation"]["state"]["stage"] == "亲密"
-            assert frames[7]["done"] == "最终回复"
+            assert frames[6]["done"] == "最终回复"
 
             # done 之后消息已持久化到固定会话 'current'（user + bot）
             # 单一会话模式下会话 id 恒为 'current'，且无 DELETE 端点，
@@ -185,7 +175,6 @@ def test_chat_sse_frame_contract() -> None:
             assert roles == ["user", "bot"], msgs
             assert msgs[0]["content"] == "你好"
             assert msgs[1]["content"] == "最终回复"
-            assert msgs[1]["explanation"]["tools"]["media"] == "generated_image"
         print("[OK] chat SSE：帧契约 + current_sse_push 接线 + 消息持久化")
     finally:
         chat_mod.process = orig_process

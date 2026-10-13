@@ -83,13 +83,6 @@ class Config:
         data_dir = os.getenv("TZTUZHAN_DATA_DIR", "").strip()
         data_path = Path(data_dir) if data_dir else (PROJECT_ROOT / "data")
         self.data_dir: Path = data_path if data_path.is_absolute() else (PROJECT_ROOT / data_path)
-        # Q3 本地可观测性：只保留最小字段事件与日聚合，默认 30 天。
-        self.telemetry_retention_days: int = max(
-            1, min(365, _env_int("TELEMETRY_RETENTION_DAYS", 30))
-        )
-        self.telemetry_event_retention_days: int = max(
-            1, min(30, _env_int("TELEMETRY_EVENT_RETENTION_DAYS", 7))
-        )
         self.search_enabled: bool = os.getenv("SEARCH_ENABLED", "1") != "0"
         # NP-14 桌面感知：默认关闭；开启后她可感知前台应用类别（不看窗口内容）
         self.desktop_awareness: bool = os.getenv("DESKTOP_AWARENESS", "0") == "1"
@@ -116,14 +109,6 @@ class Config:
         os.environ["HF_ENDPOINT"] = self.hf_endpoint
         # 记忆引擎总开关：关闭时完全退回 SQLite + TF-IDF 行为
         self.memory_v2: bool = os.getenv("MEMORY_V2", "1") != "0"
-        # Mem0 记忆管理器开关：默认关（实验分支）。2026-09-30 对比实验
-        # （backend/evals/memory_channel_compare.py）实测 Mem0 通道召回全面
-        # 落后自研（hit@1 0.45 vs 0.85；LLM 提炼将中文改写为英文并引入日期
-        # 幻觉；矛盾新旧并存），且其 chroma_mem0 库无 SQLite 权威源——备份、
-        # 存储迁移、关系包导出均不覆盖（详见 memory_manager 模块说明）。
-        # 设 MEMORY_MEM0=1 可重新启用作对照实验。
-        self.memory_mem0: bool = os.getenv("MEMORY_MEM0", "0") != "0"
-
         # 图像生成（SiliconFlow 文生图；不配置则生图功能关闭）
         self.image_base_url: str = os.getenv("IMAGE_BASE_URL", "https://api.siliconflow.cn/v1").strip()
         self.image_api_key: str = os.getenv("IMAGE_API_KEY", "").strip()
@@ -143,37 +128,15 @@ class Config:
         self.proactive_global_cooldown_sec: int = max(30, _env_int("PROACTIVE_GLOBAL_COOLDOWN_SEC", 900))
         self.proactive_check_interval_sec: int = max(30, _env_int("PROACTIVE_CHECK_INTERVAL_SEC", 300))
         self.proactive_failure_cooldown_sec: int = max(30, _env_int("PROACTIVE_FAILURE_COOLDOWN_SEC", 900))
-        # D12 主动意愿 roll（docs/D9-D12-DESIGN-2026-09-21.md §1）：权重与上下限离线校准
-        self.willingness_affection_weight: float = _env_float("WILLINGNESS_AFFECTION_WEIGHT", 0.20)
-        self.willingness_tension_weight: float = _env_float("WILLINGNESS_TENSION_WEIGHT", 0.30)
-        self.willingness_focus_penalty: float = _env_float("WILLINGNESS_FOCUS_PENALTY", 0.40)
-        self.willingness_miss_compensate: float = _env_float("WILLINGNESS_MISS_COMPENSATE", 0.15)
-        self.willingness_floor: float = _env_float("WILLINGNESS_FLOOR", 0.05)
-        self.willingness_ceil: float = _env_float("WILLINGNESS_CEIL", 0.95)
         # D10 叙事化成本熔断（docs/D9-D12-DESIGN-2026-09-21.md §2，2026-09-21 拍板：
         # 月预算 ¥30、三档 70%/100%/130%、extreme 含回复简短；用户聊天永不受影响）
         self.cost_monthly_budget_cny: float = _env_float("COST_MONTHLY_BUDGET_CNY", 30.0)
         self.cost_soft_ratio: float = _env_float("COST_SOFT_RATIO", 0.70)
         self.cost_extreme_ratio: float = _env_float("COST_EXTREME_RATIO", 1.30)
         self.cost_downgrade_model: str = os.getenv("COST_DOWNGRADE_MODEL", "").strip()
-        # D11 离线补算（docs/D9-D12-DESIGN-2026-09-21.md §4：确定性重放+限额裁剪+逐条回放可跳过）
-        self.offline_recap_min_gap_hours: float = _env_float("OFFLINE_RECAP_MIN_GAP_HOURS", 8.0)
-        self.offline_recap_max_days: int = max(1, _env_int("OFFLINE_RECAP_MAX_DAYS", 14))
-        self.offline_recap_event_cap: int = max(1, _env_int("OFFLINE_RECAP_EVENT_CAP", 8))
-        # P3-03 本地 TTS（GPT-SoVITS；§21.2——adapter 只认协商到的能力，训练/素材留空位）
-        self.local_tts_endpoint: str = os.getenv("LOCAL_TTS_ENDPOINT", "http://127.0.0.1:9880").strip()
-        self.local_tts_timeout: float = _env_float("LOCAL_TTS_TIMEOUT", 60.0)
         self.proactive_image_enabled: bool = os.getenv("PROACTIVE_IMAGE_ENABLED", "1") != "0"
         self.proactive_image_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_CHANCE_PERCENT", 20)))
         self.proactive_image_min_mood: int = max(0, min(100, _env_int("PROACTIVE_IMAGE_MIN_MOOD", 50)))
-
-        # M5 惊喜编排：隔一阵子基于真实共同产物（共同故事/书摘/目标回顾）低频送惊喜。
-        # 只基于真实经历、低频、可关闭；出牌经统一仲裁器，消耗共享每日额度。
-        self.proactive_surprise_enabled: bool = os.getenv("PROACTIVE_SURPRISE_ENABLED", "1") != "0"
-        self.proactive_surprise_min_gap_days: int = max(1, _env_int("PROACTIVE_SURPRISE_MIN_GAP_DAYS", 7))
-        self.proactive_surprise_chance_percent: int = max(0, min(100, _env_int("PROACTIVE_SURPRISE_CHANCE_PERCENT", 50)))
-        self.proactive_surprise_idle_minutes: int = max(15, _env_int("PROACTIVE_SURPRISE_IDLE_MINUTES", 120))
-        self.proactive_surprise_material_days: int = max(7, _env_int("PROACTIVE_SURPRISE_MATERIAL_DAYS", 60))
 
         # 自制表情包：仅在有明确情绪场景时低频附带，优先复用收藏。
         self.sticker_enabled: bool = os.getenv("STICKER_ENABLED", "1") != "0"
@@ -192,22 +155,6 @@ class Config:
         # 单文件大小上限（MB）与单用户文档数上限
         self.kb_max_file_mb: int = max(1, _env_int("KB_MAX_FILE_MB", 20))
         self.kb_max_documents: int = max(1, _env_int("KB_MAX_DOCUMENTS", 50))
-
-        # C4 好感度玩法闭环：解锁时刻
-        # 连续陪伴多少天触发「连续陪伴」彩蛋
-        self.unlock_streak_days: int = max(2, _env_int("UNLOCK_STREAK_DAYS", 7))
-        # M3.2 专注陪伴：25/50 分钟安静模式（feature flag，0 关闭）
-        self.focus_enabled: bool = os.getenv("FOCUS_ENABLED", "1") != "0"
-        # M8 写给未来的我们：未来信件（feature flag，0 关闭）
-        self.future_letters_enabled: bool = os.getenv("FUTURE_LETTERS_ENABLED", "1") != "0"
-        # M8 关系快照：30/100/365 天纪念页（feature flag，0 关闭）
-        self.relationship_snapshots_enabled: bool = os.getenv("RELATIONSHIP_SNAPSHOTS_ENABLED", "1") != "0"
-        # M8 双视角叙事：同一经历的双方解释页（feature flag，0 关闭）
-        self.dual_perspectives_enabled: bool = os.getenv("DUAL_PERSPECTIVES_ENABLED", "1") != "0"
-        # M8 梦境/平行可能性：显式收藏的虚构片段（feature flag，0 关闭）
-        self.possibilities_enabled: bool = os.getenv("POSSIBILITIES_ENABLED", "1") != "0"
-        # M8.7 不同版本的我们：关系版本检查点（feature flag，0 关闭）
-        self.relationship_versions_enabled: bool = os.getenv("RELATIONSHIP_VERSIONS_ENABLED", "1") != "0"
 
         # 图片理解（视觉模型：SiliconFlow / DashScope 等 OpenAI 兼容视觉端点）
         self.vision_base_url: str = os.getenv("VISION_BASE_URL", "").strip()
@@ -283,9 +230,9 @@ class Config:
                 "127.0.0.1:8801;localhost:8801;[::1]:8801",
             ).split(";") if p.strip()
         ]
-        # 额外可信浏览器来源（分号分隔）：本机其他可信前端所在 origin，如
-        # SillyTavern 酒馆同玩扩展页面（默认 :8000）。只追加进 CORS 与 Origin
-        # 白名单，不放宽 Host 校验，也不影响 token 语义（回环仍免 token）。
+        # 额外可信浏览器来源（分号分隔）：本机其他可信前端所在 origin。
+        # 只追加进 CORS 与 Origin 白名单，不放宽 Host 校验，也不影响 token
+        # 语义（回环仍免 token）。
         self.agent_extra_origins: list[str] = [
             p.strip().lower().rstrip("/") for p in os.getenv(
                 "AGENT_EXTRA_ORIGINS",

@@ -68,12 +68,9 @@ async def main() -> None:
     print(f"   terms={terms}")
 
     print("== 5. 记忆引擎 ==")
-    from backend.core.memory.engine import ensure_ready, on_message
+    from backend.core.memory.engine import ensure_ready
 
-    ensure_ready()
-    on_message(user_id, "我最爱吃番茄牛腩面", "嗯，记住了")
-    print("   on_message 无异常（后台任务异步）")
-    check("on_message 不阻塞", True)
+    check("ensure_ready 无异常", ensure_ready() in (True, False))
 
     print()
     print(f"=== 测试结果: {PASS} 通过, {FAIL} 失败 ===")

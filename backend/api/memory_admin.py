@@ -21,8 +21,6 @@ from ..core.fact_lifecycle import (
 )
 from ..core.her_profile import her_profile
 from ..core.log import logger
-from ..core import pending_thoughts
-from ..core import aesthetic_preferences as aesthetics
 from ..core import user_preferences as _prefs
 from ..core.userdb import (
     db,
@@ -33,53 +31,6 @@ from ..core.userdb import (
 from ..core.persona_profiles import active_user_id
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
-
-
-class AestheticInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    owner: Literal["user", "assistant"] = "user"
-    category: Literal["color", "style", "motif", "layout"]
-    value: str = Field(max_length=20)
-    source_type: Literal["artifact", "knowledge_opinion"] | None = None
-    source_id: int | None = Field(default=None, gt=0)
-
-
-@router.get("/aesthetics")
-async def api_aesthetics():
-    return {"ok": True, **await asyncio.to_thread(aesthetics.room, active_user_id())}
-
-
-@router.put("/aesthetics")
-async def api_put_aesthetic(body: AestheticInput):
-    try:
-        await asyncio.to_thread(aesthetics.put_preference, active_user_id(), **body.model_dump())
-        return {"ok": True}
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
-
-
-@router.delete("/aesthetics/{preference_id}")
-async def api_delete_aesthetic(preference_id: int):
-    ok = await asyncio.to_thread(aesthetics.remove_preference, active_user_id(), preference_id)
-    return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
-
-
-class PlacementInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    x: float = Field(default=.5, ge=0, le=1, allow_inf_nan=False)
-    y: float = Field(default=.5, ge=0, le=1, allow_inf_nan=False)
-    hidden: bool = False
-    slot: Literal["room"] = "room"
-    theme_version: Literal[1] = 1
-
-
-@router.put("/aesthetics/placements/{artifact_id}")
-async def api_place_artifact(artifact_id: int, body: PlacementInput):
-    try:
-        await asyncio.to_thread(aesthetics.place, active_user_id(), artifact_id, **body.model_dump())
-        return {"ok": True}
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
 
 
 @router.get("/her-profile")
@@ -116,30 +67,6 @@ async def api_delete_style_entry(style_id: int):
     if not await asyncio.to_thread(db.del_style_map, uid, style_id):
         return JSONResponse({"ok": False, "error": "这条表达观察不存在"}, status_code=404)
     logger.info("[记忆管理] 删除场景化表达观察 #{}", style_id)
-    return {"ok": True}
-
-
-@router.get("/pending-thoughts")
-async def api_pending_thoughts():
-    """她的未完成心事：用户可见可放下（M5 用户主权 + 可观测统计）。"""
-    uid = active_user_id()
-    listing = await asyncio.to_thread(_list_thoughts, uid)
-    stats = await asyncio.to_thread(pending_thoughts.stats, uid)
-    return {"ok": True, "thoughts": listing, "stats": stats}
-
-
-def _list_thoughts(uid: str) -> list[dict]:
-    from ..core.pending_thoughts import due_thoughts
-
-    return due_thoughts(uid, limit=10)
-
-
-@router.post("/pending-thoughts/{thought_id}/dismiss")
-async def api_dismiss_thought(thought_id: int):
-    uid = active_user_id()
-    if not await asyncio.to_thread(pending_thoughts.dismiss_thought, uid, thought_id):
-        return JSONResponse({"ok": False, "error": "这条心事不存在或已处理"}, status_code=404)
-    logger.info("[记忆管理] 用户放下了心事 #{}", thought_id)
     return {"ok": True}
 
 
@@ -330,45 +257,6 @@ async def api_learning_candidates(include_revoked: bool = Query(False)):
     return {"ok": True, "items": items}
 
 
-# ---- 38项#22 兴趣源管理（授权域 CRUD：只有登记过的主题才会被外部检索）----
-@router.get("/interest-feeds")
-async def api_interest_feeds_list():
-    from ..core.userdb import db
-
-    uid = active_user_id()
-    items = await asyncio.to_thread(db.list_interest_feeds, uid)
-    return {"ok": True, "items": [dict(r) for r in items]}
-
-
-@router.post("/interest-feeds")
-async def api_interest_feeds_add(body: dict = Body(...)):
-    """登记授权兴趣源：{keywords: str, label?: str}；重复关键词 409。"""
-    from ..core.userdb import db
-
-    keywords = str(body.get("keywords") or "").strip()
-    if not keywords or len(keywords) > 60:
-        return JSONResponse({"ok": False, "error": "keywords 必填且 ≤60 字"}, status_code=422)
-    uid = active_user_id()
-    feed_id = await asyncio.to_thread(
-        db.add_interest_feed, uid, keywords, str(body.get("label") or "")
-    )
-    if feed_id is None:
-        return JSONResponse({"ok": False, "error": "这个兴趣源已经登记过了"}, status_code=409)
-    logger.info("[兴趣源] {} 登记授权源：{}", uid, keywords[:40])
-    return {"ok": True, "id": feed_id}
-
-
-@router.delete("/interest-feeds/{feed_id}")
-async def api_interest_feeds_remove(feed_id: int):
-    from ..core.userdb import db
-
-    uid = active_user_id()
-    removed = await asyncio.to_thread(db.remove_interest_feed, uid, feed_id)
-    if not removed:
-        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
-    return {"ok": True}
-
-
 @router.post("/learning-candidates/{candidate_id}/confirm")
 async def api_learning_confirm(candidate_id: int):
     from ..core.learning_pipeline import LearningError, confirm
@@ -393,28 +281,6 @@ async def api_learning_revoke(candidate_id: int):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
     return {"ok": True, **result}
 
-
-@router.get("/experience-metrics")
-async def api_experience_metrics(days: int = Query(30, ge=1, le=90)):
-    """P3-05B 本地质量统计：只返回聚合计数（无正文），可关可清。"""
-    from ..core.experience_metrics import clear_user, enabled, summary
-
-    uid = active_user_id()
-    if not enabled():
-        return {"ok": True, "enabled": False, "items": []}
-    items = await asyncio.to_thread(summary, uid, days=days)
-    return {"ok": True, "enabled": True, "items": items}
-
-
-@router.delete("/experience-metrics")
-async def api_experience_metrics_clear():
-    """用户主动清理本人格统计（统计不属于关系包，删除即清空）。"""
-    from ..core.experience_metrics import clear_user
-
-    uid = active_user_id()
-    removed = await asyncio.to_thread(clear_user, uid)
-    logger.info("[统计] 用户清理本地统计 {} 条", removed)
-    return {"ok": True, "removed": removed}
 
 
 @router.get("/domain-trust")

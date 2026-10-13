@@ -22,10 +22,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_test_vision_"))
-# 测试环境收敛（对齐 test_http_endpoints）：embedding 走哈希、关 Mem0/搜索/天气，
+# 测试环境收敛（对齐 test_http_endpoints）：embedding 走哈希、关搜索/天气，
 # 独立子进程运行，显式赋值不泄漏。
 os.environ["MEMORY_EMBED_FORCE"] = "1"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"

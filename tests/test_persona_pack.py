@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ["MEMORY_EMBED_FORCE"] = "1"
-os.environ["MEMORY_MEM0"] = "0"
 os.environ["MEMORY_V2"] = "0"
 os.environ["MOOD_CITY"] = ""
 os.environ["SEARCH_ENABLED"] = "0"
@@ -51,6 +50,20 @@ voice: zh-CN-XiaoyiNeural
 """
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32  # 合法 PNG 魔数占位
+# 假的「全局默认立绘」：真实资产 assets/hotaru_v1_nohalo.png 是作者私有画稿，
+# 按设计 gitignore 不进仓库，干净检出上不存在（详见 _global_default_png）。
+GLOBAL_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x11" * 32
+
+
+def _global_default_png() -> Path:
+    """造一个假的全局默认立绘文件，返回其路径。
+
+    立绘回退这层逻辑不该依赖「本机刚好放了作者的画」——测试自己提供目标文件，
+    验的才是回退行为本身。
+    """
+    path = _TEST_TMP / "_global_default.png"
+    path.write_bytes(GLOBAL_PNG_BYTES)
+    return path
 
 
 def _make_pack(entries: dict[str, bytes]) -> bytes:
@@ -102,15 +115,31 @@ def test_missing_state_falls_back_to_pack_plain() -> None:
 
 def test_card_without_portraits_falls_back_global() -> None:
     # 纯 .md 导入（无立绘）：立绘路由回退全局资产
+    from unittest.mock import patch
+
+    import backend.api.images as images_api
+
     r = _upload("plain.md", CARD.encode("utf-8"))
     assert r.status_code == 200, r.text
     d = r.json()
     assert d.get("portraits") == []
-    # 切到无立绘人格后，/persona/full 应返回全局默认（非测试 PNG 字节）
-    r_full = client.get("/persona/full")
+
+    # ① 作者本机放了私有全身图 → 优先用它
+    with patch.object(images_api, "_PERSONA_FULL", _global_default_png()):
+        r_full = client.get("/persona/full")
     assert r_full.status_code == 200
-    assert r_full.content != PNG_BYTES
-    print("[OK] 无立绘人格：立绘路由回退全局默认")
+    assert r_full.content == GLOBAL_PNG_BYTES, "无立绘人格应回退全局默认立绘"
+
+    # ② 私有全身图不在（= 干净检出：hotaru_v1_nohalo.png 在 .gitignore 里）→
+    #    必须退回仓库自带的五档 plain，而不是 404。这一条是新克隆仓库「主区立绘
+    #    是空的」的唯一防线，别删。
+    bundled_plain = images_api._PERSONA_STATES / "plain.png"
+    assert bundled_plain.is_file(), "仓库自带的五档 plain 立绘应当入库"
+    with patch.object(images_api, "_PERSONA_FULL", images_api._PERSONA_STATES / "_absent.png"):
+        r_clean = client.get("/persona/full")
+    assert r_clean.status_code == 200, "全局全身图缺失时不得 404"
+    assert r_clean.content == bundled_plain.read_bytes()
+    print("[OK] 无立绘人格：回退全局默认（私有全身图缺失时退回自带五档 plain）")
 
 
 def test_pack_without_md_rejected() -> None:

@@ -4,8 +4,8 @@
 从 ``pipeline._process_locked`` 抽出的第一段。这些动作都发生在「用户消息已落库」
 之后、「组装 prompt」之前，特征是**确定性、有则记、失败不得影响回复**：
 
-- 关系与状态入账：重逢推进、注意力漂移、开放问题登记、幽默记忆反馈；
-- 用户教学入账：偏好教学、学习候选、活动草稿、求助回应、会话节奏；
+- 关系与状态入账：重逢推进、幽默记忆反馈；
+- 用户教学入账：偏好教学、学习候选、活动草稿、会话节奏；
 - 即时奖励：用称呼交流 / 引用共同回忆的关键词加分；
 - 惰性提炼调度：事实 / 画像 / 话题 / 结构化五元组（后台，不阻塞回复）；
 - 聊天派活：明确要求「分几步做」时创建 Agent 任务并回注一条系统提示。
@@ -72,43 +72,11 @@ async def _run_activity_draft(
         await draft_cb(draft)
 
 
-def _run_attention(user_id: str, text: str, turn_id: int) -> None:
-    """§17.1 注意力漂移：每轮推进话题权重（显式转题立即置顶），只存 topic id。"""
-    from . import attention_state as _attention
-    from .context import topic_switch_hint
-
-    key = _attention.topic_key(text)
-    recent = [str(m["content"] or "") for m in db.recent_messages(user_id, 4)]
-    prev = recent[:-1] if recent and recent[-1].strip() == text.strip() else recent
-    if topic_switch_hint(prev, text):
-        _attention.switch_topic(user_id, key, turn_id=turn_id or 0)
-    else:
-        _attention.advance_turn(user_id, key, turn_id=turn_id or 0)
-
-
-def _run_open_question(user_id: str, text: str, turn_id: int) -> None:
-    """G03：用户明确要求「以后有结果告诉我」才记下待查（确定性正则，无 LLM）。"""
-    from .open_questions import detect_tracking_request, track_question
-
-    topic = detect_tracking_request(text)
-    if topic:
-        track_question(user_id, topic, source_message_id=turn_id or None)
-
-
 def _run_humor_feedback(user_id: str, text: str, turn_id: int) -> None:
     """L04：明确反馈（「这个梗好」/「别玩这个梗」）记到上一轮实际用过的梗上。"""
     from .humor_memory import record_feedback_from_reply
 
     record_feedback_from_reply(user_id, text, turn_id=turn_id or None)
-
-
-def _run_companion_response(user_id: str, text: str, turn_id: int) -> None:
-    """G04：她 24h 内发过求助，用户这句若接受/拒绝就走同一 respond；猜不到不打扰。"""
-    from .companion_requests import respond_to_reply
-
-    responded = respond_to_reply(user_id, text, message_id=turn_id or None)
-    if responded:
-        logger.info("[pipeline] 求助回应已入账：{}", responded.get("status"))
 
 
 def _run_rhythm(user_id: str, text: str, turn_id: int) -> None:
@@ -208,8 +176,6 @@ async def run_turn_effects(
     from .reunion import observe_user_turn
 
     ledger.run("重逢状态推进", observe_user_turn, user_id, turn_id, text)
-    ledger.run("注意力推进", _run_attention, user_id, text, turn_id)
-    ledger.run("开放问题登记", _run_open_question, user_id, text, turn_id)
     ledger.run("幽默记忆反馈", _run_humor_feedback, user_id, text, turn_id)
     await ledger.run_async(
         "活动草稿",
@@ -219,7 +185,6 @@ async def run_turn_effects(
         turn_id=turn_id,
         draft_cb=draft_cb,
     )
-    ledger.run("求助回应", _run_companion_response, user_id, text, turn_id)
     ledger.run("会话节奏", _run_rhythm, user_id, text, turn_id)
     ledger.run("偏好教学", _run_preference_teaching, user_id, text, turn_id)
     ledger.run("学习候选", _run_learning_candidate, user_id, text, turn_id)

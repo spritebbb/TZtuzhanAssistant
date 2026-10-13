@@ -23,22 +23,9 @@ from ..maintenance.schema_backup import create_pre_upgrade_backup, mark_schema_c
 from ..storage.connect import OPERATIONAL_ERRORS
 from ..storage.connect import connect_database
 
-_SCHEMA_VERSION = 51  # v51: 38项#22 兴趣源两表（interest_feeds 授权 / interest_feed_items 素材）
+_SCHEMA_VERSION = 63  # v58: 删除 M8 未来信/快照/双视角/版本四表（feature 已移除；旧库残表为无害孤儿）
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS aesthetic_preferences (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
-    owner TEXT NOT NULL CHECK(owner IN ('user','assistant')),
-    category TEXT NOT NULL CHECK(category IN ('color','style','motif','layout')),
-    value TEXT NOT NULL, origin TEXT NOT NULL, source_type TEXT, source_id INTEGER,
-    status TEXT NOT NULL DEFAULT 'active', UNIQUE(user_id,owner,category)
-);
-CREATE TABLE IF NOT EXISTS artifact_placements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, artifact_id INTEGER NOT NULL,
-    slot TEXT NOT NULL DEFAULT 'room' CHECK(slot='room'), x REAL NOT NULL CHECK(x BETWEEN 0 AND 1),
-    y REAL NOT NULL CHECK(y BETWEEN 0 AND 1), theme_version INTEGER NOT NULL DEFAULT 1 CHECK(theme_version=1),
-    hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)), UNIQUE(user_id,artifact_id)
-);
 CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,
     affection       INTEGER NOT NULL DEFAULT 0,
@@ -67,17 +54,6 @@ CREATE TABLE IF NOT EXISTS long_memory (
     ts      TEXT NOT NULL,
     pinned  INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS manager_memories (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    rid         INTEGER NOT NULL,          -- 内容 md5 截断（去重键，与向量 id 一致）
-    content     TEXT NOT NULL,
-    importance  REAL NOT NULL DEFAULT 0.5,
-    created_at  TEXT NOT NULL,
-    UNIQUE(user_id, rid)
-);
-CREATE INDEX IF NOT EXISTS idx_manager_memories_user
-    ON manager_memories(user_id, created_at);
 CREATE TABLE IF NOT EXISTS affection_log (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -199,15 +175,6 @@ CREATE TABLE IF NOT EXISTS diary (
     ts      TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_diary_user_date ON diary(user_id, date);
-CREATE TABLE IF NOT EXISTS research_reports (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    period  TEXT NOT NULL,       -- 覆盖区间，如 2026-08-29~2026-09-04
-    title   TEXT NOT NULL,
-    content TEXT NOT NULL,
-    ts      TEXT NOT NULL,
-    UNIQUE(user_id, period)
-);
 -- 约定/承诺（C6 约定与跟进）：双方明确许下的事 + 该跟进的日子
 CREATE TABLE IF NOT EXISTS promises (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,57 +347,6 @@ CREATE TABLE IF NOT EXISTS learning_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_learning_user_status
     ON learning_candidates(user_id, status, id);
--- 监控 Agent：网页/订阅变化监视（只存 URL 与内容哈希，不存网页正文）。
-CREATE TABLE IF NOT EXISTS watches (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         TEXT NOT NULL,
-    url             TEXT NOT NULL,
-    label           TEXT NOT NULL DEFAULT '',
-    interval_minutes INTEGER NOT NULL DEFAULT 360,
-    last_checked_at TEXT,
-    last_hash       TEXT NOT NULL DEFAULT '',
-    last_notified_hash TEXT NOT NULL DEFAULT '',
-    last_changed_at TEXT,
-    status          TEXT NOT NULL DEFAULT 'active',   -- active / paused
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    UNIQUE (user_id, url)
-);
-CREATE INDEX IF NOT EXISTS idx_watches_user ON watches(user_id, status);
--- P3-05B 本地质量统计：仅聚合计数（无正文），默认本地、可关可清、不入关系包。
-CREATE TABLE IF NOT EXISTS experience_metrics (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    TEXT NOT NULL,
-    kind       TEXT NOT NULL,   -- rule_failure / repetition / source_pick（延迟与事件流归 telemetry）
-    value      TEXT NOT NULL,   -- 档位或对象名（≤120 字，不含聊天正文）
-    count      INTEGER NOT NULL DEFAULT 1,
-    day        TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (user_id, kind, value, day)
-);
--- 38项#22 兴趣源：用户授权的外部信息主题（ feeds=授权清单，items=拉取的素材，
--- 出牌置 used_at；两者均可由用户重新授权/重新拉取重建，不进关系包）。
-CREATE TABLE IF NOT EXISTS interest_feeds (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    keywords    TEXT NOT NULL,          -- 检索关键词（如「星穹铁道 版本资讯」）
-    label       TEXT NOT NULL DEFAULT '', -- 展示名（设置页/导出用）
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    last_pull_at TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL,
-    UNIQUE (user_id, keywords)
-);
-CREATE TABLE IF NOT EXISTS interest_feed_items (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    feed_id     INTEGER NOT NULL,
-    content     TEXT NOT NULL,          -- LLM 压缩后的一条素材（≤80 字）
-    created_at  TEXT NOT NULL,
-    used_at     TEXT,                   -- 主动分享出牌后置位；NULL=未用
-    FOREIGN KEY (feed_id) REFERENCES interest_feeds(id)
-);
-CREATE INDEX IF NOT EXISTS idx_feed_items_unused
-    ON interest_feed_items(user_id, used_at);
 -- D3 共同活动：通用活动壳，首期落地「共读」。
 CREATE TABLE IF NOT EXISTS activities (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -473,30 +389,6 @@ CREATE TABLE IF NOT EXISTS activity_viewpoints (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_viewpoints_activity
     ON activity_viewpoints(user_id, activity_id);
--- M3.3 共同目标：活动壳负责生命周期，目标表保存动机、下一步与陪伴偏好。
-CREATE TABLE IF NOT EXISTS activity_goals (
-    activity_id  INTEGER PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    motivation   TEXT NOT NULL DEFAULT '',
-    next_step    TEXT NOT NULL DEFAULT '',
-    support_mode TEXT NOT NULL DEFAULT 'companion', -- companion / reminder
-    reminder_at  TEXT,
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS goal_progress (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    activity_id INTEGER NOT NULL,
-    content     TEXT NOT NULL,
-    percent     INTEGER,
-    next_step   TEXT NOT NULL DEFAULT '',
-    ts          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_activity_goals_user
-    ON activity_goals(user_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_goal_progress_activity
-    ON goal_progress(user_id, activity_id, ts);
 -- M3.4 共同创作：活动壳负责生命周期，开头设定与轮流正文保存在专属侧表。
 -- 虚构隔离：故事正文只存这里，不进会话历史与记忆提炼；进 prompt 的唯一
 -- 通道是 cowriting.cowriting_context 的虚构声明门控注入。
@@ -517,19 +409,6 @@ CREATE TABLE IF NOT EXISTS writing_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_writing_turns_activity
     ON writing_turns(user_id, activity_id, id);
--- 酒馆同玩：一局结束后的剧情沉淀。剧情是「真回忆」（用户拍板 2026-09-14）：
--- 摘要同时写入长期记忆供 recall 检索；本表保存忠实原文，供回忆注入与追溯。
-CREATE TABLE IF NOT EXISTS tavern_sessions (
-    id          TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL,
-    card_name   TEXT NOT NULL DEFAULT '',
-    summary     TEXT NOT NULL DEFAULT '',
-    turns_json  TEXT NOT NULL DEFAULT '[]',
-    played_at   TEXT NOT NULL,
-    created_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tavern_sessions_user
-    ON tavern_sessions(user_id, played_at);
 -- D9 局势档案：每人格一行的恒定世界快照（派生态，重编译可重建，不进关系包导出）。
 -- state_json 六节 + LLM 压缩段；turn_count 为距上次更新的轮数（触发每10轮刷新）。
 CREATE TABLE IF NOT EXISTS situation_files (
@@ -545,69 +424,8 @@ CREATE TABLE IF NOT EXISTS situation_files (
 -- L12-L14 远程三层骨架已于 2026-09-30 归档删除（tag archive/remote-skeleton-l12-l14）。
 -- 老库中残存的 channel_bindings/channel_inbox/channel_outbox/devices/
 -- push_subscriptions/auth_sessions 表为无害孤儿，不再读写。
--- P3-03 本地声纹（GPT-SoVITS）：人格→模型绑定与素材清单。
--- 素材本体在加密工作区，voice_manifests 只存清单；两者均为运行资产不进关系导出。
-CREATE TABLE IF NOT EXISTS voice_manifests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    path         TEXT NOT NULL,               -- 加密工作区内的参考音频相对路径
-    text         TEXT NOT NULL DEFAULT '',    -- 参考音频的标注文本（prompt_text）
-    lang         TEXT NOT NULL DEFAULT 'zh',
-    sha256       TEXT NOT NULL DEFAULT '',
-    duration_sec REAL NOT NULL DEFAULT 0,
-    created_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS voice_profiles (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    persona_id            TEXT NOT NULL,
-    provider_version      TEXT NOT NULL,      -- 协商固定：实际安装 commit/版本
-    model_hash            TEXT NOT NULL DEFAULT '',
-    reference_manifest_id INTEGER,
-    enabled               INTEGER NOT NULL DEFAULT 1,
-    created_at            TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_voice_profiles_persona ON voice_profiles(persona_id, enabled);
--- M3.4 共同清单（歌单/书单）：活动壳负责生命周期，清单类型与条目在专属侧表。
-CREATE TABLE IF NOT EXISTS activity_lists (
-    activity_id  INTEGER PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    list_kind    TEXT NOT NULL DEFAULT 'song',   -- song / book
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS list_items (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     TEXT NOT NULL,
-    activity_id INTEGER NOT NULL,
-    title       TEXT NOT NULL,
-    creator     TEXT NOT NULL DEFAULT '',
-    note        TEXT NOT NULL DEFAULT '',
-    added_by    TEXT NOT NULL DEFAULT 'user',    -- user / tuzhan
-    ts          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_list_items_activity
-    ON list_items(user_id, activity_id, id);
--- M8「写给未来的我们」：用户亲手写的未来信件。正文是唯一的私密内容，
--- 锁定态（sealed 且条件未达成）绝不离开后端；ready 由查询时按条件确定性计算。
-CREATE TABLE IF NOT EXISTS future_letters (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id       TEXT NOT NULL,
-    title         TEXT NOT NULL DEFAULT '',
-    body          TEXT NOT NULL,                   -- 正文：锁定态任何接口都不返回
-    unlock_type   TEXT NOT NULL,                   -- date / goal / event
-    unlock_at     TEXT,                            -- date：到达时刻（必须晚于创建时间）
-    goal_id       INTEGER,                         -- goal：activities.id（kind='goal'）
-    event_type    TEXT,                            -- event：完成/修复类事件白名单
-    status        TEXT NOT NULL DEFAULT 'sealed',  -- sealed / opened（ready 是计算态不落状态列）
-    unlocked_at   TEXT,                            -- 条件达成落账时间（惰性写、幂等）
-    unlocked_by_event_id INTEGER,                  -- event 类型首次匹配的关系事件 id
-    opened_at     TEXT,
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_future_letters_user
-    ON future_letters(user_id, status, id);
 -- M2 前置最小版：关系事件事实层。本切片只写 reading_finished，
--- 后续事件类型、pending_thoughts 与 Narrative Planner 按 Sprint 2 扩展。
+-- 后续事件类型按 Sprint 2 扩展。
 CREATE TABLE IF NOT EXISTS relationship_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      TEXT NOT NULL,
@@ -626,78 +444,6 @@ CREATE TABLE IF NOT EXISTS relationship_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_events_idem
     ON relationship_events(user_id, event_type, source_id) WHERE status = 'active';
--- M8 第二垂直切片：30/100/365 天关系快照。确定性汇编真实持久数据（不调用
--- LLM），用户显式创建/删除、绝不自动再生；UNIQUE(user_id, snapshot_days)
--- 保证每个里程碑至多一页。
-CREATE TABLE IF NOT EXISTS relationship_snapshots (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id             TEXT NOT NULL,
-    snapshot_days       INTEGER NOT NULL,              -- 30 / 100 / 365
-    start_date          TEXT NOT NULL,                 -- 关系起点（最早 user 消息的本地日期）
-    cutoff_date         TEXT NOT NULL,                 -- start_date + snapshot_days - 1
-    generated_at        TEXT NOT NULL,                 -- 快照整理时刻
-    source_manifest_json TEXT NOT NULL DEFAULT '{}',   -- 来源清单（type/id/date + counts/omitted）
-    rendered_markdown   TEXT NOT NULL,                 -- 模板化正文（只来自真实行）
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL,
-    UNIQUE(user_id, snapshot_days)
-);
-CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_user
-    ON relationship_snapshots(user_id, snapshot_days);
--- M8 第三垂直切片：双视角叙事。同一件真实经历，用户与菟菚各自保留一段解释，
--- 并存不合并；菟菚视角默认由 LLM 基于锚点真实记录生成草稿、经用户确认落库，
--- 也可由用户代填（origin 标记来源）。锚点可空（自由主题）；有锚点时取其
--- 真实记录作生成素材并用于展示跳转，锚点 id 属展示性快照，不参与导出重映射。
-CREATE TABLE IF NOT EXISTS dual_perspectives (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id            TEXT NOT NULL,
-    title              TEXT NOT NULL,               -- 经历标题（用户起名）
-    source_type        TEXT,                        -- event / diary / activity / artifact / free
-    source_id          INTEGER,                     -- 锚点 id（free 为 NULL）
-    source_date        TEXT,                        -- 锚点日期快照（展示用）
-    source_label       TEXT NOT NULL DEFAULT '',    -- 锚点摘要快照（展示与取材说明）
-    user_view          TEXT NOT NULL DEFAULT '',
-    tuzhan_view        TEXT NOT NULL DEFAULT '',
-    tuzhan_view_origin TEXT NOT NULL DEFAULT 'user',  -- llm / user
-    created_at         TEXT NOT NULL,
-    updated_at         TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_dual_perspectives_user
-    ON dual_perspectives(user_id, id);
--- M8.7「不同版本的我们」：用户显式创建的关系版本检查点。snapshot_json 只保存
--- 当时的结构化状态、行为帧白名单与记录计数（format_version=1），绝不保存消息
--- 原文、事实正文、事件 payload 或日记/产物内容；一经创建不可修改，只可删除。
-CREATE TABLE IF NOT EXISTS relationship_versions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    label TEXT NOT NULL,
-    captured_at TEXT NOT NULL,
-    schema_version INTEGER NOT NULL,
-    snapshot_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_relationship_versions_user
-    ON relationship_versions(user_id, captured_at, id);
--- M5 未完成心事：想问但时机不对、想确认的事；只能携带叙事素材，不能带可执行指令。
-CREATE TABLE IF NOT EXISTS pending_thoughts (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id        TEXT NOT NULL,
-    kind           TEXT NOT NULL,     -- resume_reading / confirm_memory
-    source_type    TEXT NOT NULL,     -- activity / fact
-    source_id      INTEGER NOT NULL,
-    content        TEXT NOT NULL,     -- 叙事素材（她惦记的事，自然语言）
-    earliest_at    TEXT NOT NULL,     -- 最早可表达时间（Narrative Planner 门控）
-    expires_at     TEXT,              -- 过期即放弃
-    priority       INTEGER NOT NULL DEFAULT 5,  -- 1-9，小=优先
-    max_attempts   INTEGER NOT NULL DEFAULT 2,
-    attempts       INTEGER NOT NULL DEFAULT 0,
-    last_attempt_at TEXT,
-    status         TEXT NOT NULL DEFAULT 'pending',  -- pending / expressed / dismissed
-    created_at     TEXT NOT NULL,
-    UNIQUE(user_id, kind, source_id)
-);
-CREATE INDEX IF NOT EXISTS idx_pending_thoughts_user
-    ON pending_thoughts(user_id, status, earliest_at);
 -- M2 前置最小版：可保存的共同产物（首批：共读共同书摘）。
 CREATE TABLE IF NOT EXISTS artifacts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -713,20 +459,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
     status        TEXT NOT NULL DEFAULT 'active',
     UNIQUE (user_id, artifact_type, source_id)
 );
--- C4 好感度玩法闭环：解锁时刻（阈值跨越/彩蛋）队列与收集
-CREATE TABLE IF NOT EXISTS unlocks (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      TEXT NOT NULL,
-    key          TEXT NOT NULL,     -- UNLOCK_DEFS.key（如 stage_lover / easter_streak7）
-    kind         TEXT NOT NULL,     -- stage / bond / easter
-    title        TEXT NOT NULL,
-    anchors      TEXT NOT NULL,     -- JSON 数组：内容锚点（注入 LLM 的要点）
-    enqueued_at  TEXT NOT NULL,
-    delivered_at TEXT,              -- NULL = 待说出口（pending）
-    content      TEXT,              -- 说出口那轮她说的话（摘要）
-    UNIQUE (user_id, key)           -- 同 key 一生只解锁一次
-);
-CREATE INDEX IF NOT EXISTS idx_unlocks_user ON unlocks(user_id, delivered_at);
 -- P1-02 语境注册表生命周期：按成功提交的 turn 记 sticky/cooldown（运行态，
 -- 不导出；user_id 已含人格 scope，天然按人格隔离）。
 CREATE TABLE IF NOT EXISTS context_lifecycle (
@@ -852,41 +584,6 @@ CREATE TABLE IF NOT EXISTS greeting_variant_usage (
     last_source_id TEXT,
     PRIMARY KEY (user_id, variant_id)
 );
--- G03 悬念/开放问题：用户明确要求「有结果告诉我」的事；7 天到期、最多 2 次
--- 复查、间隔 24h；last_evidence_hash 只存证据条目规范化哈希，不存模型叙述。
-CREATE TABLE IF NOT EXISTS open_questions (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id            TEXT NOT NULL,
-    source_message_id  INTEGER,
-    topic              TEXT NOT NULL,
-    topic_key          TEXT NOT NULL,           -- 规范化主题（同主题幂等）
-    status             TEXT NOT NULL DEFAULT 'open',  -- open/researching/resolved/dismissed/expired
-    next_check_at      TEXT,
-    expires_at         TEXT NOT NULL,
-    attempts           INTEGER NOT NULL DEFAULT 0,
-    last_evidence_hash TEXT,
-    created_at         TEXT NOT NULL,
-    updated_at         TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_open_questions_user
-    ON open_questions(user_id, status, next_check_at);
--- G04 她的求助/愿望：亲密与信任双门槛达标时，她偶尔请对方帮个小忙
--- （挑歌/挑书）。候选经主动仲裁投递，24h 未回应过期不再问；接受只写
--- 角色虚构产物，与现实承诺账分离。
-CREATE TABLE IF NOT EXISTS companion_requests (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id             TEXT NOT NULL,
-    life_event_id       INTEGER,
-    kind                TEXT NOT NULL,           -- song_choice / book_choice
-    status              TEXT NOT NULL DEFAULT 'candidate',  -- candidate/offered/accepted/declined/expired
-    offered_at          TEXT,
-    expires_at          TEXT,
-    response_message_id INTEGER,
-    created_at          TEXT NOT NULL,
-    updated_at          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_companion_requests_user
-    ON companion_requests(user_id, status);
 -- F03 心事注入回执（runtime，不导出）：记录某轮把哪条心事作为语境选中
 -- （selected）或确认被采用（committed）；唯一三元组，不存模型全文。
 CREATE TABLE IF NOT EXISTS thought_context_receipts (
@@ -919,7 +616,7 @@ CREATE INDEX IF NOT EXISTS idx_humor_usage_user
 CREATE TABLE IF NOT EXISTS source_links (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        TEXT NOT NULL,
-    owner_type     TEXT NOT NULL,   -- diary / research / promise / artifact
+    owner_type     TEXT NOT NULL,   -- diary / promise / artifact
     owner_id       INTEGER NOT NULL,
     source_type    TEXT NOT NULL,   -- event / activity / fact / knowledge / character_life
     source_id      INTEGER NOT NULL,
@@ -1135,22 +832,7 @@ def _locked(method):
 
 # P3-3：级联触发器单独成常量——UserDB.reset() 的「删文件重建」分支此前只跑
 # _SCHEMA 不跑本脚本，同进程 reset 后删产物/事件不再级联清理（重启才恢复）。
-_TRIGGERS_SQL = """
-CREATE TRIGGER IF NOT EXISTS room_artifact_deleted AFTER DELETE ON artifacts BEGIN
-  DELETE FROM artifact_placements WHERE user_id=OLD.user_id AND artifact_id=OLD.id;
-  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='artifact' AND source_id=OLD.id;
-END;
-CREATE TRIGGER IF NOT EXISTS room_event_deleted AFTER DELETE ON relationship_events BEGIN
-  DELETE FROM artifacts WHERE user_id=OLD.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=OLD.id;
-END;
-CREATE TRIGGER IF NOT EXISTS room_event_invalidated AFTER UPDATE OF status ON relationship_events
-WHEN NEW.status!='active' BEGIN
-  DELETE FROM artifacts WHERE user_id=NEW.user_id AND artifact_type='relationship_object' AND source_type='relationship_event' AND source_id=NEW.id;
-END;
-CREATE TRIGGER IF NOT EXISTS aesthetic_opinion_deleted AFTER DELETE ON knowledge_opinions BEGIN
-  DELETE FROM aesthetic_preferences WHERE user_id=OLD.user_id AND source_type='knowledge_opinion' AND source_id=OLD.id;
-END;
-"""
+_TRIGGERS_SQL = ""
 
 
 class UserDB:
@@ -1264,16 +946,6 @@ class UserDB:
         ):
             if column not in policy_columns:
                 self.conn.execute(f"ALTER TABLE memory_policy ADD COLUMN {column} {definition}")
-        # v41：页面变化与“已通知”分离。旧库已有 last_hash 视为已建立且已通知的
-        # 基线，避免升级后把历史页面误报为一次新变化。
-        watch_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(watches)")}
-        if "last_notified_hash" not in watch_columns:
-            self.conn.execute(
-                "ALTER TABLE watches ADD COLUMN last_notified_hash TEXT NOT NULL DEFAULT ''"
-            )
-            self.conn.execute(
-                "UPDATE watches SET last_notified_hash=last_hash WHERE last_hash<>''"
-            )
         # 兼容旧库：补上 style_profile 列
         try:
             self.conn.execute("ALTER TABLE users ADD COLUMN style_profile TEXT")
@@ -1488,24 +1160,12 @@ class UserDB:
             )
         self.conn.execute("DELETE FROM diary WHERE user_id = ?", (legacy,))
 
-        # research_reports：period 在同一用户内唯一，目标侧已有则保留目标。
-        legacy_reports = self.conn.execute(
-            "SELECT period, title, content, ts FROM research_reports WHERE user_id = ?", (legacy,)
-        ).fetchall()
-        for report in legacy_reports:
-            self.conn.execute(
-                "INSERT OR IGNORE INTO research_reports (user_id, period, title, content, ts) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (target, report["period"], report["title"], report["content"], report["ts"]),
-            )
-        self.conn.execute("DELETE FROM research_reports WHERE user_id = ?", (legacy,))
-
         # 其余「纯 append」表：直接把 user_id 改挂 target（无唯一约束冲突风险）
         for table in (
             "messages", "long_memory", "facts", "affection_log", "important_dates",
             "mood_log", "stickers", "user_profile", "user_terms", "user_style_map", "triples", "tasks",
             "promises", "usage_log", "kb_documents", "kb_chunks", "activities", "activity_notes",
-            "activity_goals", "goal_progress", "profile_evolution_log", "her_statements",
+            "profile_evolution_log", "her_statements",
         ):
             self.conn.execute(
                 f"UPDATE {table} SET user_id = ? WHERE user_id = ?", (target, legacy)
@@ -1775,73 +1435,6 @@ class UserDB:
             (user_id, start.isoformat(), end.isoformat()),
         ).fetchall()
 
-    # ---- 38项#22 兴趣源 ----
-    @_locked
-    def add_interest_feed(self, user_id: str, keywords: str, label: str = "") -> int | None:
-        """登记一个授权兴趣源；关键词重复返回 None。"""
-        cur = self.conn.execute(
-            "INSERT OR IGNORE INTO interest_feeds (user_id, keywords, label, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, keywords.strip()[:60], label.strip()[:40], datetime.now().isoformat(timespec="seconds")),
-        )
-        self.conn.commit()
-        return cur.lastrowid if cur.rowcount else None
-
-    def list_interest_feeds(self, user_id: str, *, only_enabled: bool = False) -> list:
-        sql = "SELECT id, keywords, label, enabled, last_pull_at, created_at FROM interest_feeds WHERE user_id=?"
-        if only_enabled:
-            sql += " AND enabled=1"
-        with self._lock:
-            return self.conn.execute(sql + " ORDER BY id", (user_id,)).fetchall()
-
-    @_locked
-    def remove_interest_feed(self, user_id: str, feed_id: int) -> bool:
-        cur = self.conn.execute(
-            "DELETE FROM interest_feeds WHERE user_id=? AND id=?", (user_id, feed_id)
-        )
-        self.conn.execute(
-            "DELETE FROM interest_feed_items WHERE user_id=? AND feed_id=?", (user_id, feed_id)
-        )
-        self.conn.commit()
-        return bool(cur.rowcount)
-
-    @_locked
-    def set_feed_pulled(self, feed_id: int) -> None:
-        self.conn.execute(
-            "UPDATE interest_feeds SET last_pull_at=? WHERE id=?",
-            (datetime.now().isoformat(timespec="seconds"), feed_id),
-        )
-        self.conn.commit()
-
-    @_locked
-    def add_feed_items(self, user_id: str, feed_id: int, contents: list[str]) -> int:
-        now = datetime.now().isoformat(timespec="seconds")
-        self.conn.executemany(
-            "INSERT INTO interest_feed_items (user_id, feed_id, content, created_at) VALUES (?, ?, ?, ?)",
-            [(user_id, feed_id, c[:80], now) for c in contents],
-        )
-        self.conn.commit()
-        return len(contents)
-
-    def unused_feed_items(self, user_id: str, *, max_age_days: int = 5, limit: int = 3) -> list:
-        """未分享且仍在保鲜期内的素材（出牌候选）。"""
-        with self._lock:
-            return self.conn.execute(
-                "SELECT i.id, i.content, f.keywords FROM interest_feed_items i "
-                "JOIN interest_feeds f ON f.id = i.feed_id "
-                "WHERE i.user_id=? AND i.used_at IS NULL "
-                "AND date(i.created_at) >= date('now', ?) ORDER BY i.id LIMIT ?",
-                (user_id, f"-{int(max_age_days)} days", limit),
-            ).fetchall()
-
-    @_locked
-    def mark_feed_item_used(self, user_id: str, item_id: int) -> None:
-        self.conn.execute(
-            "UPDATE interest_feed_items SET used_at=? WHERE user_id=? AND id=?",
-            (datetime.now().isoformat(timespec="seconds"), user_id, item_id),
-        )
-        self.conn.commit()
-
     # ---- long memory ----
     @_locked
     def add_long_memory(self, user_id: str, content: str, pinned: bool = False) -> int:
@@ -1878,71 +1471,6 @@ class UserDB:
             )
             self.conn.commit()
         return removed
-
-    # ---- manager memories（P0-1：fallback 管理记忆的权威副本 ----
-    # Mem0 降级期的记忆此前只写 Chroma mem 分区，任何 rebuild 都会整库删除
-    # 且 migrate 不重灌 → 永久丢失。现在 SQLite 是权威源，向量只做检索索引。
-    @_locked
-    def save_manager_memory(self, user_id: str, rid: int, content: str,
-                            importance: float = 0.5, created_at: str | None = None) -> bool:
-        try:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO manager_memories "
-                "(user_id, rid, content, importance, created_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, int(rid), content, float(importance),
-                 created_at or datetime.now().isoformat(timespec="seconds")),
-            )
-            self.conn.commit()
-            return True
-        except Exception as exc:
-            logger.warning("[userdb] 管理记忆落库失败：{} rid={}：{}", user_id, rid, exc)
-            return False
-
-    @_locked
-    def list_manager_memory_rows(self, user_id: str) -> list:
-        """按创建时间升序返回该用户的全部管理记忆（rid/content/importance/created_at）。"""
-        return self.conn.execute(
-            "SELECT rid, content, importance, created_at FROM manager_memories "
-            "WHERE user_id=? ORDER BY created_at, rid",
-            (user_id,),
-        ).fetchall()
-
-    @_locked
-    def manager_memory_existing_rids(self, user_id: str, rids: list[int]) -> set[int]:
-        """权威存在性闸门：返回 rids 中在表内仍存在的子集（检索过滤向量孤儿用）。"""
-        if not rids:
-            return set()
-        marks = ",".join("?" for _ in rids)
-        rows = self.conn.execute(
-            f"SELECT rid FROM manager_memories WHERE user_id=? AND rid IN ({marks})",
-            (user_id, *[int(r) for r in rids]),
-        ).fetchall()
-        return {r["rid"] for r in rows}
-
-    @_locked
-    def delete_manager_memory(self, user_id: str, rids: list[int]) -> int:
-        if not rids:
-            return 0
-        marks = ",".join("?" for _ in rids)
-        cur = self.conn.execute(
-            f"DELETE FROM manager_memories WHERE user_id=? AND rid IN ({marks})",
-            (user_id, *[int(r) for r in rids]),
-        )
-        self.conn.commit()
-        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-
-    @_locked
-    def clear_manager_memories(self, user_id: str) -> int:
-        cur = self.conn.execute(
-            "DELETE FROM manager_memories WHERE user_id=?", (user_id,)
-        )
-        self.conn.commit()
-        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-
-    @_locked
-    def count_manager_memory_rows(self) -> int:
-        """全部用户的管理记忆总数（migration 增量判定用）。"""
-        return int(self.conn.execute("SELECT COUNT(*) AS c FROM manager_memories").fetchone()["c"])
 
     @_locked
     def search_long_memory(self, user_id: str, query: str, top_k: int):
@@ -2543,32 +2071,26 @@ class UserDB:
             for table in (
                 "affection_log", "long_memory", "facts", "user_meta", "messages",
                 "users", "kv_store", "important_dates", "stickers",
-                "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
+                "user_profile", "user_terms", "user_style_map", "diary", "triples",
                 "tasks", "promises", "usage_log", "activity_notes", "activities",
-                "activity_viewpoints", "activity_goals", "goal_progress",
-                "activity_writings", "writing_turns", "activity_lists", "list_items",
+                "activity_viewpoints",
+                "activity_writings", "writing_turns",
                 "relationship_events", "artifacts", "context_lifecycle",
                 "shared_resources", "resource_grants",
-                "persona_evolution_log", "experience_metrics",
+                "persona_evolution_log",
                 "profile_evolution_log", "her_statements",
-                "learning_candidates", "watches",
+                "learning_candidates",
                 "character_life_events", "job_runs",
                 "relationship_dimension_ledger", "relationship_style_evidence",
                 "memory_policy", "memory_annotations", "first_occurrences",
                 "user_preferences", "event_chains", "reunion_arcs",
-                "greeting_variant_usage", "open_questions", "companion_requests",
+                "greeting_variant_usage",
                 "thought_context_receipts", "humor_usage", "source_links", "wrapup_outbox", "reading_segments", "reading_bookmarks", "activity_draft_receipts",
                 "document_segments", "document_import_jobs", "observation_entries",
                 "domain_trust_events", "domain_trust_snapshot",
-                "aesthetic_preferences", "artifact_placements",
                 "knowledge_opinion_sources", "knowledge_opinions",
-                "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
-                "relationship_versions",
-                "kb_documents", "kb_chunks", "unlocks", "mood_log",
-                "tavern_sessions",
+                "kb_documents", "kb_chunks", "mood_log",
                 "situation_files",
-                "interest_feeds", "interest_feed_items",
-                "voice_profiles", "voice_manifests",
             ):
                 self.conn.execute(f"DELETE FROM {table}")
         self.conn.commit()
@@ -3167,7 +2689,7 @@ def kv_del(user_id: str, key: str) -> bool:
         return cur.rowcount > 0
 
 
-# ---- diary / research_reports（C2：私人日记与阶段研究报告）----
+# ---- diary（C2：私人日记）----
 
 
 def save_diary(user_id: str, day: str, content: str, mood: str = "") -> int | None:
@@ -3206,31 +2728,3 @@ def list_diaries(user_id: str, limit: int = 60) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def save_research_report(user_id: str, period: str, title: str, content: str) -> int | None:
-    content = content.strip()
-    if not content:
-        return None
-    with db._lock:
-        db.conn.execute(
-            "INSERT OR IGNORE INTO research_reports (user_id, period, title, content, ts) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (
-                user_id, period[:32], title.strip()[:80] or "观察人类：阶段记录",
-                content[:2400], datetime.now().isoformat(timespec="seconds"),
-            ),
-        )
-        row = db.conn.execute(
-            "SELECT id FROM research_reports WHERE user_id = ? AND period = ?", (user_id, period[:32])
-        ).fetchone()
-        db.conn.commit()
-        return int(row["id"]) if row else None
-
-
-def list_research_reports(user_id: str, limit: int = 24) -> list[dict]:
-    with db._lock:
-        rows = db.conn.execute(
-            "SELECT id, period, title, content, ts FROM research_reports WHERE user_id = ? "
-            "ORDER BY id DESC LIMIT ?",
-            (user_id, max(1, min(100, int(limit)))),
-        ).fetchall()
-    return [dict(row) for row in rows]

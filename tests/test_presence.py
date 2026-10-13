@@ -1,4 +1,4 @@
-"""L08 unified VisualState derives from existing state, schedule and focus owners."""
+"""L08 unified VisualState derives from existing state and schedule owners."""
 from __future__ import annotations
 
 import os
@@ -24,8 +24,7 @@ def main() -> None:
     db.ensure_user(uid)
     now = datetime(2026, 9, 9, 15, 0).astimezone()
     profile = {"id": "p-one", "motion_enabled": True}
-    with patch.object(presence, "focus_in_progress", return_value=False), \
-         patch.object(presence, "active_profile", return_value=profile):
+    with patch.object(presence, "active_profile", return_value=profile):
         view = presence.visual_state(uid, now=now, persona_id="p-one", profile=profile)
     assert set(view) == {"persona_id", "revision", "mood_label", "bond_label", "energy_band",
                          "activity_kind", "presence", "quiet", "reduced_motion", "source_time"}
@@ -33,20 +32,14 @@ def main() -> None:
     assert view["presence"] == "home" and not view["quiet"] and not view["reduced_motion"]
     assert isinstance(view["revision"], int) and "prompt" not in str(view).lower()
 
-    with patch.object(presence, "focus_in_progress", return_value=True):
-        focused = presence.visual_state(uid, now=now, persona_id="p-one", profile=profile)
-    assert focused["presence"] == "focus" and focused["quiet"]
-
-    with patch("backend.core.life_templates.active_outing", return_value={"description": "去城里转转"}), \
-         patch.object(presence, "focus_in_progress", return_value=False):
+    with patch("backend.core.life_templates.active_outing", return_value={"description": "去城里转转"}):
         away = presence.visual_state(uid, now=now, persona_id="p-one", profile=profile)
         assert away["presence"] == "announced_offline"
         assert presence.current_presence(uid, now=now) == "announced_offline"
 
     ephemeral_uid = "presence-readonly-new-user"
     assert db.get_user(ephemeral_uid) is None
-    with patch("backend.core.life_templates.active_outing", return_value=None), \
-         patch.object(presence, "focus_in_progress", return_value=False):
+    with patch("backend.core.life_templates.active_outing", return_value=None):
         assert presence.current_presence(ephemeral_uid, now=now) == "home"
     assert db.get_user(ephemeral_uid) is None, "presence 只读不得为临时对话创建用户"
 

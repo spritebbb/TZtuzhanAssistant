@@ -9,15 +9,28 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 ROOT = Path(__file__).resolve().parents[1]
+# 仓库根的 .venv；git worktree 不会自带 .venv（虚拟环境不随 worktree 复制），
+# 那时退回当前解释器——否则整份测试会因为「目录不对」而红，红的还不是被测行为。
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
-UTC = timezone.utc
-AT = datetime(2026, 9, 7, 13, 0, 0, tzinfo=UTC)  # 周一 13:00 UTC = 本地 21:00
+if not PY.exists():
+    PY = Path(sys.executable)
+# 锚点必须是**本地时刻**：2026-09-07（周一）本地 21:00。
+#
+# 早前写成固定 UTC 时刻（13:00Z），等于偷偷假设本机时区是 UTC+8——CI runner 跑在
+# UTC 上时它就变成本地 13:00，推进 3 小时不跨本地午夜，下面的素材条数断言随之
+# 失败（events 1 vs 期望 2）。
+#
+# 也不能靠改进程时区来固定：Windows 的 CRT 在进程启动时就把时区缓存了，运行时
+# 赋值 os.environ["TZ"] 无效（实测 offset 不变）；而且它只认 POSIX 写法
+# （JST-9 生效，Asia/Tokyo 被忽略）。所以解法是把「本地 21:00」直接表达进测试
+# 数据，而不是去动环境。这样在任何时区的机器上都是同一个本地时刻。
+AT = datetime(2026, 9, 7, 21, 0, 0).astimezone()
 
 
 def _event_count(uid: str) -> int:
@@ -124,7 +137,6 @@ def test_midnight_block_spanning() -> int:
 
 def _spawn_tick(data_root: Path, at: datetime, extra: list[str] | None = None) -> dict:
     env = os.environ.copy()
-    env["FEATURE_TELEMETRY_ENABLED"] = "1"
     proc = subprocess.run(
         [str(PY), "-X", "utf8", "-m", "backend.maintenance.time_tick",
          "--data-root", str(data_root), "--at", at.isoformat(), "--json",
@@ -161,17 +173,6 @@ def test_subprocess_race_single_claim() -> int:
     back = _spawn_tick(data_root, AT + timedelta(minutes=15), args)
     assert back.get("succeeded", 0) == 0, back
 
-    telemetry = sqlite3.connect(data_root / "telemetry.db")
-    rows = telemetry.execute(
-        "SELECT event_name,job_run_id,outcome FROM telemetry_events "
-        "WHERE event_name IN ('job_started','job_finished') ORDER BY id"
-    ).fetchall()
-    telemetry.close()
-    expected_id = f"time_tick:{AT.isoformat().replace('+00:00', 'Z')}"
-    assert rows == [
-        ("job_started", expected_id, "started"),
-        ("job_finished", expected_id, "success"),
-    ], rows
     print("[OK] 真实双子进程竞争恰好认领一次 / 重复与回拨零增量")
     return 0
 

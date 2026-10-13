@@ -25,7 +25,6 @@ _write_lock = threading.Lock()
 # 配置管理，不在这个仅有内部写端、尚无 UI 的动态开关表中重复维护。
 FLAG_DEFAULTS = {
     "compact_ui_enabled": True,
-    "aesthetics_enabled": os.getenv("FEATURE_AESTHETICS_ENABLED", "1").lower() not in {"0", "false", "off"},
     "memory_lifecycle_enabled": os.getenv("FEATURE_MEMORY_LIFECYCLE_ENABLED", "1").lower()
         not in {"0", "false", "off"},
     "memory_salience_enabled": os.getenv("FEATURE_MEMORY_SALIENCE_ENABLED", "1").lower()
@@ -37,24 +36,16 @@ FLAG_DEFAULTS = {
     # 岗位三：她的自述记忆——daily 提取她的第一人称自述，矛盾双条并存，
     # 话题相关时提示一次交人格演绎（不自动取代、不反复盘问）。
     "her_statements_enabled": True,
-    # 38项#23 事件感：每日一条外部世界摘要进问候素材池（web_search+小 LLM
-    # 压缩，常驻循环 kv 幂等，成本闸保护）。2026-09-30 用户拍板默认开。
-    "news_digest_enabled": True,
     # 38项#26 平淡时刻入账：daily 批次 LLM 提取平淡但有记头的当日事项，
     # 写 facts 新 source_type=plain_moment（低 confidence + 短保留期），
     # 不进情绪档案。2026-09-30 用户拍板（LLM 提取，默认开）。
     "plain_moments_enabled": True,
-    # 38项#22 外部素材管线：用户授权的兴趣源定期拉外部内容进主动素材池，
-    # 经统一仲裁低频分享（necessity 门槛高于心事/约定）。2026-09-30 默认开
-    #（授权与 #23 事件感同性质：有授权域、成本闸保护）。
-    "interest_feeds_enabled": True,
     # P0-01A：用户可见回复在发送/持久化前统一检查。实现与测试已稳定
     # （P3 验收 + test_output_hygiene.py），设置页有开关入口，默认开启；
     # 关闭时 pipeline 保持旧流式契约。
     "output_hygiene_enabled": True,
-    # P1-02：语境注册表接管共同清单语境（首期唯一 provider）。实现与测试
-    # 已稳定（test_context_registry.py），设置页有开关入口，默认开启；
-    # 关闭时走 colists.list_context 旧路径；两条路径互斥，不会双注入。
+    # P1-02：语境注册表统一管理注入对话的语境来源（知识观点/项目上下文）。
+    # 实现与测试已稳定，设置页有开关入口，默认开启；关闭时本轮不注入语境。
     "context_registry_enabled": True,
     # L06：低频生活模板池（她低频出门/换活动）。用户拍板（2026-09-08）：
     # 接主动候选源、概率 0.25、用户意见可取消、出门可沉默但事件/状态行
@@ -66,45 +57,20 @@ FLAG_DEFAULTS = {
     # F01：基于真实素材的问候与变体池。关闭后问候退回旧素材逻辑（离线叙事
     # 与兜底池），不破坏原 gap 门控与并发去重；不选变体、不记冷却。
     "greeting_material_enabled": True,
-    # G04：她的求助与愿望（亲密+信任双门槛时偶尔请对方帮个小忙）。关闭后
-    # 不再生成候选；已发出的请求仍可回应，已接受的产物保留。
-    "companion_requests_enabled": True,
     # L04：幽默记忆（梗的授权/冷却/退役）。关闭后不再选梗注入，既有共同
     # 语言注入行为不变；反馈与退役仍可登记（不影响用户主权操作）。
     "humor_memory_enabled": True,
-    # F04：专注收尾人格化与可重试投递。关闭后完成专注不再入箱，原计时与
-    # 完成流程不变（退回原文案语义）。
-    "focus_wrapup_enabled": True,
     # F06：聊天意图自动预填草稿。关闭后不再产草稿，原手动创建入口保留。
     "activity_drafts_enabled": True,
-    # P3-05B：本地质量统计（延迟/失败规则/重复率/来源选择/明确反馈计数）。
-    # 默认本地记录、可关可清；临时轮不写；不属于关系包。
-    "experience_metrics_enabled": os.getenv("FEATURE_EXPERIENCE_METRICS_ENABLED", "1").lower()
-        not in {"0", "false", "off"},
-    # Q3：本地最小遥测与来源链。关闭后立即停止新记录，已有数据可单独清理。
-    "telemetry_enabled": os.getenv("FEATURE_TELEMETRY_ENABLED", "1").lower()
-        not in {"0", "false", "off"},
     # L16：可选择共享知识。默认全部隔离；只有用户明确「分享给某角色」才生效。
     "shared_resources_enabled": os.getenv("FEATURE_SHARED_RESOURCES_ENABLED", "1").lower()
         not in {"0", "false", "off"},
     # D1：场景化表达观察（user_style_map 复活）。关闭后停止注入已观察到的
     # 表达习惯；提炼与用户主权操作（查看/删除）不受影响。
     "style_map_enabled": True,
-    # 酒馆同玩（SillyTavern「菟菚同伴」扩展点名她说话）。关闭后 /api/tavern/*
-    # 一律 403；卡/世界书素材的不可信包裹与裁决规则不依赖本开关。
-    "tavern_enabled": True,
-    # D12 主动意愿 roll：necessity 达标的主动候选再掷一次「她想不想说」；
-    # 硬规则源（约定到点等）与用户直接对话永不进骰子。关闭后回到纯 necessity 门。
-    "willingness_enabled": True,
     # D9 局势档案：≤2.5k tokens 恒定世界快照常驻注入（目标/约定/悬念/近事件/
     # 生活/焦点），钩子不靠检索命中。派生态可随时重编译重建；关闭时整层退场。
     "situation_enabled": True,
-    # D11 离线补算：重开后把她离线期间照常过的日子逐条说给你（可跳过）；
-    # 确定性重放真实行程，超限降级摘要，开场一句才用 LLM。
-    "offline_recap_enabled": True,
-    # P3-03 本地语音（GPT-SoVITS）：当前人格有启用声纹且能力协商成功时优先
-    # 用本地合成，任何一步不满足显式回退 edge-tts。默认关，装好服务再开。
-    "local_tts_enabled": False,
 }
 
 

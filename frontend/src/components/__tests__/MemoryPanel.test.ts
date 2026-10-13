@@ -20,7 +20,6 @@ import {
 } from '../../api/memory'
 import MemoryPanel from '../MemoryPanel.vue'
 
-vi.mock('../RoomPanel.vue', () => ({ default: { template: '<section aria-label="共同审美" />' } }))
 vi.mock('../../api/memory', () => ({
   getFacts: vi.fn(),
   updateFact: vi.fn(),
@@ -41,9 +40,6 @@ vi.mock('../../api/relationship', () => ({
   exportRelationshipUrl: vi.fn(() => '/api/relationship/export'),
   previewRestore: vi.fn(),
   restoreRelationship: vi.fn(),
-  previewSeal: vi.fn(),
-  sealMemories: vi.fn(),
-  sealFileName: vi.fn((at: string) => `sealing-${(at || '').slice(0, 10) || 'bundle'}.json`),
 }))
 
 const fact: FactItem = {

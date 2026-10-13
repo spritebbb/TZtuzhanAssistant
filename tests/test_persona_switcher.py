@@ -17,7 +17,6 @@ async def main() -> None:
         os.environ["TZTUZHAN_DATA_DIR"] = tmp
         os.environ["PERSONA_FILE"] = str(ROOT / "persona-菟菚.md")
         os.environ["MEMORY_V2"] = "0"
-        os.environ["MEMORY_MEM0"] = "0"
 
         from backend.core import persona_profiles as profiles
         from backend.core import persona as persona_runtime

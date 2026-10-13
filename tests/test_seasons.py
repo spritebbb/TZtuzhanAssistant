@@ -110,9 +110,8 @@ def _test_priority_and_reasons() -> None:
     print("[OK] 季节优先级：修复>庆祝>创作>忙碌>沉淀，理由均可追溯到真实信号")
 
 
-async def _test_pipeline_and_explanation() -> None:
+async def _test_pipeline_user_last() -> None:
     from backend.core import pipeline
-    from backend.core.explainability import build_reply_explanation
 
     # 行为帧：季节行参与 compose
     from backend.core.behavior import build_behavior_frame
@@ -123,7 +122,7 @@ async def _test_pipeline_and_explanation() -> None:
     frame = build_behavior_frame(state, season_line=current_season(UID, state)["line"])
     assert "不追问" in frame.compose()
 
-    # pipeline：user 消息在最后 + 解释快照带季节与理由
+    # pipeline：user 消息在最后
     captured: dict = {}
 
     async def fake_chat(messages, **kwargs):
@@ -137,20 +136,12 @@ async def _test_pipeline_and_explanation() -> None:
     finally:
         pipeline.chat = original_chat
     assert captured["messages"][-1]["role"] == "user"
-
-    season = current_season(UID, _State(), today=TODAY)
-    snapshot = build_reply_explanation(
-        state,
-        frame,
-        memory_rows=[("关系季节", f"{season['label']}（{season['reason']}）")],
-    )
-    assert any(item["kind"] == "关系季节" for item in snapshot["memories"])
-    print("[OK] pipeline/解释快照：季节可解释（含理由），user 仍在最后")
+    print("[OK] pipeline：季节行参与行为帧，user 仍在最后")
 
 
 async def main() -> None:
     _test_priority_and_reasons()
-    await _test_pipeline_and_explanation()
+    await _test_pipeline_user_last()
     print("\n=== M4 关系季节：全部通过 ===")
 
 

@@ -14,8 +14,6 @@ import KnowledgePanel from './components/KnowledgePanel.vue'
 import TourPanel from './components/TourPanel.vue'
 import MemoryPanel from './components/MemoryPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
-import TavernPanel from './components/TavernPanel.vue'
-import DashboardPanel from './components/DashboardPanel.vue'
 import ActivityPanel from './components/ActivityPanel.vue'
 import CornerPanel from './components/CornerPanel.vue'
 import PersonaSwitcher from './components/PersonaSwitcher.vue'
@@ -24,12 +22,8 @@ import { ensureBaseUrl, apiFetch } from './api'
 import { getLockStatus, lockNow, type LockStatus } from './api/lock'
 import { CURRENT_SESSION_ID, archiveCurrent, resetUser } from './api/sessions'
 import { listPersonas, updatePersona, type PersonaProfile } from './api/personas'
-import { useFocusMode } from './utils/focusMode'
 import { refreshVisualState, startVisualState, stopVisualState, switchVisualPersona, visualRecentEvents, visualState, visualQuiet } from './state/visualState'
 import { activeDialog, focusFirst, trapDialogTab } from './utils/dialogFocus'
-
-// M3.2 专注陪伴：全局计时与安静模式（body.focus-mode），应用存活期内持续对表
-const focusMode = useFocusMode()
 
 const settingsOpen = ref(false)
 const agentOpen = ref(false)
@@ -38,8 +32,6 @@ const knowledgeOpen = ref(false)
 const memoryOpen = ref(false)
 const cornerOpen = ref(false)
 const usageOpen = ref(false)
-const tavernOpen = ref(false)
-const dashboardOpen = ref(false)
 const activityOpen = ref(false)
 const sidebarOpen = ref(false)
 const personaOpen = ref(false)
@@ -135,16 +127,6 @@ function onNotify(e: Event) {
 const theme = ref<'dark' | 'light'>('dark')
 const themeStorageKey = 'tztuzhan-theme'
 
-// 专注计时徽章（mm:ss；暂停时显示暂停态）
-const focusClockText = computed(() => {
-  const session = focusMode.current.value
-  if (!session) return ''
-  const total = focusMode.remainingSec.value
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return focusMode.paused.value ? `已暂停 ${mm}:${ss}` : `${mm}:${ss}`
-})
-
 // === 主题切换（暗色/亮色；未手动选择时按昼夜自动：7-19 点亮色温室，夜晚暗色月光） ===
 function loadTheme() {
   try {
@@ -178,7 +160,7 @@ watch(theme, (t) => applyTheme(t, false), { immediate: false })
 // === 键盘快捷键 ===
 const dialogFlags = () => [
   settingsOpen.value, agentOpen.value, diaryOpen.value, knowledgeOpen.value,
-  memoryOpen.value, cornerOpen.value, usageOpen.value, dashboardOpen.value,
+  memoryOpen.value, cornerOpen.value, usageOpen.value,
   activityOpen.value, personaOpen.value, moreOpen.value, tourOpen.value,
   resetOpen.value,
 ]
@@ -208,7 +190,6 @@ function closeDialogs() {
   diaryOpen.value = false
   memoryOpen.value = false
   usageOpen.value = false
-  dashboardOpen.value = false
   activityOpen.value = false
   cornerOpen.value = false
   knowledgeOpen.value = false
@@ -250,12 +231,12 @@ function openBookshelfFromActivity() {
 }
 
 const moreTools = [
-  { id: 'dashboard', label: '成长总览' }, { id: 'diary', label: '日记' },
+  { id: 'diary', label: '日记' },
   { id: 'memory', label: '记忆与了解她' }, { id: 'corner', label: '我们的角落' },
   { id: 'usage', label: '用量账本' }, { id: 'knowledge', label: '书架' },
   { id: 'agent', label: '任务代理' }, { id: 'archive', label: '归档当前对话' },
   { id: 'theme', label: '切换主题' }, { id: 'motion', label: '切换动效' },
-  { id: 'tour', label: '能力演示' }, { id: 'tavern', label: '酒馆同玩' },
+  { id: 'tour', label: '能力演示' },
   { id: 'settings', label: '设置' }, { id: 'reset', label: '重新开始' },
 ]
 const recentToolIds = ref<string[]>([])
@@ -277,12 +258,10 @@ function useMoreTool(id: string) {
   rememberTool(id)
   moreOpen.value = false
   moreQuery.value = ''
-  if (id === 'dashboard') dashboardOpen.value = true
-  else if (id === 'diary') diaryOpen.value = true
+  if (id === 'diary') diaryOpen.value = true
   else if (id === 'memory') memoryOpen.value = true
   else if (id === 'corner') cornerOpen.value = true
   else if (id === 'usage') usageOpen.value = true
-  else if (id === 'tavern') tavernOpen.value = true
   else if (id === 'knowledge') knowledgeOpen.value = true
   else if (id === 'agent') agentOpen.value = true
   else if (id === 'archive') void archiveNow()
@@ -318,7 +297,7 @@ function onPersonaSwitched(profile: PersonaProfile) {
 function onAppLocked(): void {
   lockScreenOpen.value = true
   for (const key of [settingsOpen, agentOpen, diaryOpen, knowledgeOpen, memoryOpen,
-    cornerOpen, usageOpen, dashboardOpen, activityOpen, personaOpen, tourOpen]) {
+    cornerOpen, usageOpen, activityOpen, personaOpen, tourOpen]) {
     key.value = false
   }
   moreOpen.value = false
@@ -383,14 +362,12 @@ onMounted(async () => {
     wizardOpen.value = shouldShowFirstRun(localStorage.getItem(FIRST_RUN_FLAG), cfg)
   } catch { /* 后端未就绪时不打扰 */ }
   startVisualState(() => activePersona.value.id)
-  focusMode.start()   // 专注陪伴：恢复未结束的计时并对表
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener(NOTIFY_EVENT, onNotify)
   window.removeEventListener('tztuzhan:app-locked', onAppLocked)
-  focusMode.stop()
   stopVisualState()
 })
 </script>
@@ -435,18 +412,10 @@ onUnmounted(() => {
           <span class="presence-dot"></span>
           {{ presenceLabel || '陪伴中' }}
         </div>
-        <button v-if="focusMode.current.value" class="presence focus-chip" title="专注陪伴中，点击查看" @click="activityOpen = true">
-          ⏱ {{ focusClockText }}
-        </button>
         <div v-if="!compactUi" class="header-right">
           <button class="icon-btn" title="一起做点什么" @click="activityOpen = true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/>
-            </svg>
-          </button>
-          <button class="icon-btn" title="成长总览" @click="dashboardOpen = true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><path d="m4 8 6-5 6 8 5-5"/>
             </svg>
           </button>
           <button class="icon-btn" :title="'查看' + activePersona.name + '的日记'" @click="diaryOpen = true">
@@ -551,8 +520,6 @@ onUnmounted(() => {
     <MemoryPanel :show="memoryOpen" :persona-name="activePersona.name" @close="memoryOpen = false" />
     <CornerPanel :show="cornerOpen" :persona-name="activePersona.name" @close="cornerOpen = false" />
     <UsagePanel :show="usageOpen" :persona-name="activePersona.name" @close="usageOpen = false" />
-    <TavernPanel :show="tavernOpen" :persona-name="activePersona.name" @close="tavernOpen = false" />
-    <DashboardPanel :show="dashboardOpen" @close="dashboardOpen = false" />
     <ActivityPanel :show="activityOpen" :persona-name="activePersona.name" @close="activityOpen = false" @open-bookshelf="openBookshelfFromActivity" @discuss="discussActivity" />
     <PersonaSwitcher :show="personaOpen" :disabled="generating" @close="personaOpen = false" @switched="onPersonaSwitched" />
 

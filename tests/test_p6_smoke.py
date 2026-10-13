@@ -24,7 +24,7 @@ def main() -> None:
         d = r.json()
         assert d["ok"] and "tool_list" in d, "meta 应含 tool_list"
         n = len(d["tool_list"])
-        assert n >= 34, f"工具数应≥34: {n}"
+        assert n >= 33, f"工具数应≥33: {n}"
         print(f"[OK] /api/meta: {n} 个工具元数据")
 
         # 3) MCP /mcp/tools 含安全元数据（external 桥已删，代表换 agent_run）
@@ -54,20 +54,7 @@ def main() -> None:
         assert r2.json()["ok"]
         print("[OK] /api/confirm 路由 + pending 计数")
 
-        # 7) 远程任务路由按需注册：未配 AGENT_REMOTE_TOKEN → 404（不挂载）；
-        #    配了 token → 空 task 应 400（参数校验）
-        from backend.core.config import config as _cfg
-        r = client.post("/api/remote/task", data={})
-        if _cfg.agent_remote_token:
-            assert r.status_code == 400
-            print("[OK] /api/remote/task 路由（token 已配置）")
-        else:
-            # 未挂载时 POST 落到前端静态 catch-all → 405；两者都算「端点不存在」
-            assert r.status_code in (404, 405), \
-                f"未配 token 时 /api/remote/* 应按需不注册(404/405)，实得 {r.status_code}"
-            print("[OK] /api/remote/task 未挂载（按需注册，未配 token）")
-
-    print("\n=== P6 端到端 smoke: 7 项全部通过 ===")
+    print("\n=== P6 端到端 smoke: 6 项全部通过 ===")
 
 
 main()

@@ -80,7 +80,6 @@ def main() -> None:
 
         os.environ["TZTUZHAN_DATA_DIR"] = str(runtime)
         os.environ["MEMORY_V2"] = "0"
-        os.environ["MEMORY_MEM0"] = "0"
         # P3-04 E 惰性化后 config 实例在 import 期就固化了 data_dir，此刻再改 env
         # 已经太晚（首次连接会去升级另一个库）；直接把权威路径指到本测试的
         # runtime 目录，下面的版本守卫断言的才是这里造出来的库。
@@ -114,9 +113,8 @@ def main() -> None:
                     )
                 }
                 assert {
-                    "activity_viewpoints", "activity_goals", "goal_progress",
-                    "relationship_events", "artifacts", "future_letters",
-                    "relationship_snapshots", "dual_perspectives",
+                    "activity_viewpoints",
+                    "relationship_events", "artifacts",
                     "reunion_arcs",
                     "knowledge_opinions", "knowledge_opinion_sources",
                     "relationship_style_evidence", "memory_policy",

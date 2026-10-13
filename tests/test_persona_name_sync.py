@@ -46,33 +46,19 @@ def _switch_back_to_default() -> None:
     persona_profiles.activate(persona_profiles.DEFAULT_PERSONA_ID)
 
 
-def test_dual_perspectives_draft_prompt() -> None:
-    from backend.core.dual_perspectives import _DRAFT_PROMPT
-
-    _switch_to_alt()
-    try:
-        # 模板常量本身不动，调用方 replace 后必须出现新人格名
-        assert "菟菚" in _DRAFT_PROMPT
-        swapped = _DRAFT_PROMPT.replace("菟菚", persona_profiles.active_name())
-        assert "你是「橘九」" in swapped and "菟菚" not in swapped
-    finally:
-        _switch_back_to_default()
-    print("[OK] dual_perspectives 草稿提示词可按人格替换")
-
-
-def test_viewpoint_and_letter_prompts_replaceable() -> None:
+def test_viewpoint_and_diary_prompts_replaceable() -> None:
     from backend.core.activities import _VIEWPOINT_DRAFT_PROMPT
-    from backend.core.sealing import _LETTER_PROMPT
+    from backend.core.daily import DIARY_PROMPT as _DIARY_PROMPT
 
     _switch_to_alt()
     try:
         name = persona_profiles.active_name()
-        for template in (_VIEWPOINT_DRAFT_PROMPT, _LETTER_PROMPT):
+        for template in (_VIEWPOINT_DRAFT_PROMPT, _DIARY_PROMPT):
             swapped = template.replace("菟菚", name)
             assert "橘九" in swapped and "菟菚" not in swapped
     finally:
         _switch_back_to_default()
-    print("[OK] activities/sealing 提示词可按人格替换")
+    print("[OK] activities/daily 提示词可按人格替换")
 
 
 def test_dispatch_pattern_follows_persona() -> None:
@@ -89,17 +75,6 @@ def test_dispatch_pattern_follows_persona() -> None:
         _switch_back_to_default()
     assert detect_dispatch_request("给菟菚派任务:整理周报") == "整理周报"
     print("[OK] 派单正则跟随激活人格（含缓存切换）")
-
-
-def test_tavern_clean_reply_and_identity() -> None:
-    from backend.core.tavern import _clean_reply
-
-    assert _clean_reply("菟菚：你好呀") == "你好呀"
-    assert _clean_reply("【菟菚】你好") == "你好"
-    assert _clean_reply("橘九：喵，上线了", "橘九") == "喵，上线了"
-    assert _clean_reply("【橘九】喵", "橘九") == "喵"
-    assert _clean_reply("没有标签的话", "橘九") == "没有标签的话"
-    print("[OK] tavern 发言标签剥离接受动态人格名")
 
 
 def test_image_prompts_diverge_by_persona() -> None:
@@ -137,37 +112,75 @@ def test_her_profile_gated() -> None:
     print("[OK] her_profile 仅默认人格返回侧写")
 
 
+def test_activate_invalidates_active_id_cache() -> None:
+    """activate() 之后 active_id() 必须立刻反映新人格，不能只靠 mtime 失效。
+
+    回归的是这个真实故障：active_id() 拿 active.json 的 mtime 当缓存失效键，
+    而 activate() 写盘后不刷缓存。Windows 会延迟更新最后写入时间，两次快速切换
+    可能落到同一个 mtime，缓存于是继续返回上一个人格——而 active_id() 决定
+    scoped_user_id()，也就是记忆/会话写进哪个人格命名空间。
+    （CI 上间歇失败：main 的 run #31 红、#33 绿。）
+
+    这里把「两次写入 mtime 相同」这个条件**固定下来**，让间歇复现变成必然：
+    只要有人把 activate() 里的显式失效去掉，这个断言就会稳定地红。
+    """
+    from unittest.mock import patch
+
+    from backend.core import persona_profiles as profiles
+
+    # 先切换一次：既进入被测状态，也保证 active.json 一定存在
+    # （不要依赖"前面某个测试已经建过它"，那样单独跑这个文件就会崩）
+    _switch_to_alt()
+    try:
+        frozen = profiles._STATE.stat().st_mtime
+        real_write = profiles._write_json
+
+        def write_with_frozen_mtime(path, value):
+            real_write(path, value)
+            if path == profiles._STATE:
+                import os as _os
+
+                _os.utime(path, (frozen, frozen))  # 模拟「写完了但 mtime 没变」
+
+        with patch.object(profiles, "_write_json", write_with_frozen_mtime):
+            # 缓存里是切换前那个人格，且时间戳与文件一致（= 看起来仍然有效）
+            profiles._cached_active_id = "上一轮激活过的人格"
+            profiles._cached_state_mtime = frozen
+            profiles.activate(profiles.DEFAULT_PERSONA_ID)
+            assert profiles.active_id() == profiles.DEFAULT_PERSONA_ID, \
+                "mtime 未变时，activate() 必须显式失效缓存"
+            assert profiles.active_user_id() == profiles.DEFAULT_USER_ID, \
+                "命名空间必须跟着切回来（否则新记忆写进上一个人格）"
+    finally:
+        _switch_back_to_default()
+    print("[OK] 切人格后 active_id 缓存立刻失效（不依赖 mtime）")
+
+
 def test_canon_life_gated() -> None:
-    """菟菚的正典生活（离线补算/生活模板池/状态行）只对默认人格成立。"""
-    import asyncio
+    """菟菚的正典生活（生活模板池/状态行）只对默认人格成立。"""
 
     from backend.core.life_templates import load_templates
-    from backend.core.offline_recap import maybe_generate
 
-    # 默认人格：离线补算会走到窗口判断（功能开关开着时返回 None 或 pending，不抛错）
     default_pool = load_templates()
     assert any(t.output_kind != "rest" for t in default_pool)  # 内置池完整
 
     _switch_to_alt()
     try:
-        # 离线补算：非默认人格直接跳过（行程是菟菚的正典）
-        assert asyncio.run(maybe_generate(persona_profiles.active_user_id())) is None
         # 生活模板池：无定制文件时空池（只剩中性 rest 兜底），不回退菟菚内置池
         alt_pool = load_templates()
         assert all(t.output_kind == "rest" for t in alt_pool)
         assert len(alt_pool) == 1
     finally:
         _switch_back_to_default()
-    print("[OK] 正典生活（离线补算/模板池）仅默认人格")
+    print("[OK] 正典生活（模板池）仅默认人格")
 
 
 def main() -> None:
-    test_dual_perspectives_draft_prompt()
-    test_viewpoint_and_letter_prompts_replaceable()
+    test_viewpoint_and_diary_prompts_replaceable()
     test_dispatch_pattern_follows_persona()
-    test_tavern_clean_reply_and_identity()
     test_image_prompts_diverge_by_persona()
     test_her_profile_gated()
+    test_activate_invalidates_active_id_cache()
     test_canon_life_gated()
     print("\n=== 人格名同步回归：全部通过 ===")
 

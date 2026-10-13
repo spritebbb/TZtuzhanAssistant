@@ -1,15 +1,12 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { getDiaries, getResearchReports, type DiaryEntry, type ResearchReport } from '../api/diary'
-import { getUnlocks, type UnlockSlot } from '../api/unlocks'
+import { getDiaries, type DiaryEntry } from '../api/diary'
 import { getRelationshipStyle, getDomainTrust, type RelationshipStyle, type DomainTrustItem } from '../api/relationship'
 
 const props = defineProps<{ show: boolean; personaName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
-const tab = ref<'diary' | 'research' | 'ours'>('diary')
+const tab = ref<'diary' | 'ours'>('diary')
 const diaries = ref<DiaryEntry[]>([])
-const reports = ref<ResearchReport[]>([])
-const unlocks = ref<UnlockSlot[]>([])
 const styleInfo = ref<RelationshipStyle | null>(null)
 const domainTrust = ref<DomainTrustItem[]>([])
 const loading = ref(false)
@@ -19,10 +16,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [diaryRows, reportRows, slotRows] = await Promise.all([getDiaries(), getResearchReports(), getUnlocks()])
-    diaries.value = diaryRows
-    reports.value = reportRows
-    unlocks.value = slotRows
+    diaries.value = await getDiaries()
   } catch {
     error.value = '日记加载失败，请稍后再试'
   } finally {
@@ -71,7 +65,6 @@ watch(() => props.show, (show) => { if (show) void load() })
       </header>
       <nav>
         <button :class="{ active: tab === 'diary' }" @click="tab = 'diary'">私人日记</button>
-        <button :class="{ active: tab === 'research' }" @click="tab = 'research'">观察人类</button>
         <button :class="{ active: tab === 'ours' }" @click="toggleOurs">我们之间</button>
       </nav>
       <div class="entries">
@@ -84,27 +77,7 @@ watch(() => props.show, (show) => { if (show) void load() })
           </article>
           <p v-if="!diaries.length" class="empty">还没有日记。聊过一个完整的日子后再来偷看</p>
         </template>
-        <template v-else-if="tab === 'research'">
-          <article v-for="report in reports" :key="report.id" class="report">
-            <div class="meta"><time>{{ report.period }}</time><span>阶段报告</span></div>
-            <h3>{{ report.title }}</h3>
-            <p>{{ report.content }}</p>
-          </article>
-          <p v-if="!reports.length" class="empty">样本还不够。每积累七篇日记，她会写一份阶段报告</p>
-        </template>
         <template v-else>
-          <article v-for="slot in unlocks" :key="slot.key" :class="['unlock', slot.status]">
-            <div class="meta">
-              <time v-if="slot.delivered_at">{{ slot.delivered_at.slice(0, 10) }}</time>
-              <time v-else>——</time>
-              <span>{{ slot.kind === 'stage' ? '阶段' : slot.kind === 'bond' ? '羁绊' : '彩蛋' }}</span>
-            </div>
-            <h3>{{ slot.status === 'locked' ? '？？？' : slot.title }}</h3>
-            <p v-if="slot.status === 'delivered' && slot.content">{{ slot.content }}</p>
-            <p v-else-if="slot.status === 'pending'" class="hint">她有句话想对你说，下次聊天时留意</p>
-            <p v-else-if="slot.status === 'locked'" class="hint">还没走到这一页</p>
-          </article>
-          <p v-if="!unlocks.length" class="empty">日子还长，慢慢来</p>
           <!-- L03 长期关系气质：只显示气质名 + 最多 2 条形成原因，不显示等级/分数 -->
           <article class="unlock style-card">
             <div class="meta"><time>——</time><span>长期气质</span></div>

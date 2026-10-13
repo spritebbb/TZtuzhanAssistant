@@ -1,5 +1,5 @@
 """数据迁移：把既有 SQLite 记忆（long_memory / facts / triples / user_profile /
-important_dates / manager_memories / kv 摘要）批量灌入 Chroma 向量库，保留现有记忆不丢。
+important_dates / kv 摘要）批量灌入 Chroma 向量库，保留现有记忆不丢。
 
 运行时机：
 - 启动时由 engine.ensure_backfill() 自动触发（检测到 Chroma 为空且 SQLite 有数据）
@@ -57,7 +57,6 @@ def _needs_migration() -> bool:
             "triples": "triples",
             "user_profile": "profile",
             "important_dates": "topic",
-            "manager_memories": "mem",
             "kb_chunks": "kb",
         }
         total = 0
@@ -176,16 +175,6 @@ def migrate(progress_cb=None) -> dict:
                 stats["summary"] = stats.get("summary", 0) + 1
     except Exception:
         pass
-
-    # 7) manager_memories → mem（P0-1：fallback 管理记忆的权威副本重灌。
-    #    此前该分区只在写入时进向量，任何 rebuild 都会把降级期记忆清掉且
-    #    无回填路径——现在它与 lm/facts 一样「SQLite 权威、向量可重建」。
-    #    向量 rid 必须用内容哈希列 rid（与 _FallbackManager.add 一致），
-    #    用自增 id 重灌会让检索权威闸门把全部 mem 向量当孤儿过滤掉。）
-    count += _migrate_table(
-        "manager_memories", "mem", lambda r: r["content"], stats, progress_cb,
-        rid_fn=lambda r: r["rid"],
-    )
 
     # 8) kb_chunks → kb（P1-3：rebuild 删除 kb 分区后原本没有任何重灌路径，
     #    文档列表还在、chunk_count 正常，但召回永远为空——「读过却想不起」。

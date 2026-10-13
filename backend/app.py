@@ -18,19 +18,12 @@ from .api import (
     audit,
     backup,
     chat,
-    colists,
     activity_drafts,
     observations,
-    companion_requests,
     config_api,
     confirm,
-    dashboard,
     diary,
     encryption,
-    dual_perspectives,
-    focus,
-    future_letters,
-    goals,
     greeting,
     health,
     images,
@@ -44,25 +37,16 @@ from .api import (
     personas,
     shared_resources,
     situation,
-    offline_recap,
     desktop,
     tour,
-    telemetry,
-    possibilities,
     plugins as plugins_api,
     relationship,
-    relationship_snapshots,
-    relationship_versions,
-    sealing,
-    remote,
     sessions,
-    unlocks,
     tts,
     usage,
     user_reset,
     vision,
     writings,
-    tavern,
 )
 from .maintenance.loop import checkpoint_all, maintenance_loop
 from .session import store as session_store
@@ -95,7 +79,7 @@ def create_app() -> FastAPI:
     # 的 Origin 均为 null，放行它等于给恶意本地 HTML/嵌 iframe 的网页开 CORS 读取。
     # Electron 生产环境已改为加载 http://127.0.0.1:8801（同源，见 electron/main.ts）；
     # Vite dev 是 localhost:5173。收窄后，恶意网页无法借 CORS 读本机 API 响应。
-    # AGENT_EXTRA_ORIGINS 追加本机其他可信前端（如酒馆同玩扩展页面，默认 :8000）。
+    # AGENT_EXTRA_ORIGINS 追加本机其他可信前端（默认 :8000）。
     from .core.config import config as _config
 
     app.add_middleware(
@@ -184,10 +168,6 @@ def create_app() -> FastAPI:
     # 除健康探针外，所有 API、插件网关和人物图片均可能泄露私人数据或触发动作；
     # 非回环来源必须统一鉴权，不能只保护写接口而把会话/配置/日志的 GET 裸露在 LAN。
     _PUBLIC_REMOTE_PATHS = {"/api/health"}
-    # remote/task 兼容 token 放在 JSON/form body 的既有调用协议；HTTP 中间件还未
-    # 解析 body，故该一个入口由路由自身执行同一套来源+常量时间 token 校验。
-    _BODY_AUTH_REMOTE_PATHS = {"/api/remote/task"}
-
     @app.middleware("http")
     async def _remote_auth_guard(request, call_next):
         path = request.url.path
@@ -198,7 +178,6 @@ def create_app() -> FastAPI:
             or (
                 path.startswith("/api/")
                 and path not in _PUBLIC_REMOTE_PATHS
-                and path not in _BODY_AUTH_REMOTE_PATHS
             )
         )
         if not protected:
@@ -268,7 +247,6 @@ def create_app() -> FastAPI:
     app.include_router(backup.router)
     app.include_router(lock.router)
     app.include_router(situation.router)
-    app.include_router(offline_recap.router)
     app.include_router(desktop.router)
     app.include_router(encryption.router)
     app.include_router(sessions.router)
@@ -276,29 +254,16 @@ def create_app() -> FastAPI:
     app.include_router(confirm.router)
     app.include_router(activities.router)
     app.include_router(artifacts.router)
-    app.include_router(dashboard.router)
     app.include_router(diary.router)
-    app.include_router(focus.router)
-    app.include_router(future_letters.router)
-    app.include_router(goals.router)
     app.include_router(writings.router)
     app.include_router(relationship.router)
-    app.include_router(relationship_snapshots.router)
-    app.include_router(relationship_versions.router)
-    app.include_router(dual_perspectives.router)
-    app.include_router(sealing.router)
-    app.include_router(possibilities.router)
-    app.include_router(colists.router)
     app.include_router(memory_admin.router)
     app.include_router(shared_resources.router)
     app.include_router(tour.router)
-    app.include_router(telemetry.router)
-    app.include_router(companion_requests.router)
     app.include_router(activity_drafts.router)
     app.include_router(observations.router)
     app.include_router(keepsake.router)
     app.include_router(knowledge.router)
-    app.include_router(unlocks.router)
     app.include_router(usage.router)
     app.include_router(agent.router)
     app.include_router(vision.router)
@@ -306,19 +271,11 @@ def create_app() -> FastAPI:
     app.include_router(meta.router)
     app.include_router(personas.router)
     app.include_router(audit.router)
-    # MCP 对外端点按需注册（2026-09-30 拍板）：未配置 AGENT_REMOTE_TOKEN 时
-    # 不挂载 /api/remote/*（404 不可探测），配了 token 才对外提供远程任务入口
-    # （回环本机调用本就免 token，不受此影响）。
-    from .core.config import config as _cfg
-
-    if _cfg.agent_remote_token:
-        app.include_router(remote.router)
     app.include_router(config_api.router)
     app.include_router(greeting.router)
     app.include_router(initiative.router)
     app.include_router(tts.router)
     app.include_router(user_reset.router)
-    app.include_router(tavern.router)
     app.include_router(mcp_servers.router)
     app.include_router(mcp_server.router)
     app.include_router(plugins_api.router)
@@ -495,30 +452,6 @@ def create_app() -> FastAPI:
             _spawn_bg(_agent_session.agent_scheduler_loop())
         except Exception:
             logger.exception("[Agent] 定时任务调度器启动失败")
-        # D11 离线补算：启动时为当前人格后台预生成（有足够离线窗口才真正生成）；
-        # 锁定态由 maybe_generate 内部自然失败/跳过，不影响启动
-        try:
-            from .core.offline_recap import startup_recap as _startup_recap
-
-            _spawn_bg(_startup_recap())
-        except Exception:
-            logger.exception("[离线补算] 启动预生成任务创建失败")
-        # 38项#23 事件感：每小时为当前人格补一条当日外部世界摘要（幂等、
-        # fail-soft），进问候素材池末位
-        try:
-            from .core.news_digest import news_loop as _news_loop
-
-            _spawn_bg(_news_loop())
-        except Exception:
-            logger.exception("[事件感] 后台新闻循环启动失败")
-        # 38项#22 兴趣源：每小时检查到期授权源拉新素材（无源零动作）
-        try:
-            from .core.interest_feed import feed_loop as _feed_loop
-
-            _spawn_bg(_feed_loop())
-        except Exception:
-            logger.exception("[兴趣源] 后台循环启动失败")
-
     _bg_tasks: set = set()
 
     def _spawn_bg(coro) -> None:

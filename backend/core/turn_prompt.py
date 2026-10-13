@@ -388,24 +388,18 @@ def inject_activity_contexts(
     messages: list[dict],
     *,
     reading_context: str = "",
-    focus_ctx: str = "",
-    goal_ctx: str = "",
     writing_ctx: str = "",
-    tavern_mem_ctx: str = "",
     list_ctx: str = "",
     event_recall_result: dict | None = None,
 ) -> None:
-    """共读 / 专注 / 目标 / 创作 / 酒馆 / 清单 / 关系事件：各自独立成一条 system。
+    """共读 / 创作 / 清单 / 关系事件：各自独立成一条 system。
 
     这些是「你们正在做的事」与「真实发生过的事」，与记忆块分开注入——来源语义不同，
     混在一条里容易让模型把资料或虚构情节错当成现实记忆。
     """
     for content in (
         reading_context,
-        focus_ctx,
-        goal_ctx,
         writing_ctx,
-        tavern_mem_ctx,
         list_ctx,
     ):
         if content:
@@ -414,40 +408,6 @@ def inject_activity_contexts(
     events = event_recall_result or {}
     if events.get("context"):
         messages.append({"role": "system", "content": events["context"]})
-
-
-def inject_pending_unlock(
-    messages: list[dict], user_id: str, *, ephemeral: bool
-) -> dict | None:
-    """C4 解锁时刻：她有句心里话了到想说的时候（队列制，每轮最多一条）。"""
-    if ephemeral:
-        return None
-    try:
-        from . import unlock as _unlock_mod
-
-        pending_unlock = _unlock_mod.next_pending(user_id)
-        if pending_unlock is None:
-            return None
-        anchor_lines = "\n".join(f"- {a}" for a in pending_unlock["anchors"])
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "你心里有件事一直想对他说，今天你想自然地说出来"
-                    "（这不是任务，是你自己想讲）：\n"
-                    f"这件事是关于：{pending_unlock['title']}\n"
-                    "你心里盘旋的念头：\n"
-                    + anchor_lines
-                    + "\n用你自己的话、顺着眼下的聊天氛围带出来，可以先铺垫几句再说；"
-                    "说完就自然聊下去。不要念清单、不要「我要跟你说件事」式预告、"
-                    "不要提好感度/等级/解锁/系统这类词。"
-                ),
-            }
-        )
-        return pending_unlock
-    except Exception:  # noqa: BLE001
-        logger.exception("[pipeline] 解锁注入失败（不影响回复）")
-        return None
 
 
 # ---------------------------------------------------------------- 对对方的了解
@@ -799,7 +759,6 @@ __all__ = [
     "inject_memory_block",
     "inject_memory_correction",
     "inject_night_boundary",
-    "inject_pending_unlock",
     "inject_preference_constraints",
     "inject_presence",
     "inject_search_context",

@@ -135,26 +135,6 @@ async def _greeting_text(
     variant_hint = ""
     if reunion_hint:
         narrative_hint = "\n\n" + reunion_hint
-    elif gap_hours is not None and gap_hours >= config.proactive_greeting_idle_hours:
-        try:
-            from .offline_narrative import collect_offline_context
-
-            # collect_offline_context 内部含同步 Chroma 检索（query_triples），
-            # 放线程池执行，避免慢查询阻塞事件循环
-            narrative = await asyncio.to_thread(
-                collect_offline_context, user_id, gap_hours, now=now
-            )
-            # 梦境只在亲密/恋人采用；关系未到时降为研究碎片，避免借梦越级。
-            if narrative.mode == "dream" and affection.stage_of(affection_val) in {"初识", "熟悉"}:
-                narrative = type(narrative)(
-                    mode="research",
-                    gap_hours=narrative.gap_hours,
-                    recent_lines=narrative.recent_lines,
-                    triple_lines=narrative.triple_lines,
-                )
-            narrative_hint = "\n\n" + narrative.prompt_hint(affection.stage_of(affection_val))
-        except Exception as e:
-            logger.warning(f"[问候] 离线叙事素材整理失败: {e}")
     if not reunion_hint:
         # F01：真实素材 + 变体方向（久别重逢走 P2-06 三段式，不归本池）。
         try:

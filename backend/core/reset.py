@@ -3,11 +3,10 @@
 
 仅用于用户明确选择「重新开始」时调用。范围：
 - userdb（bot.db）：好感度/昵称/恋人确认、messages、long_memory、facts、triples、
-  important_dates、stickers、user_profile、user_terms、user_style_map、diary、research_reports、
+  important_dates、stickers、user_profile、user_terms、user_style_map、diary、
   affection_log、mood_log、activities、activity_notes、tasks、user_meta、kv_store（含 greeting 的 web_last_seen、
   initiative 的 daily 标记等）→ 全部清空。
 - 向量库（memory v2）：按 user 前缀的语义向量 → 全清。
-- Mem0 向量库（data/chroma_mem0，独立目录）：按 user_id 的管理记忆 → 全清。
 - 当前会话（sessions.db 'current'）：气泡清空、标题复位为「新会话」。
 - 用户图片：本次删除行引用、且删除后不再被任何行引用的 imgs 文件 → 删除。
 - 物理层：两个库 checkpoint + VACUUM，避免旧内容留在空闲页/WAL 里。
@@ -52,37 +51,30 @@ def _connect_reset(path, *, timeout: float = 10.0):
 _TABLES = (
     "affection_log", "mood_log", "long_memory", "facts", "user_meta", "messages",
     "users", "kv_store", "important_dates", "stickers",
-    "user_profile", "user_terms", "user_style_map", "diary", "research_reports", "triples",
+    "user_profile", "user_terms", "user_style_map", "diary", "triples",
     "tasks", "promises", "usage_log", "activity_notes", "activities",
-    "activity_viewpoints", "activity_goals", "goal_progress",
-    "activity_writings", "writing_turns", "activity_lists", "list_items",
+    "activity_viewpoints",
+    "activity_writings", "writing_turns",
     "relationship_events", "artifacts", "context_lifecycle",
     "character_life_events", "relationship_dimension_ledger", "relationship_style_evidence",
     "memory_policy", "memory_annotations", "first_occurrences",
     "user_preferences", "event_chains",
     "reunion_arcs",
     "knowledge_opinion_sources", "knowledge_opinions",
-    "pending_thoughts", "future_letters", "relationship_snapshots", "dual_perspectives",
-    "relationship_versions", "greeting_variant_usage", "open_questions",
-    "companion_requests", "thought_context_receipts", "humor_usage", "source_links",
+    "greeting_variant_usage",
+    "thought_context_receipts", "humor_usage", "source_links",
     "wrapup_outbox", "reading_segments", "reading_bookmarks",
     "activity_draft_receipts", "document_segments", "document_import_jobs", "observation_entries",
     "domain_trust_events", "domain_trust_snapshot",
-    "aesthetic_preferences", "artifact_placements",
     "shared_resources", "resource_grants",
-    "persona_evolution_log", "experience_metrics",
-    "learning_candidates", "watches",
-    "kb_documents", "kb_chunks", "unlocks",
-    "manager_memories",
-    "tavern_sessions",
+    "persona_evolution_log",
+    "learning_candidates",
+    "kb_documents", "kb_chunks",
     "situation_files",
-    # 38项#22 兴趣源：授权清单与素材都随重置清空（用户重新授权即可重建）
-    "interest_feeds", "interest_feed_items",
 )
 
 # 无 user_id 列的传输态/运行资产表（按整体清除；素材本体在加密工作区不受影响）
 _TABLES_NO_USER = (
-    "voice_profiles", "voice_manifests",
 )
 
 _reset_lock = asyncio.Lock()
@@ -129,10 +121,8 @@ async def _quiesce_user_writers() -> None:
     """停止生成任务，并等待所有已开始的用户记忆写任务真正结束。"""
     from ..api import agent as agent_api
     from ..api import chat as chat_api
-    from ..api import remote as remote_api
     from ..agent import session as agent_session
     from . import pipeline, tasks as core_tasks
-    from .memory import engine
 
     # 先落取消状态，再取消执行协程；命令类工具会在 CancelledError 中杀进程树。
     for task_id, task in list(agent_api._agent_bg_by_id.items()):
@@ -140,14 +130,12 @@ async def _quiesce_user_writers() -> None:
             agent_session.cancel_task(task_id)
     await _cancel_tasks(list(agent_api._agent_bg_by_id.values()))
     await _cancel_tasks(list(chat_api._bg_tasks))
-    # 远程工具循环同样会写 userdb/记忆；不停止它就会在清库后回写数据。
-    await _cancel_tasks(list(remote_api._remote_bg_by_id.values()))
     await _cancel_tasks(list(core_tasks._tasks))
 
-    # pipeline/Mem0 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，
+    # pipeline 中可能含 asyncio.to_thread。取消外层 Task 无法杀工作线程，
     # 所以必须等待真实完成后再清库；超时则拒绝重置，避免“清完又写回来”。
     writers = [
-        task for task in [*pipeline._memory_tasks, *engine._message_tasks]
+        task for task in pipeline._memory_tasks
         if not task.done()
     ]
     if writers:
@@ -410,7 +398,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             "deep": deep,
             "userdb_tables": 0,
             "vector": 0,
-            "mem0": 0,
             "media": 0,
             "archives": 0,
             "backups": 0,
@@ -418,7 +405,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             "compact": "",
             "session_msgs": 0,
             "agent_tasks": 0,
-            "telemetry": 0,
             "failures": [],
         }
         try:
@@ -472,17 +458,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
                 stats["failures"].append(f"向量库清空失败：{exc}")
                 logger.warning("[重置] 向量库清空失败：{}", exc)
 
-            # Mem0 是独立向量库（data/chroma_mem0），不归 vector_store 管；
-            # 漏掉它会让重置后的长期记忆召回继续命中旧记忆。
-            try:
-                from .memory.memory_manager import manager as memory_manager
-
-                stats["mem0"] = await asyncio.to_thread(memory_manager.clear_user, uid)
-                logger.info("[重置] Mem0 管理记忆已清空：{}", stats["mem0"])
-            except Exception as exc:
-                stats["failures"].append(f"Mem0 管理记忆清空失败：{exc}")
-                logger.warning("[重置] Mem0 管理记忆清空失败：{}", exc)
-
             try:
                 from ..session import store as _store
 
@@ -499,14 +474,6 @@ async def reset_everything(*, deep: bool = False) -> dict:
             except Exception as exc:
                 stats["failures"].append(f"Agent 任务清空失败：{exc}")
                 logger.warning("[重置] Agent 任务清空失败：{}", exc)
-
-            try:
-                from .telemetry import clear_user as clear_telemetry
-
-                stats["telemetry"] = await asyncio.to_thread(clear_telemetry, uid)
-            except Exception as exc:
-                stats["failures"].append(f"本地遥测清空失败：{exc}")
-                logger.warning("[重置] 本地遥测清空失败：{}", exc)
 
             if deep:
                 try:

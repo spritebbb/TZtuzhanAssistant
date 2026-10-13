@@ -8,7 +8,7 @@
 - 恢复预览：先校验格式、schema 版本、引用完整性（含跨类别引用），再展示
   将写入的计数；不做静默覆盖。
 - 恢复写入当前 bot.db 的目标命名空间：要求目标命名空间为空；主键一律重新
-  分配（整数主键按 AUTOINCREMENT，文本主键如 tavern_sessions 的 uuid 重新
+  分配（整数主键按 AUTOINCREMENT，文本主键重新
   生成）——主键在 bot.db 内全局唯一且不含 user_id，原样保留会让同一份备份
   恢复进第二个命名空间时主键冲突；引用列按映射重建，user_id 文本列一律
   重写为目标命名空间。
@@ -29,28 +29,22 @@ from .userdb import db
 BUNDLE_KIND = "tuzhan-relationship-bundle"
 BUNDLE_VERSION = 1
 
-# 主键别名表：主键列不叫 id、且主键值就是别一张表的外键（activity_lists.
-# activity_id 即 activities.id）。preview 的引用校验与 restore 的 id_maps
-# 登记都按此表取行主键；通用循环只重命名 "id" 主键，这类表由此表兜住。
-_BUNDLE_PK: dict[str, str] = {"activity_lists": "activity_id"}
-
 # 类别 → 表清单（导出与恢复顺序无关；全部表都在 userdb.reset 双清单里）
 CATEGORIES: dict[str, tuple[str, ...]] = {
     "identity": ("users", "user_meta"),
     "memory": ("facts", "long_memory", "triples", "user_profile", "user_terms", "user_style_map",
-               "memory_policy", "memory_annotations", "first_occurrences", "aesthetic_preferences",
-               "learning_candidates", "manager_memories", "user_preferences", "profile_evolution_log"),
-    "milestones": ("affection_log", "mood_log", "unlocks", "important_dates"),
-    "life": ("diary", "research_reports", "stickers", "future_letters", "relationship_snapshots", "dual_perspectives", "relationship_versions", "character_life_events", "reunion_arcs", "companion_requests", "source_links",
-             "persona_evolution_log", "tavern_sessions", "her_statements"),
-    "tasks": ("tasks", "promises", "open_questions", "watches"),
+               "memory_policy", "memory_annotations", "first_occurrences",
+               "learning_candidates", "user_preferences", "profile_evolution_log"),
+    "milestones": ("affection_log", "mood_log", "important_dates"),
+    "life": ("diary", "stickers", "character_life_events", "reunion_arcs", "source_links",
+             "persona_evolution_log", "her_statements"),
+    "tasks": ("tasks", "promises"),
     "activities": (
-        "activities", "activity_notes", "activity_viewpoints", "activity_goals",
-        "goal_progress", "activity_writings", "writing_turns", "artifacts",
-        "reading_segments", "reading_bookmarks", "observation_entries", "artifact_placements",
-        "activity_lists", "list_items",
+        "activities", "activity_notes", "activity_viewpoints",
+        "activity_writings", "writing_turns", "artifacts",
+        "reading_segments", "reading_bookmarks", "observation_entries",
     ),
-    "events": ("relationship_events", "pending_thoughts", "relationship_style_evidence",
+    "events": ("relationship_events", "relationship_style_evidence",
                "domain_trust_events", "domain_trust_snapshot", "event_chains",
                "relationship_dimension_ledger", "humor_usage"),
     "knowledge": ("kb_documents", "kb_chunks", "document_segments", "knowledge_opinions", "knowledge_opinion_sources",
@@ -68,18 +62,7 @@ _SOURCE_TABLE_BY_TYPE = {
     "promise": "promises",
     "fact": "facts",
     "important_date": "important_dates",
-    "future_letter": "future_letters",
-    "relationship_snapshot": "relationship_snapshots",
 }
-
-_SNAPSHOT_MANIFEST_TABLE_BY_TYPE = {
-    "relationship_event": "relationship_events",
-    "artifact": "artifacts",
-    "diary": "diary",
-    "user_term": "user_terms",
-    "activity_viewpoint": "activity_viewpoints",
-}
-
 
 class BundleError(ValueError):
     """导出/恢复的可预期业务错误。"""
@@ -116,8 +99,6 @@ def _rule_dynamic(table: str, column: str, type_column: str):
 
 
 _REFERENCE_RULES = (
-    _rule_static("artifact_placements", "artifact_id", "artifacts", frozenset()),
-    _rule_dynamic("aesthetic_preferences", "source_id", "source_type"),
     _rule_static("resource_grants", "resource_id", "shared_resources", frozenset()),
     _rule_static("persona_evolution_log", "source_event_id", "relationship_events", frozenset()),
     _rule_static("activity_notes", "activity_id", "activities"),
@@ -125,8 +106,6 @@ _REFERENCE_RULES = (
     _rule_static("observation_entries", "activity_id", "activities"),
     _rule_static("reading_bookmarks", "segment_id", "reading_segments"),
     _rule_static("activity_viewpoints", "activity_id", "activities"),
-    _rule_static("activity_goals", "activity_id", "activities"),
-    _rule_static("goal_progress", "activity_id", "activities"),
     _rule_static("activity_writings", "activity_id", "activities"),
     _rule_static("writing_turns", "activity_id", "activities"),
     _rule_static("kb_chunks", "doc_id", "kb_documents"),
@@ -138,13 +117,8 @@ _REFERENCE_RULES = (
     _rule_static("profile_evolution_log", "new_id", "user_profile", frozenset()),
     _rule_static("knowledge_opinion_sources", "chunk_id", "kb_chunks"),
     _rule_static("activities", "document_id", "kb_documents"),
-    # 换机漏表批（DF-1）：activity_lists 主键即 activities.id（rowid alias），
-    # 走通用引用重写后 id_maps 记录的新值与 activities 一致，list_items 再对齐。
-    _rule_static("activity_lists", "activity_id", "activities"),
-    _rule_static("list_items", "activity_id", "activity_lists"),
     _rule_static("relationship_dimension_ledger", "event_id", "relationship_events"),
     _rule_static("event_chains", "source_event_id", "relationship_events"),
-    _rule_static("event_chains", "result_id", "pending_thoughts"),
     _rule_static("humor_usage", "term_id", "user_terms"),
     _rule_static("document_segments", "document_id", "kb_documents"),
     _rule_static("facts", "conflicts_with_fact_id", "facts", frozenset()),
@@ -152,18 +126,12 @@ _REFERENCE_RULES = (
     _rule_static("memory_annotations", "fact_id", "facts", frozenset()),
     _rule_static("memory_annotations", "source_event_id", "relationship_events", frozenset()),
     _rule_static("first_occurrences", "source_event_id", "relationship_events", frozenset()),
-    _rule_static("future_letters", "goal_id", "activities"),
-    _rule_static("future_letters", "unlocked_by_event_id", "relationship_events", frozenset()),
     _rule_static("reunion_arcs", "source_snapshot_id", "character_life_events", frozenset()),
     _rule_static("relationship_style_evidence", "event_id", "relationship_events", frozenset()),
     _rule_static("domain_trust_events", "event_id", "relationship_events", frozenset()),
-    _rule_static("companion_requests", "life_event_id", "character_life_events", frozenset()),
-    # open_questions.source_message_id 指向 messages（不属于关系包）：按
-    # memory_policy.source_message_ids 先例不建引用规则，恢复时统一清空。
     _rule_dynamic("artifacts", "source_id", "source_type"),
     _rule_dynamic("source_links", "source_id", "source_type"),
     _rule_dynamic("relationship_events", "source_id", "source_type"),
-    _rule_dynamic("pending_thoughts", "source_id", "source_type"),
 )
 
 
@@ -256,7 +224,7 @@ def _validate_references(data: dict[str, list[dict]]) -> list[str]:
                 broken = True
                 break
             if not any(
-                int(candidate.get(_BUNDLE_PK.get(ref_table, "id")) or 0) == value
+                int(candidate.get("id") or 0) == value
                 for candidate in ref_rows
             ):
                 errors.append(f"引用断裂：{table} 的 {ref_table}.id={value} 在备份中不存在")
@@ -264,54 +232,7 @@ def _validate_references(data: dict[str, list[dict]]) -> list[str]:
                 break
         if broken:
             continue
-    for snapshot in data.get("relationship_snapshots") or []:
-        try:
-            manifest = json.loads(snapshot.get("source_manifest_json") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            errors.append("关系快照的来源清单不是有效 JSON")
-            continue
-        for item in manifest.get("items") or []:
-            source_type = str(item.get("type") or "")
-            ref_table = _SNAPSHOT_MANIFEST_TABLE_BY_TYPE.get(source_type)
-            if ref_table is None:
-                errors.append(f"关系快照含未知来源类型：{source_type or '?'}")
-                continue
-            ref_rows = data.get(ref_table)
-            if ref_rows is None:
-                errors.append(
-                    f"类别不完整：关系快照来源引用了 {ref_table}，但备份里没有该表"
-                )
-                continue
-            try:
-                source_id = int(item.get("id"))
-            except (TypeError, ValueError):
-                errors.append(f"关系快照的 {source_type} 来源 id 无效")
-                continue
-            if not any(int(row.get("id") or 0) == source_id for row in ref_rows):
-                errors.append(
-                    f"引用断裂：关系快照的 {source_type}.id={source_id} 在备份中不存在"
-                )
     return errors
-
-
-def _remap_snapshot_manifests(
-    data: dict[str, list[dict]], id_maps: dict[str, dict[int, int]], target_user_id: str
-) -> None:
-    """恢复后二阶段重写冻结清单的来源 id，使其指向目标命名空间的新行。"""
-    for source_row in data.get("relationship_snapshots") or []:
-        old_snapshot_id = int(source_row["id"])
-        new_snapshot_id = id_maps.get("relationship_snapshots", {}).get(old_snapshot_id)
-        if new_snapshot_id is None:
-            continue
-        manifest = json.loads(source_row.get("source_manifest_json") or "{}")
-        for item in manifest.get("items") or []:
-            ref_table = _SNAPSHOT_MANIFEST_TABLE_BY_TYPE[str(item["type"])]
-            item["id"] = id_maps[ref_table][int(item["id"])]
-        db.conn.execute(
-            "UPDATE relationship_snapshots SET source_manifest_json = ? "
-            "WHERE id = ? AND user_id = ?",
-            (json.dumps(manifest, ensure_ascii=False), new_snapshot_id, target_user_id),
-        )
 
 
 def _column_label(table: str, ref_fn: Callable) -> str:
@@ -434,7 +355,7 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
 
     data: dict[str, list[dict]] = bundle["data"]
     kv_export: dict[str, str] = (bundle.get("kv") or {}).get("exported") or {}
-    # 主键映射：整数主键 old_int → new_int；文本主键（tavern_sessions 的 uuid）
+    # 主键映射：整数主键 old_int → new_int；文本主键
     # old_str → new_str。两者都重新分配，见模块 docstring 的恢复契约。
     id_maps: dict[str, dict] = defaultdict(dict)
     self_fixups: list[tuple[str, str, str, int, int]] = []  # (table, column, ref_table, referencing_old_id, old_ref_value)
@@ -462,12 +383,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         values["source_message_id"] = None
                         if values.get("status") == "active":
                             values["status"] = "candidate"
-                    if table == "open_questions":
-                        # 同上：源消息不在包内，清空编号避免指向目标库无关消息。
-                        values["source_message_id"] = None
-                    if table == "companion_requests":
-                        # 同上：回应消息不在包内，清空编号。
-                        values["response_message_id"] = None
                     if table == "user_preferences":
                         # 换机漏表批（DF-1）：教学偏好的来源消息不在包内，清空编号。
                         values["source_message_id"] = None
@@ -531,11 +446,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                         id_maps[table][old_id] = (
                             new_text_id if new_text_id is not None else int(cur.lastrowid)
                         )
-                    elif table in _BUNDLE_PK and values.get(_BUNDLE_PK[table]) is not None:
-                        # 主键别名表：按别名登记映射（新值已由引用规则重写为
-                        # activities 的新 id），下游 list_items 据此解析。
-                        pk_name = _BUNDLE_PK[table]
-                        id_maps[table][int(row[pk_name])] = int(values[pk_name])
                 restored[table] = len(rows)
             # 二阶段：自引用回填（引用行与被引用行的新 id 都已确定）
             for table, column, ref_table, referencing_old_id, old_value in self_fixups:
@@ -547,7 +457,6 @@ def restore_bundle(bundle: dict, target_user_id: str, *, dry_run: bool = False) 
                     f"UPDATE {table} SET {column} = ? WHERE id = ? AND user_id = ?",
                     (ref_new_id, row_new_id, target_user_id),
                 )
-            _remap_snapshot_manifests(data, id_maps, target_user_id)
             if "resource_grants" in data:
                 # L16：导入默认全部收紧为私有——授权撤销待用户重新分享。
                 db.conn.execute(

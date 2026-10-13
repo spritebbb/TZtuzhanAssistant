@@ -39,7 +39,6 @@ from .turn_prompt import (
     inject_memory_block,
     inject_memory_correction,
     inject_night_boundary,
-    inject_pending_unlock,
     inject_preference_constraints,
     inject_presence,
     inject_search_context,
@@ -490,21 +489,6 @@ def _mcp_tool_filter(user_text: str, skill_texts: list[str]):
         return None
 
 
-def _cost_line(user_id: str) -> str:
-    """D10 成本熔断叙事面 → 行为帧 cost_line。
-
-    提示类（事多轻提）每日一次由 cost_guard 内部 kv 门控；extreme 的
-    「更简短」是常驻质地约束。任一失败即空串，不阻塞回复。
-    """
-    try:
-        from .cost_guard import cost_lines
-
-        hint, standing = cost_lines(user_id)
-        return " ".join(p for p in (hint, standing) if p)
-    except Exception:
-        return ""
-
-
 # NP-14：类别 → 行为帧提示语（只说类别，不说进程名——话术披露红线）
 _AWARENESS_LINES = {
     "code": "用户此刻大概率在写代码或用终端，打扰要克制，长内容给结论优先",
@@ -801,7 +785,7 @@ def _user_lock(user_id: str) -> "asyncio.Lock":
     return lock
 
 
-async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
+async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, draft_cb=None) -> str:
     """处理一条用户消息，返回菟菚的回复。
 
     merged_msg=True 表示 text 是用户连续发送的多条消息合并成的一段话，
@@ -818,9 +802,6 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
 
     ephemeral=True 表示这一轮只在当前界面暂时展示，不写会话、记忆、画像、关系
     状态或主动回访素材；仍可读取既有背景，以正常完成陪伴回复。
-
-    explain_cb：可选的异步回调 async (snapshot: dict) -> None，返回这一轮实际
-    注入的状态、行为帧、记忆与工具快照；不包含 system prompt 或模型思考链。
     """
     from .privacy import is_ephemeral_request
 
@@ -838,12 +819,11 @@ async def process(user_id: str, text: str, *, mock: bool = False, merged_msg: bo
         return await _process_locked(
             user_id, text, mock=mock, merged_msg=merged_msg, ephemeral=ephemeral,
             stream_cb=stream_cb, image_cb=image_cb, progress_cb=progress_cb,
-            explain_cb=explain_cb,
             draft_cb=draft_cb,
         )
 
 
-async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, explain_cb=None, draft_cb=None) -> str:
+async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged_msg: bool = False, ephemeral: bool = False, stream_cb=None, image_cb=None, progress_cb=None, draft_cb=None) -> str:
     from .persona_profiles import persona_name_for_user_id
     from .privacy import ephemeral_prompt, is_ephemeral_request
 
@@ -891,13 +871,9 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     # 本轮副作用台账：所有「不影响回复的旁路动作」统一登记，失败不再静默。
     ledger = EffectLedger("turn")
 
-    # 1.0.0) C4 解锁时刻检测 + 1.0.1) 拟人核心层：语义感知丢后台执行，消除
-    # 「每条消息首字前死等感知 LLM」的串行瓶颈；显式状态交互必须同步落账。
+    # 1.0.1) 拟人核心层：语义感知丢后台执行，消除「每条消息首字前死等感知
+    # LLM」的串行瓶颈；显式状态交互必须同步落账。
     if not ephemeral:
-        from . import unlock as _unlock_mod
-
-        ledger.run("解锁检测", _unlock_mod.check_and_enqueue, user_id)
-
         from .state import handle_state_interaction
 
         ledger.run("显式状态交互", handle_state_interaction, user_id, text)
@@ -997,10 +973,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     fact_id_map = gathered["fact_id_map"]
     kb_hits = gathered["kb_hits"]
     reading_context = gathered["reading_context"]
-    focus_ctx = gathered["focus_ctx"]
-    goal_ctx = gathered["goal_ctx"]
     writing_ctx = gathered["writing_ctx"]
-    tavern_mem_ctx = gathered["tavern_mem_ctx"]
     list_ctx = gathered["list_ctx"]
     context_selection = gathered["context_selection"]
     event_recall_result = gathered["event_recall_result"]
@@ -1055,9 +1028,7 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             from . import imagegen
 
             if imagegen.enabled():
-                from .aesthetic_preferences import image_prompt
-
-                drawn_image_path = await imagegen.generate(image_prompt(user_id, text))
+                drawn_image_path = await imagegen.generate(text)
                 if drawn_image_path:
                     await image_cb(drawn_image_path)
         except Exception:
@@ -1088,7 +1059,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             calendar_line=compose_line(cal_mod),
             style_line=_style_line(user_id),
             evolution_line=_evolution_line(user_id),
-            cost_line=_cost_line(user_id),
             awareness_line=_awareness_line(),
         )
     except Exception:
@@ -1139,14 +1109,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     inject_activity_contexts(
         messages,
         reading_context=reading_context,
-        focus_ctx=focus_ctx,
-        goal_ctx=goal_ctx,
         writing_ctx=writing_ctx,
-        tavern_mem_ctx=tavern_mem_ctx,
         list_ctx=list_ctx,
         event_recall_result=event_recall_result,
     )
-    pending_unlock = inject_pending_unlock(messages, user_id, ephemeral=ephemeral)
 
     # 4.2 / 4.2b / 杂项：对对方的了解、硬约束、行程、唤醒、搜索求证
     inject_understanding(messages, user_id, is_chitchat=is_chitchat)
@@ -1307,13 +1273,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
             if recent and any(_too_similar(reply, r) for r in recent):
                 logger.info("[pipeline] 检测到重复回复，重写一次")
                 rewrite_used = True
-                # P3-05B 统计：重复率（只记命中窗口大小，不记正文）
-                try:
-                    from .experience_metrics import record as _metric
-
-                    _metric(user_id, "repetition", f"recent{len(recent)}")
-                except Exception:
-                    logger.debug("[pipeline] 重复率统计写入失败（不影响回复）")
                 messages.append(
                     {
                         "role": "system",
@@ -1350,30 +1309,10 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
     reply = _apply_reply_plugins(reply, ephemeral=ephemeral)
 
     if hygiene_enabled:
-        from .output_hygiene import RULE_VERSION, inspect_reply
+        from .output_hygiene import inspect_reply
 
         assert hygiene_ctx is not None
         checked = inspect_reply(reply, context=hygiene_ctx)
-        try:
-            from .telemetry import record_current
-
-            record_current(
-                "output_checked",
-                source_ids=[f"rule:{rule}" for rule in checked.rule_ids[:3]],
-                rule_version=RULE_VERSION,
-                outcome=checked.action,
-            )
-        except Exception:
-            logger.warning("[telemetry] output_checked 记录失败")
-        if checked.action == "rewrite":
-            # P3-05B 统计：规则失败计数（只记规则名，不记正文）
-            try:
-                from .experience_metrics import record as _metric
-
-                for rule in (checked.rule_ids or [])[:3]:
-                    _metric(user_id, "rule_failure", str(rule)[:60])
-            except Exception:
-                logger.debug("[pipeline] 规则失败计数写入失败（不影响回复）")
         if checked.action == "accept":
             reply = checked.text
         elif checked.action == "rewrite" and not rewrite_used:
@@ -1434,66 +1373,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 幽默记忆使用登记失败（不影响回复）")
 
-    # 5.10.1) C4 解锁落账：回复已定稿，把「她说出口的话」摘要存进收集页
-    if not ephemeral and pending_unlock is not None:
-        try:
-            from . import unlock as _unlock_mod
-
-            _unlock_mod.mark_delivered(user_id, pending_unlock["key"], reply[:300])
-        except Exception:
-            logger.exception("[pipeline] 解锁落账失败（不影响回复）")
-
-    # 5.11) 可解释性快照：只公开可验证的状态/行为/记忆来源，不公开隐藏思考。
-    if explain_cb is not None and reply_state is not None and reply_frame is not None:
-        try:
-            from .explainability import build_reply_explanation
-
-            memory_rows: list[tuple] = []
-            memory_rows.extend(("相关对话", value) for value in remembered[:2])
-            fact_ids_used: list[int] = []
-            for value in facts[:2]:
-                fact_id = fact_id_map.get(str(value).strip())
-                memory_rows.append(("长期事实", value, fact_id))
-                if fact_id:
-                    fact_ids_used.append(fact_id)
-            memory_rows.extend(
-                ("知识库", f"《{h['filename']}》相关段落" if h.get("filename") else "相关段落")
-                for h in kb_hits[:2]
-            )
-            if pending_unlock is not None:
-                memory_rows.append(("解锁时刻", f"她说出了心里话：{pending_unlock['title']}"))
-            memory_rows.extend(
-                ("结构化记忆", f"{item[0]} {item[2]} {item[3]}")
-                for item in triples[:2]
-                if len(item) >= 4
-            )
-            memory_rows.extend(
-                ("事件来源", source) for source in event_recall_result.get("sources", [])[:2]
-            )
-            if reply_season:
-                memory_rows.append(
-                    ("关系季节", f"{reply_season['label']}（{reply_season['reason']}）")
-                )
-            snapshot = build_reply_explanation(
-                reply_state,
-                reply_frame,
-                memory_rows=memory_rows,
-                search_used=bool(search_hits),
-                media=(
-                    "generated_image"
-                    if drawn_image_path
-                    else "sticker" if sticker_path else "none"
-                ),
-                contexts=(
-                    context_selection.explain() if context_selection is not None else ()
-                ),
-                fact_ids=fact_ids_used,
-                user_id=user_id,
-            )
-            await explain_cb(snapshot)
-        except Exception:
-            logger.exception("[pipeline] 回复解释快照失败（不影响回复）")
-
     # 6) 临时对话只把回复交给当前客户端，任何会话/记忆/关系状态都不落盘。
     if ephemeral:
         return reply
@@ -1533,13 +1412,6 @@ async def _process_locked(user_id: str, text: str, *, mock: bool = False, merged
         except Exception:
             logger.exception("[pipeline] 记忆后台任务启动失败")
 
-    # 6.2) 记忆引擎 v2：后台提炼画像 / Mem0 记忆管理（失败静默，不阻塞回复）
-    try:
-        from .memory.engine import on_message
-
-        on_message(user_id, text, reply, mock=mock)
-    except Exception:
-        logger.debug("[pipeline] 记忆引擎 on_message 失败（后台提炼，不影响回复）")
     # 本轮吞掉的旁路错误计数（进程级，供 /api/meta 观测）；不暴露用户内容。
     ledger.run("本轮台账记账", _record_ledger, ledger)
     # P3：把 turn_effects 台账的失败项并入本轮 ledger——复用 fail() 的

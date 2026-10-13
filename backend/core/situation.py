@@ -30,9 +30,7 @@ DEFAULT_CHAR_BUDGET = 5000       # 注入文本字符预算（≈2.5k tokens CJK
 _MAX_COMPRESSED_CHARS = 300
 
 _SECTION_TITLES = {
-    "goals": "你们正在一起做的事",
     "promises": "还开着的约定",
-    "questions": "她惦记的没解开的疑问",
     "events": "最近发生的事",
     "life": "她此刻的生活",
     "focus": "关系里的当下焦点",
@@ -42,23 +40,6 @@ _SECTION_TITLES = {
 # ---------------------------------------------------------------------------
 # 确定性数据面（全部 SQL，无 LLM）
 # ---------------------------------------------------------------------------
-
-def _active_goals(user_id: str) -> list[str]:
-    from .goals import list_goals
-
-    lines = []
-    for g in list_goals(user_id, limit=10):
-        if g.get("status") not in ("active", "paused"):
-            continue
-        title = str(g.get("title") or "").strip()
-        step = str(g.get("next_step") or "").strip()
-        state = "进行中" if g.get("status") == "active" else "暂停中"
-        if title:
-            lines.append(
-                f"- {title}（{state}）" + (f"：下一步 {step}" if step else "")
-            )
-    return lines[:5]
-
 
 def _open_promises(user_id: str) -> list[str]:
     from .userdb import db
@@ -76,19 +57,6 @@ def _open_promises(user_id: str) -> list[str]:
         if content:
             lines.append(f"- {content}" + (f"（说好 {due} 前后）" if due else ""))
     return lines
-
-
-def _open_question_lines(user_id: str) -> list[str]:
-    from .open_questions import list_questions
-
-    lines = []
-    for q in list_questions(user_id, limit=10):
-        if str(q.get("status") or "") not in ("open", "researching"):
-            continue
-        topic = str(q.get("topic") or "").strip()
-        if topic:
-            lines.append(f"- {topic}（还没答案）")
-    return lines[:4]
 
 
 def _recent_events(user_id: str, *, limit: int = RECENT_EVENT_WINDOW) -> list[dict]:
@@ -187,9 +155,7 @@ def _focus_line(user_id: str) -> str:
 def rebuild_sections(user_id: str) -> dict:
     """从 SQLite 权威数据确定性重建六节（不含 LLM 压缩段）。"""
     return {
-        "goals": _active_goals(user_id),
         "promises": _open_promises(user_id),
-        "questions": _open_question_lines(user_id),
         "events_recent": _recent_events(user_id),
         "older_event_count": _older_event_count(user_id),
         "life": _life_line(user_id),
@@ -385,9 +351,7 @@ def _render(sections: dict, compressed: str, *, char_budget: int) -> str:
         lines.append(f"（更早还有 {older_count} 件事，没展开）")
     blocks = [
         (_SECTION_TITLES["life"], [str(sections.get("life") or "")] if sections.get("life") else []),
-        (_SECTION_TITLES["goals"], sections.get("goals") or []),
         (_SECTION_TITLES["promises"], sections.get("promises") or []),
-        (_SECTION_TITLES["questions"], sections.get("questions") or []),
         (_SECTION_TITLES["events"], lines),
         (_SECTION_TITLES["focus"], sections.get("focus") or []),
     ]

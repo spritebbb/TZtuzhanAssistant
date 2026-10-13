@@ -12,12 +12,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+# git worktree 不带自己的 .venv（虚拟环境不随 worktree 复制），退回当前解释器，
+# 否则整份测试会因为「路径不存在」而红，红的原因还不是被测的旧库升级。
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_watch.sql"
+if not PYTHON.exists():
+    PYTHON = Path(sys.executable)
+FIXTURE = ROOT / "tests" / "fixtures" / "legacy" / "v40_legacy.sql"
 
 
 def _target_version() -> int:
-    """跟随代码的当前 schema 版本（v45 引入声纹表，v46 追加 manager_memories），
+    """跟随代码的当前 schema 版本（v45 引入声纹表），
     升级链 v40 → 当前版本每次 bump 自动适用。"""
     from backend.core.userdb import _SCHEMA_VERSION
 
@@ -50,7 +54,6 @@ def _run_import(
     env.update({
         "TZTUZHAN_DATA_DIR": str(data_root),
         "MEMORY_V2": "0",
-        "MEMORY_MEM0": "0",
         "MEMORY_EMBED_FORCE": "1",
     })
     proc = subprocess.run(
@@ -75,24 +78,15 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     _run_import(data_root)
 
     conn = sqlite3.connect(db_path)
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(watches)")}
-    row = conn.execute(
-        "SELECT last_hash,last_notified_hash FROM watches WHERE user_id='fixture-user'"
-    ).fetchone()
     assert _version(conn) == TARGET_VERSION
-    assert "last_notified_hash" in columns and row == ("fixture-hash", "fixture-hash")
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    before_count = conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0]
     conn.close()
 
     backups = list((data_root / "backups").glob(f"schema-bot-v40-to-v{TARGET_VERSION}-*/bot.db"))
     assert len(backups) == 1, backups
     old = sqlite3.connect(backups[0])
     assert _version(old) == 40
-    assert "last_notified_hash" not in {
-        row[1] for row in old.execute("PRAGMA table_info(watches)")
-    }
     old.close()
 
     _run_import(data_root)
@@ -100,9 +94,8 @@ def test_v40_upgrade_and_repeat_idempotency() -> tuple[Path, Path]:
     conn = sqlite3.connect(db_path)
     assert len(after_backups) == 1
     assert _version(conn) == TARGET_VERSION
-    assert conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0] == before_count
     conn.close()
-    print("[PASS] v40→v41 数据/回填/版本/幂等升级")
+    print("[PASS] v40→当前版本 版本/完整性/备份/幂等升级")
     return data_root, backups[0]
 
 
@@ -126,7 +119,6 @@ def test_interrupted_target_restores_from_verified_snapshot(snapshot: Path) -> N
     restored = restore_sqlite_backup(snapshot, interrupted)
     conn = sqlite3.connect(restored)
     assert _version(conn) == 40
-    assert conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0] == 1
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     conn.close()
     print("[PASS] 中断目标不损坏升级前快照，可验证恢复")
@@ -136,7 +128,7 @@ def test_reset_after_upgrade(data_root: Path) -> None:
     _run_import(data_root, "from backend.core.userdb import db; db.reset()")
     conn = sqlite3.connect(data_root / "bot.db")
     assert _version(conn) == TARGET_VERSION
-    assert conn.execute("SELECT COUNT(*) FROM watches").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     conn.close()
     print("[PASS] 升级后 reset 保持当前 schema 且清空业务行")

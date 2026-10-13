@@ -56,18 +56,6 @@ def on_promise_completed(user_id: str, promise_id: int, *, now: datetime | None 
         )
         db.conn.commit()
         chain_id = int(cur.lastrowid) if cur.rowcount else None
-    if chain_id is not None:
-        from .pending_thoughts import _add
-
-        _add(
-            user_id,
-            "chain_aftermath",
-            "event_chain",
-            chain_id,
-            "一起完成的那件事有了结果，可以自然地回望一句",
-            earliest_at=due.isoformat(timespec="seconds"),
-            priority=6,
-        )
     return chain_id
 
 

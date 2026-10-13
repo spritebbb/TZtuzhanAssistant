@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["meta"])
 
 def _negative_mood(user_id: str) -> dict:
     """哄好玩法：负面情绪摘要。kind 是人话级标签（委屈/生气/不安），
-    strength 只到档位（low/mid/high）——数值细节留在可解释面板。"""
+    strength 只到档位（low/mid/high）——只给档位，不吐具体数值。"""
     try:
         from ..core.emotion_state import active_emotions_map
 
@@ -52,7 +52,7 @@ def _memory_status() -> dict:
     """记忆引擎运行状态（向量库可用性/embedding 模式/条目数），失败静默。"""
     # 记忆明确关闭时，状态查询不得为了展示一个状态而初始化 Chroma 或触发模型加载。
     if not config.memory_v2:
-        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "disabled", "mem0": False}
+        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "disabled"}
     try:
         from ..core.memory import vector_store as vec
         from ..core.memory import embedding as emb
@@ -66,10 +66,9 @@ def _memory_status() -> dict:
                 f"model:{emb.current_model()}" if emb.is_loaded()
                 else ("hash" if config.memory_embed_force else "warming")
             ),
-            "mem0": bool(config.memory_mem0),
         }
     except Exception:
-        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "unknown", "mem0": False}
+        return {"vector_enabled": False, "vector_count": 0, "embed_mode": "unknown"}
 
 
 @router.get("/meta")

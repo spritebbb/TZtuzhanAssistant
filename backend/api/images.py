@@ -70,6 +70,12 @@ async def persona_full():
         return FileResponse(active, media_type="image/png")
     if _PERSONA_FULL.exists():
         return FileResponse(_PERSONA_FULL, media_type="image/png")
+    # 全局全身图 assets/hotaru_v1_nohalo.png 是作者私有画稿、按设计在 .gitignore 里，
+    # 干净检出上不存在。缺了它不能直接 404——退回仓库自带的五档 plain（已入库），
+    # 否则新克隆的仓库里主区立绘是空的。
+    bundled = _PERSONA_STATES / "plain.png"
+    if bundled.exists():
+        return FileResponse(bundled, media_type="image/png")
     return JSONResponse({"ok": False, "error": "立绘未找到"}, status_code=404)
 
 

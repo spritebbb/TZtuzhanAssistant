@@ -153,16 +153,6 @@ TOUR_STEPS: tuple[dict, ...] = (
         "needs": "需要 context7 MCP 服务器已连接",
     },
     {
-        "id": "watch",
-        "group": "Agent 主秀",
-        "kind": "chat",
-        "title": "监控 Agent（盯着页面）",
-        "shows": "让她替你盯着某个网页，变了主动告诉你",
-        "prompt": "帮我盯着 https://example.com 这个页面，有变化告诉我。",
-        "tools": ["watch_add", "watch_list"],
-        "check": "watch_list 里出现该地址；页面变化后她会主动开口",
-    },
-    {
         "id": "schedule",
         "group": "Agent 主秀",
         "kind": "chat",
@@ -191,16 +181,6 @@ TOUR_STEPS: tuple[dict, ...] = (
         "prompt": "你现在心情怎么样？我们认识多久了？",
         "tools": ["/api/meta"],
         "check": "回答里带她当前的心情与关系阶段，而不是泛泛而谈",
-    },
-    {
-        "id": "explain",
-        "group": "长期陪伴",
-        "kind": "ui",
-        "title": "可解释性（她为什么这么说）",
-        "shows": "每条回复都能展开看她依据了哪些记忆与状态",
-        "prompt": "点她回复气泡下方的「为什么」按钮。",
-        "tools": ["explanation"],
-        "check": "弹出依据面板，列出本轮参考的记忆/状态来源",
     },
     {
         "id": "ephemeral",

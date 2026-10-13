@@ -41,11 +41,11 @@ def test_skill_triggers_and_names_tools() -> int:
     referenced = skills_reference_tools([skill], [
         "agent_fanout", "agent_run", "web_search", "write_file", "read_file",
         "memory_add", "todo_create", "browser_navigate", "query-docs",
-        "run_python", "currency_convert", "watch_add",
+        "run_python", "currency_convert",
     ])
     for expected in (
         "agent_fanout", "web_search", "write_file", "memory_add", "todo_create",
-        "run_python", "currency_convert", "watch_add",
+        "run_python", "currency_convert",
     ):
         assert expected in referenced, (expected, referenced)
     print("[OK] 教程技能可被触发，且点名了所需工具（含新增步骤）")
@@ -156,7 +156,7 @@ def test_new_steps_trigger_their_capability() -> int:
     assert detect_dispatch_request(steps["report"]["prompt"]), steps["report"]["prompt"]
 
     # 界面型步骤：标 ui 且不要求用户「发这句话」
-    for sid in ("vision", "tts", "explain", "ephemeral"):
+    for sid in ("vision", "tts", "ephemeral"):
         assert steps[sid]["kind"] == "ui", sid
     print("[OK] 新增步骤的提示词能触发对应能力（生图 / 工具循环 / 派活 / 界面操作）")
     return 0

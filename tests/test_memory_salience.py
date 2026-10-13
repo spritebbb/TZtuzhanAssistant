@@ -366,9 +366,7 @@ def test_production_sources() -> int:
 
 
 def test_lifecycle_display_and_fading() -> int:
-    """G01 片4：解释层露出（非敏感元数据 + 二次授权）与可见遗忘候选。"""
-    from backend.core.explainability import build_reply_explanation
-    from backend.core.state import AgentState
+    """G01 片4：可见遗忘到期前候选（非敏感元数据，不含原文）。"""
     from backend.core.userdb import update_fact_pinned
 
     uid = "g01-display"
@@ -382,51 +380,13 @@ def test_lifecycle_display_and_fading() -> int:
     update_fact_pinned(uid, pinned, True)
     ms.observe_fact(uid, short, [], now=now - timedelta(days=28), new_fact=True)
     ms.observe_fact(uid, dated, [], now=now - timedelta(days=1), new_fact=True)
-    ms.record_user_teaching_annotation(uid, pinned)
-
-    meta = ms.lifecycle_for_facts(uid, [pinned, short, secret, dated, 999999])
-    assert meta[pinned]["retention"] == "长期保留" and meta[pinned]["user_confirmed"]
-    assert meta[short]["retention"].startswith("保留到 "), meta[short]
-    assert secret not in meta, "never_surface 不进入解释层（二次授权）"
-    assert meta[dated]["retention"].startswith("保留到 ")
-    assert 999999 not in meta, "已删除/不存在的事实不出现"
-    for entry in meta.values():
-        assert "score" not in entry and "confidence" in entry and entry["can_edit"]
-    # 二次授权是返回时查询：改策略后同一批 id 的露出立即收敛。
-    db.conn.execute("UPDATE facts SET surface_policy='never_surface' WHERE id=?", (short,))
-    db.conn.commit()
-    assert short not in ms.lifecycle_for_facts(uid, [short])
-
-    # 解释快照：只给实际引用的事实行附 lifecycle，其余行不带。
-    state = AgentState()
-    frame = __import__("backend.core.behavior", fromlist=["BehaviorFrame"]).BehaviorFrame(
-        mood_line="", stage_line="", texture_line="", initiative="", reaction_line="",
-        rest_line="", tension_line="", archive_line="", event_line="",
-    )
-    snapshot = build_reply_explanation(
-        state, frame,
-        memory_rows=[("长期事实", "用户喜欢猫", pinned), ("相关对话", "随便聊聊")],
-        fact_ids=[pinned], user_id=uid,
-    )
-    fact_row = next(m for m in snapshot["memories"] if m["text"] == "用户喜欢猫")
-    assert fact_row["lifecycle"]["retention"] == "长期保留", fact_row
-    other_row = next(m for m in snapshot["memories"] if m["text"] == "随便聊聊")
-    assert "lifecycle" not in other_row
-    # 旧客户端兼容：不传 fact_ids 时快照结构不变。
-    plain = build_reply_explanation(state, frame, memory_rows=[("长期事实", "用户喜欢猫")])
-    assert "lifecycle" not in plain["memories"][0]
 
     # 可见遗忘：到期前候选只给元数据（无原文），到期后由既有衰减物理删除。
     candidates = ms.expiring_soon_candidates(uid, within_days=3, now=now)
     ids = {c["fact_id"] for c in candidates}
     assert dated in ids and pinned not in ids and secret not in ids
     assert all("content" not in c for c in candidates), "候选不含原文"
-    from backend.core.pending_thoughts import due_thoughts, sync_pending_thoughts
-
-    assert sync_pending_thoughts(uid) >= 1
-    fading = [t for t in due_thoughts(uid, 10) if t["kind"] == "memory_fading"]
-    assert fading and dated in {t["source_id"] for t in fading}, fading
-    print("[OK] 解释层露出（二次授权/不含 score）+ 可见遗忘到期前候选")
+    print("[OK] 可见遗忘到期前候选（不含原文）")
     return 0
 
 

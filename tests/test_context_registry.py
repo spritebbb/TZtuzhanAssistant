@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""P1-02 语境注册表回归：provider 迁移一致性、生命周期（sticky/cooldown）、
-源失效重验、幂等提交与人格隔离。"""
+"""P1-02 语境注册表回归：生命周期（sticky/cooldown）、源失效重验、
+幂等提交与人格隔离。用测试 provider 驱动，不依赖具体业务 provider。"""
 from __future__ import annotations
 
 import os
@@ -12,41 +12,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault("TZTUZHAN_DATA_DIR", tempfile.mkdtemp(prefix="tztuzhan_ctxreg_"))
 
+from backend.core import context_registry as cr
+
 QUERY = "最近在听什么歌？给我推荐几首"
 IDLE_QUERY = "今天好累啊，什么都不想干"
 
+# 已登记用户（模拟「这份语境只属于某个人格作用域」）
+_KNOWN: set[str] = set()
 
-def _setup_lists(uid: str) -> int:
-    from backend.core import colists
+
+class _FakeProvider(cr.ContextProvider):
+    """测试 provider：QUERY 命中、alive、且属于已登记用户时产一条候选。"""
+
+    def __init__(self):
+        self.entry = cr.ContextEntry(id="fake", namespace="test/fake", source_type="fake", priority=50.0)
+        self.alive = True
+
+    def _candidate(self):
+        text = "测试语境：一份真实攒下的清单"
+        return cr.ContextCandidate(
+            entry_id=self.entry.id, source_id="1", source_version="v1",
+            text=text, token_count=cr._estimate_tokens(text),
+            source_namespace=self.entry.namespace, priority=self.entry.priority, relevance=1.0,
+        )
+
+    def collect(self, user_id, query, state, turn_id):
+        if not self.alive or user_id not in _KNOWN or QUERY not in query:
+            return []
+        return [self._candidate()]
+
+    def render(self, candidates):
+        return "\n".join(c.text for c in candidates)
+
+    def refresh(self, user_id, source_id):
+        if not self.alive or user_id not in _KNOWN or str(source_id) != "1":
+            return None
+        return self._candidate()
+
+
+def _setup(uid: str) -> _FakeProvider:
     from backend.core.userdb import db
 
     db.ensure_user(uid)
-    item = colists.start_list(uid, "深夜歌单", "song")
-    colists.add_item(uid, item["id"], "夜航星", "匿名歌手", "循环了一周")
-    colists.add_item(uid, item["id"], "慢速公路", "", "")
-    return item["id"]
+    _KNOWN.add(uid)
+    p = _FakeProvider()
+    cr._PROVIDERS.clear()
+    cr.register_provider(p)
+    return p
 
 
-def test_provider_matches_legacy_output() -> int:
-    from backend.core import colists
+def test_provider_hit_and_idle() -> int:
     from backend.core.context_registry import collect_context
 
     uid = "ctxreg-parity"
-    aid = _setup_lists(uid)
-
-    # 无关聊天：新旧路径都是零注入
-    legacy_idle = colists.list_context(uid, IDLE_QUERY)
+    _setup(uid)
+    # 无关聊天：零注入
     sel_idle = collect_context(uid, IDLE_QUERY, turn_id=1)
-    assert legacy_idle == "" and not sel_idle.items, "无关聊天必须零注入"
-
-    # 话题命中：注册表渲染文本与旧路径完全一致（单清单场景）
-    legacy = colists.list_context(uid, QUERY)
+    assert not sel_idle.items, "无关聊天必须零注入"
+    # 话题命中：产候选且 fresh
     sel = collect_context(uid, QUERY, turn_id=2)
-    assert sel.items and sel.assemble() == legacy, "开关打开前后注入文本应一致"
-    assert sel.items[0].source_id == str(aid)
-    assert sel.items[0].fresh and sel.fresh_entry_keys == {f"colists:{aid}"}
-    assert sel.explain()[0]["reasons"] == ["topic_match"]
-    print("[OK] provider 迁移与旧路径输出一致（含无关聊天零注入）")
+    assert sel.items and sel.items[0].source_id == "1"
+    assert sel.items[0].fresh and sel.fresh_entry_keys == {"fake:1"}
+    print("[OK] provider：无关聊天零注入、命中产候选且 fresh")
     return 0
 
 
@@ -55,14 +82,14 @@ def test_lifecycle_sticky_and_cooldown() -> int:
     from backend.core.userdb import db
 
     uid = "ctxreg-lifecycle"
-    aid = _setup_lists(uid)
+    _setup(uid)
 
     # turn 1：话题命中并成功提交 → sticky_until=3, cooldown_until=7
     sel1 = collect_context(uid, QUERY, turn_id=1)
     commit_context_turn(uid, 1, sel1.fresh_entry_keys)
     row = db.conn.execute(
         "SELECT * FROM context_lifecycle WHERE user_id=? AND entry_id=?",
-        (uid, f"colists:{aid}"),
+        (uid, "fake:1"),
     ).fetchone()
     assert row is not None and row["sticky_until_turn"] == 3 and row["cooldown_until_turn"] == 7
 
@@ -73,7 +100,7 @@ def test_lifecycle_sticky_and_cooldown() -> int:
     commit_context_turn(uid, 2, sel2.fresh_entry_keys)  # 空集合 no-op
     row2 = db.conn.execute(
         "SELECT last_committed_turn FROM context_lifecycle WHERE user_id=? AND entry_id=?",
-        (uid, f"colists:{aid}"),
+        (uid, "fake:1"),
     ).fetchone()
     assert row2["last_committed_turn"] == 1, "非命中轮不得刷新生命周期"
 
@@ -97,16 +124,15 @@ def test_lifecycle_sticky_and_cooldown() -> int:
 
 
 def test_source_invalidation_beats_sticky() -> int:
-    from backend.core import colists
     from backend.core.context_registry import collect_context, commit_context_turn
 
     uid = "ctxreg-invalidate"
-    aid = _setup_lists(uid)
+    p = _setup(uid)
     sel1 = collect_context(uid, QUERY, turn_id=1)
     commit_context_turn(uid, 1, sel1.fresh_entry_keys)
 
-    # 源取消（收列后又取消）：sticky 轮重验失败 → 静默退场
-    colists.cancel_list(uid, aid)
+    # 源关闭：sticky 轮重验失败 → 静默退场
+    p.alive = False
     sel2 = collect_context(uid, IDLE_QUERY, turn_id=2)
     assert not sel2.items, "源关闭/取消必须优先于 sticky"
     print("[OK] 源失效优先于 sticky（每轮重验）")
@@ -118,7 +144,7 @@ def test_idempotent_commit_and_persona_isolation() -> int:
     from backend.core.userdb import db
 
     uid = "ctxreg-idem"
-    aid = _setup_lists(uid)
+    _setup(uid)
     sel1 = collect_context(uid, QUERY, turn_id=10)
     commit_context_turn(uid, 10, sel1.fresh_entry_keys)
     commit_context_turn(uid, 10, sel1.fresh_entry_keys)  # 重试同一轮
@@ -130,7 +156,7 @@ def test_idempotent_commit_and_persona_isolation() -> int:
     # 人格隔离：另一 user_id（persona scope 后缀模拟）互不可见
     uid2 = "ctxreg-idem::persona::other"
     sel2 = collect_context(uid2, QUERY, turn_id=11)
-    assert not sel2.items, "其它人格作用域没有这份清单"
+    assert not sel2.items, "其它人格作用域没有这份语境"
     print("[OK] 幂等提交 + 人格作用域隔离")
     return 0
 
@@ -149,7 +175,7 @@ def test_flag_default_off_and_reset_table() -> int:
 
 def main() -> int:
     failed = (
-        test_provider_matches_legacy_output()
+        test_provider_hit_and_idle()
         + test_lifecycle_sticky_and_cooldown()
         + test_source_invalidation_beats_sticky()
         + test_idempotent_commit_and_persona_isolation()

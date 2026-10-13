@@ -35,7 +35,7 @@ _persist_lock = threading.Lock()
 @router.get("/tools")
 async def mcp_list_tools(request: Request):
     """列出所有可用工具（含名称、描述、输入 schema、安全元数据）。"""
-    # 与 /api/remote 同一 token 体系（来源 IP 语义）：回环来源免 token；
+    # 与本机其它受控端点同一 token 体系（来源 IP 语义）：回环来源免 token；
     # 非回环来源必须携带有效 token（防局域网裸调读取工具清单/安全元数据）
     if not remote_token_ok_by_peer(
         request_token(request), request.client.host if request.client else None
@@ -68,7 +68,7 @@ async def mcp_list_tools(request: Request):
 async def mcp_call_tool(request: Request):
     """调用工具。body: {"name": "...", "arguments": {...}}
 
-    鉴权：与 /api/remote 同一 token 体系（来源 IP 语义，Authorization:
+    鉴权：与本机其它受控端点同一 token 体系（来源 IP 语义，Authorization:
     Bearer <token> 或 ?token=）。回环来源免 token；非回环来源必须携带与
     AGENT_REMOTE_TOKEN 匹配的 token，未配置 token 时一律拒绝。
     """

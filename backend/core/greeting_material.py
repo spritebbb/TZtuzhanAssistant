@@ -5,8 +5,7 @@
 
 **素材（只取授权真实来源，不建新原文表）**
 - ``collect_greeting_material(user_id, now)``：近 30 天最多 3 条，进行中的
-  活动优先，其次关系事件、她自己的角色生活事件，末位可补一条当日外部世界
-  摘要（38项#23 事件感，news_digest 产出，关系素材永远优先于外部新闻）；
+  活动优先，其次关系事件、她自己的角色生活事件；
 - 排除敏感/never_surface/已过期/源已删（事件作废走既有级联，天然不出现）；
 - 没有素材就返回空列表——问候走「无素材」类，绝不编「你今天做了 X」。
 
@@ -78,7 +77,7 @@ class GreetingMaterialError(ValueError):
 class SourceRef:
     """一条授权问候素材：只带可展示的转述，不带原始正文。"""
 
-    kind: str            # activity / event / life / news
+    kind: str            # activity / event / life
     source_id: int
     line: str            # 口语化转述（模型据此措辞，不得超出）
     occurred_at: str
@@ -234,12 +233,18 @@ def _collect_activities(user_id: str, since: str, limit: int) -> list[SourceRef]
 
 
 def _collect_events(user_id: str, since: str, limit: int) -> list[SourceRef]:
-    """近 30 天完成类关系事件；隐私非 normal 与已过期的天然被查询排除。"""
+    """完成类关系事件；窗口用调用方给的 since（与 _collect_activities 同一基准）。
+
+    这里此前改用墙上时钟的 within_days，等于把入参 since 丢掉：调用方传进来的
+    时间基准被无视，用固定时间戳写的回归测试也就随真实日期漂移而失效。
+    """
     from .relationship_events import active_events
 
-    events = active_events(user_id, limit=max(1, int(limit)) * 3, within_days=MATERIAL_WINDOW_DAYS)
+    events = active_events(user_id, limit=max(1, int(limit)) * 3)
     out: list[SourceRef] = []
     for event in events:
+        if str(event.get("occurred_at") or "") < since:
+            continue  # 窗口外：按调用方给的时间基准判，不按墙上时钟
         if str(event.get("privacy") or "normal") != "normal":
             continue  # 敏感事件不进问候素材
         line = _event_line(str(event["event_type"]), event.get("payload") or {},
@@ -273,28 +278,6 @@ def _collect_life(user_id: str, since: str, limit: int) -> list[SourceRef]:
     return out
 
 
-def _collect_news(user_id: str, since: str, limit: int) -> list[SourceRef]:
-    """当日外部世界摘要（38项#23 事件感）：有则一条，末位补充（关系素材优先）。
-
-    与前三个收集器不同，news 不看 30 天窗口（``since`` 不用）——外部新闻
-    只属于「今天」，kv 键即当日，隔天自然失效。
-    """
-    from .news_digest import news_line
-
-    out: list[SourceRef] = []
-    if max(0, int(limit)) < 1:
-        return out
-    moment = datetime.now()
-    summary = news_line(user_id, moment.date().isoformat())
-    if not summary:
-        return out
-    out.append(SourceRef(
-        kind="news", source_id=0, line=summary[:60],
-        occurred_at=moment.isoformat(timespec="seconds"),
-    ))
-    return out
-
-
 def collect_greeting_material(user_id: str, now: datetime | None = None, *,
                               limit: int = MATERIAL_LIMIT) -> list[SourceRef]:
     """近 30 天最多 limit 条授权素材；进行中的活动优先。
@@ -310,7 +293,7 @@ def collect_greeting_material(user_id: str, now: datetime | None = None, *,
     limit = max(1, min(5, int(limit)))
     material: list[SourceRef] = []
     seen_lines: set[str] = set()
-    for collector in (_collect_activities, _collect_events, _collect_life, _collect_news):
+    for collector in (_collect_activities, _collect_events, _collect_life):
         if len(material) >= limit:
             break
         try:
@@ -398,7 +381,6 @@ def _pick_category(material: list[SourceRef], *, busy_return: bool) -> str:
         return CATEGORY_NO_MATERIAL
     if busy_return:
         return CATEGORY_BUSY_RETURN
-    # news 不算「你们之间做过的事」，只归 plain_return，不参与 activity_done 变体
     if any(item.kind in ("event", "activity") for item in material):
         return CATEGORY_ACTIVITY_DONE
     return CATEGORY_PLAIN_RETURN
@@ -445,8 +427,6 @@ def build_material_hint(material: list[SourceRef]) -> str:
     for item in material:
         if item.fiction:
             tag = "（她自己的虚构日常，不是对方的事）"
-        elif item.kind == "news":
-            tag = "（外部世界今天的事，不是你们之间的事，最多顺带一提）"
         else:
             tag = ""
         lines.append(f"- {item.line}{tag}")
